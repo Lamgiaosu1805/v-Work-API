@@ -4,6 +4,8 @@ const port = 3000
 const route = require('./src/routes')
 const morgan = require('morgan')
 
+require('dotenv').config();
+
 //use middlewares
 app.use(morgan('dev'))
 app.use(express.json())

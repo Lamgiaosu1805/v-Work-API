@@ -1,6 +1,5 @@
 const express = require('express')
 const app = express()
-const port = 3000
 const route = require('./src/routes')
 const morgan = require('morgan')
 
@@ -16,6 +15,8 @@ app.use(express.urlencoded({
 //routing
 route(app);
 
+const port = process.env.PORT || 3000
+
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`)
+  console.log(`App listening on port ${port}`)
 })

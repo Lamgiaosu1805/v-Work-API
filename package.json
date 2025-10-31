@@ -12,7 +12,9 @@
   "dependencies": {
     "axios": "^1.8.1",
     "dotenv": "^16.4.7",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "moment-timezone": "^0.6.0",
+    "mongoose": "^8.19.2"
   },
   "devDependencies": {
     "morgan": "^1.10.0",

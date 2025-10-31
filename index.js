@@ -2,6 +2,7 @@ const express = require('express')
 const app = express()
 const route = require('./src/routes')
 const morgan = require('morgan')
+const db = require('./src/config/connectDB')
 
 require('dotenv').config();
 
@@ -14,6 +15,9 @@ app.use(express.urlencoded({
 
 //routing
 route(app);
+
+//connectdb
+db.connect()
 
 const port = process.env.PORT || 3000
 

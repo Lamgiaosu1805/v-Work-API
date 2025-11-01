@@ -8,7 +8,6 @@ const UserController = {
       const {
         username,
         password,
-        email,
         full_name,
         cccd,
         phone_number,
@@ -18,7 +17,7 @@ const UserController = {
         tinh_trang_hon_nhan,
       } = req.body;
 
-      const account = await AccountModel.create({ username, password, email });
+      const account = await AccountModel.create({ username, password });
 
       const userInfo = await UserInfoModel.create({
         full_name,

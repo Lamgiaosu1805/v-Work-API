@@ -13,8 +13,10 @@
     "axios": "^1.8.1",
     "dotenv": "^16.4.7",
     "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
     "moment-timezone": "^0.6.0",
-    "mongoose": "^8.19.2"
+    "mongoose": "^8.19.2",
+    "multer": "^2.0.2"
   },
   "devDependencies": {
     "morgan": "^1.10.0",

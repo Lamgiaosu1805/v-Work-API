@@ -1,12 +1,41 @@
-const express = require('express');
-const UserController = require('../controllers/UserController');
-const router = express.Router()
+const express = require("express");
+const router = express.Router();
+const { mockAdmin, isAdmin } = require("../middlewares/authMiddleware");
+const upload = require("../middlewares/uploadFile");
+const UserController = require("../controllers/UserController");
+const DocumentTypeModel = require("../models/DocumentTypeModel");
 
+// GET danh sách documentType
+router.get("/documentTypes", async (req, res) => {
+  try {
+    const types = await DocumentTypeModel.find({ isDeleted: false });
+    res.json(types);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 
-//GET
-router.get('/:userId', UserController.getUserInfo);
+// POST create user + upload files dynamic
+router.post(
+  "/createUser",
+  mockAdmin,
+  isAdmin,
+  async (req, res, next) => {
+    try {
+      // Lấy tất cả documentType hiện tại
+      const docTypes = await DocumentTypeModel.find({ isDeleted: false });
+      const fields = docTypes.map((doc) => ({ name: doc._id.toString(), maxCount: 10 }));
 
-//POST
-router.post('/', UserController.createUser);
+      // Gọi multer.fields dynamic
+      upload.fields(fields)(req, res, function (err) {
+        if (err) return res.status(400).json({ message: err.message });
+        next();
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+  UserController.createUser
+);
 
 module.exports = router;

@@ -1,13 +1,17 @@
+const mongoose = require("mongoose");
 const AccountModel = require("../models/AccountModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDocumentModel = require("../models/UserDocumentModel");
+const Utils = require("../config/common/utils");
+const bcrypt = require('bcrypt')
 
 const UserController = {
   createUser: async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
       const {
-        username,
-        password,
         full_name,
         cccd,
         phone_number,
@@ -17,49 +21,90 @@ const UserController = {
         tinh_trang_hon_nhan,
       } = req.body;
 
-      const account = await AccountModel.create({ username, password });
+      const existingUser = await UserInfoModel.findOne({ cccd }).session(session);
+      if (existingUser) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Thông tin đã tồn tại" });
+      }
 
-      const userInfo = await UserInfoModel.create({
-        full_name,
-        cccd,
-        phone_number,
-        sex,
-        date_of_birth,
-        address,
-        tinh_trang_hon_nhan,
-        id_account: account._id,
-      });
+      const stt = await UserInfoModel.countDocuments().session(session);
+      const maNV = Utils.getMaNV((stt + 1).toString());
+      const username = await Utils.generateUsername(full_name);
+      const password = Utils.genRandomPassword();
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+
+      const [account] = await AccountModel.create(
+        [
+          {
+            username,
+            password: hashedPassword,
+          },
+        ],
+        { session }
+      );
+
+      const [userInfo] = await UserInfoModel.create(
+        [
+          {
+            full_name,
+            cccd,
+            phone_number,
+            sex,
+            date_of_birth,
+            address,
+            tinh_trang_hon_nhan,
+            id_account: account._id,
+            ma_nv: maNV,
+          },
+        ],
+        { session }
+      );
 
       const documents = [];
-      const files = req.files;
+      const files = req.files || {};
 
       for (const [type_id, fileArray] of Object.entries(files)) {
         const attachments = fileArray.map((f) => ({
           file_name: f.originalname,
           file_url: f.path,
           uploaded_at: new Date(),
-          uploaded_by: req.user._id, // admin
+          uploaded_by: req.user?._id || null, // admin
           allowed_users: [userInfo._id],
         }));
         documents.push({ type_id, attachments });
       }
 
-      // 4️⃣ Lưu UserDocument
-      const userDocument = await UserDocumentModel.create({
-        user_id: userInfo._id,
-        documents,
-      });
+      await UserDocumentModel.create(
+        [
+          {
+            user_id: userInfo._id,
+            documents,
+          },
+        ],
+        { session }
+      );
+
+      await session.commitTransaction();
+      session.endSession();
 
       res.status(201).json({
         message: "User, userInfo và documents created successfully",
         account,
+        firstPassword: password,
         userInfo,
-        userDocument,
       });
     } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
       console.error(err);
-      res.status(500).json({ message: "Internal server error", error: err.message });
+      res.status(500).json({
+        message: "Internal server error",
+        error: err.message,
+      });
     }
   },
 };
+
 module.exports = UserController;

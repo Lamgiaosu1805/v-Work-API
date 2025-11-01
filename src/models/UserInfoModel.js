@@ -3,7 +3,7 @@ const BaseSchema = require("./BaseSchema");
 
 const UserInfoModel = new mongoose.Schema(
   {
-    full_name: { type: String, required: true, unique: true },
+    full_name: { type: String, required: true },
     cccd: { type: String, required: true },
     phone_number: { type: String, required: true },
     sex: { type: Number, required: true }, // 0: Nữ, 1: Nam, 2: Khác
@@ -14,6 +14,7 @@ const UserInfoModel = new mongoose.Schema(
     id_phong_ban: { type: mongoose.Schema.Types.ObjectId, ref: 'phong_ban' },
     id_chuc_vu: { type: mongoose.Schema.Types.ObjectId, ref: 'chuc_vu' },
     id_vi_tri: { type: mongoose.Schema.Types.ObjectId, ref: 'vi_tri' },
+    ma_nv: { type: String, required: true, unique: true },
     ...BaseSchema.obj,
   },
   {

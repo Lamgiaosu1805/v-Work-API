@@ -107,7 +107,6 @@ const AuthController = {
         }
     },
 
-    // 🔹 Refresh token
     refreshToken: async (req, res) => {
         try {
             const { refreshToken } = req.body;
@@ -115,27 +114,50 @@ const AuthController = {
                 return res.status(400).json({ message: "Thiếu refresh token" });
 
             const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+
             const account = await AccountModel.findById(decoded.id);
             if (!account)
                 return res.status(404).json({ message: "Không tìm thấy tài khoản" });
 
-            // 🔸 Kiểm tra token còn hợp lệ trong DB
             const storedToken = account.refreshTokens.find(
                 (t) => t.token === refreshToken && !t.revoked
             );
 
             if (!storedToken)
-                return res.status(403).json({ message: "Refresh token không hợp lệ hoặc đã bị thu hồi" });
+                return res
+                    .status(403)
+                    .json({ message: "Refresh token không hợp lệ hoặc đã bị thu hồi" });
 
-            // 🔸 Cấp access token mới
+            storedToken.revoked = true;
+
             const newAccessToken = jwt.sign(
                 { id: account._id, username: account.username, role: account.role },
                 JWT_SECRET,
                 { expiresIn: "30m" }
             );
 
+            const newRefreshToken = jwt.sign(
+                { id: account._id },
+                JWT_REFRESH_SECRET,
+                { expiresIn: "7d" }
+            );
+
+            account.refreshTokens = [
+                {
+                    token: newRefreshToken,
+                    createdAt: new Date(),
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                    revoked: false,
+                },
+            ];
+
+            await account.save();
+
+            // 7️⃣ Trả kết quả
             res.status(200).json({
+                message: "Làm mới token thành công",
                 accessToken: newAccessToken,
+                refreshToken: newRefreshToken,
             });
         } catch (err) {
             console.error("Refresh Token Error:", err);
@@ -143,31 +165,41 @@ const AuthController = {
         }
     },
 
-    // 🔹 Logout
     logout: async (req, res) => {
         try {
             const { refreshToken } = req.body;
             if (!refreshToken)
                 return res.status(400).json({ message: "Thiếu refresh token" });
 
-            const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
-            const account = await AccountModel.findById(decoded.id);
-            if (!account)
-                return res.status(404).json({ message: "Không tìm thấy tài khoản" });
+            // Tìm account có chứa refreshToken này (không cần verify)
+            const account = await AccountModel.findOne({
+                "refreshTokens.token": refreshToken,
+            });
 
-            // 🔸 Revoke token
+            if (!account)
+                return res.status(404).json({ message: "Không tìm thấy tài khoản hoặc token" });
+
+            // Revoke token
             const tokenEntry = account.refreshTokens.find(
                 (t) => t.token === refreshToken
             );
-            if (tokenEntry) tokenEntry.revoked = true;
 
-            await account.save();
-            res.status(200).json({ message: "Đăng xuất thành công" });
+            if (tokenEntry) {
+                tokenEntry.revoked = true;
+                await account.save();
+                return res.status(200).json({ message: "Đăng xuất thành công" });
+            }
+
+            res.status(400).json({ message: "Refresh token không tồn tại" });
         } catch (err) {
             console.error("Logout Error:", err);
-            res.status(500).json({ message: "Internal server error", error: err.message });
+            res.status(500).json({
+                message: "Lỗi hệ thống",
+                error: err.message,
+            });
         }
-    },
+    }
+
 };
 
 module.exports = AuthController;

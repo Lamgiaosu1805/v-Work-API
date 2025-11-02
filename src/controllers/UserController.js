@@ -105,6 +105,35 @@ const UserController = {
       });
     }
   },
+  createAdmin: async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      const existingAdmin = await AccountModel.findOne({ username, role: "admin" });
+      if (existingAdmin) {
+        return res.status(400).json({ message: "Admin đã tồn tại" });
+      }
+
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+
+      const newAdmin = new AccountModel({
+        username,
+        password: hashedPassword,
+        role: "admin",
+        isFirstLogin: false,
+      });
+
+      await newAdmin.save();
+
+      res.status(201).json({
+        message: "Admin created successfully",
+        admin: newAdmin,
+      });
+    } catch (error) {
+      console.log(error);
+      res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  }
 };
 
 module.exports = UserController;

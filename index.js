@@ -1,10 +1,9 @@
+require('dotenv').config();
 const express = require('express')
 const app = express()
 const route = require('./src/routes')
 const morgan = require('morgan')
 const db = require('./src/config/connectDB')
-
-require('dotenv').config();
 
 //use middlewares
 app.use(morgan('dev'))

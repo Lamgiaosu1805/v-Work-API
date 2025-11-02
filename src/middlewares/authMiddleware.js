@@ -1,83 +1,71 @@
-// const jwt = require("jsonwebtoken");
-// const Account = require("../models/AccountModel");
-// const UserInfo = require("../models/UserInfoModel");
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+const AccountModel = require("../models/AccountModel");
 
-// // Middleware xác thực token và gán req.user
-// async function authenticate(req, res, next) {
-//   try {
-//     const authHeader = req.headers.authorization;
-//     if (!authHeader) return res.status(401).json({ message: "No token" });
+async function authenticate(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({
+        errorCode: "MISSING_TOKEN",
+        message: "Không có access token",
+      });
+    }
 
-//     const token = authHeader.split(" ")[1]; // Bearer <token>
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const token = authHeader.split(" ")[1]; // "Bearer <token>"
 
-//     const user = await Account.findById(decoded.userId);
-//     if (!user) return res.status(401).json({ message: "User not found" });
+    // ✅ Verify token
+    const decoded = jwt.verify(token, process.env.SECRET_KEY);
 
-//     req.user = {
-//       _id: user._id,
-//       role: user.role, // "admin" hoặc "user"
-//     };
-//     next();
-//   } catch (err) {
-//     res.status(401).json({ message: "Invalid token" });
-//   }
-// }
+    // ✅ Kiểm tra user có tồn tại
+    const account = await AccountModel.findById(decoded.id);
+    if (!account) {
+      return res.status(401).json({
+        errorCode: "USER_NOT_FOUND",
+        message: "Không tìm thấy tài khoản",
+      });
+    }
 
-// // Kiểm tra admin
-// function isAdmin(req, res, next) {
-//   if (req.user.role === "admin") return next();
-//   return res.status(403).json({ message: "Chỉ admin mới được phép" });
-// }
+    // ✅ Kiểm tra tài khoản bị xóa hoặc khóa
+    if (account.isDeleted) {
+      return res.status(403).json({
+        errorCode: "ACCOUNT_LOCKED",
+        message: "Tài khoản đã bị khóa hoặc xóa",
+      });
+    }
 
-// // Kiểm tra chính chủ hoặc admin dựa trên UserInfo.id_account
-// async function isOwnerOrAdmin(req, res, next) {
-//   try {
-//     const userInfoId = req.params.userInfoId || req.body.user_info_id;
-//     if (!userInfoId) return res.status(400).json({ message: "userInfoId không được để trống" });
+    // ✅ Gắn user vào request
+    req.account = {
+      _id: account._id,
+      username: account.username,
+      role: account.role,
+    };
 
-//     const userInfo = await UserInfo.findById(userInfoId);
-//     if (!userInfo) return res.status(404).json({ message: "UserInfo không tồn tại" });
+    next();
+  } catch (err) {
+    if (err.name === "TokenExpiredError") {
+      return res.status(401).json({
+        errorCode: "TOKEN_EXPIRED",
+        message: "Access token đã hết hạn",
+      });
+    }
 
-//     // Nếu admin hoặc chính chủ
-//     if (req.user.role === "admin" || userInfo.id_account.toString() === req.user._id.toString()) {
-//       return next();
-//     }
-
-//     return res.status(403).json({ message: "Bạn không có quyền truy cập hồ sơ này" });
-//   } catch (err) {
-//     return res.status(500).json({ message: err.message });
-//   }
-// }
-
-// module.exports = { authenticate, isAdmin, isOwnerOrAdmin };
-const { default: mongoose } = require("mongoose");
-const Account = require("../models/AccountModel");
-const UserInfo = require("../models/UserInfoModel");
-
-async function mockAdmin(req, res, next) {
-  // Mock admin test
-  req.user = { _id: new mongoose.Types.ObjectId(), role: "admin" };
-  next();
+    return res.status(401).json({
+      errorCode: "INVALID_TOKEN",
+      message: "Token không hợp lệ",
+    });
+  }
 }
 
-async function isAdmin(req, res, next) {
-  if (req.user.role === "admin") return next();
-  return res.status(403).json({ message: "Chỉ admin mới được phép" });
+function isAdmin(req, res, next) {
+  if (req.account?.role === "admin") return next();
+  return res.status(403).json({
+    errorCode: "FORBIDDEN",
+    message: "Chỉ admin mới được phép thực hiện thao tác này",
+  });
 }
 
-async function isOwnerOrAdmin(req, res, next) {
-  const userDocument = req.userDocument; // attach trước đó
-  if (!userDocument) return res.status(400).json({ message: "Document not found" });
-
-  if (
-    req.user.role === "admin" ||
-    userDocument.user_id.toString() === req.user._id.toString()
-  )
-    return next();
-
-  return res.status(403).json({ message: "Không có quyền truy cập" });
-}
-
-module.exports = { mockAdmin, isAdmin, isOwnerOrAdmin };
-
+module.exports = {
+  authenticate,
+  isAdmin,
+};

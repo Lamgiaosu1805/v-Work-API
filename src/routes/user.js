@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { mockAdmin, isAdmin } = require("../middlewares/authMiddleware");
+const { isAdmin, authenticate } = require("../middlewares/authMiddleware");
 const upload = require("../middlewares/uploadFile");
 const UserController = require("../controllers/UserController");
 const DocumentTypeModel = require("../models/DocumentTypeModel");
@@ -18,7 +18,7 @@ router.get("/documentTypes", async (req, res) => {
 // POST create user + upload files dynamic
 router.post(
   "/createUser",
-  mockAdmin,
+  authenticate,
   isAdmin,
   async (req, res, next) => {
     try {
@@ -37,5 +37,7 @@ router.post(
   },
   UserController.createUser
 );
+
+// router.post("/createAdmin", UserController.createAdmin);
 
 module.exports = router;

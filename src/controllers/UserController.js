@@ -70,7 +70,7 @@ const UserController = {
           file_name: f.originalname,
           file_url: f.path,
           uploaded_at: new Date(),
-          uploaded_by: req.user?._id || null, // admin
+          uploaded_by: req.account?._id || null, // admin
           allowed_users: [userInfo._id],
         }));
         documents.push({ type_id, attachments });

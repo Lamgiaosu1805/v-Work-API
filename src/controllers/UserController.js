@@ -182,27 +182,42 @@ const UserController = {
   },
   getUserInfo: async (req, res) => {
     try {
-      // Lấy thông tin user cơ bản
+      //Lấy thông tin user cơ bản
       const user = await UserInfoModel.findOne({ id_account: req.account._id });
-
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
 
-      // Lấy danh sách phòng ban + vị trí đảm nhận
+      //Lấy danh sách phòng ban + vị trí đảm nhận
       const userDepartments = await UserDepartmentPositionModel.find({ user: user._id })
         .populate("department", "department_name department_code")
         .populate("position", "position_name");
 
-      // Trả về dữ liệu hợp nhất
+      //Lấy danh sách hồ sơ tài liệu
+      const userDocuments = await UserDocumentModel.findOne({ user_id: user._id })
+        .populate("documents.type_id", "name required")
+        .populate("documents.attachments.uploaded_by", "username");
+
+      //Chuẩn hóa dữ liệu trả về
       res.json({
         ...user.toObject(),
-        departments: userDepartments.map(item => ({
+        departments: userDepartments.map((item) => ({
           department: item.department,
           position: item.position,
         })),
+        documents: userDocuments
+          ? userDocuments.documents.map((doc) => ({
+            type: doc.type_id,
+            note: doc.note,
+            attachments: doc.attachments.map((a) => ({
+              file_name: a.file_name,
+              file_url: a.file_url,
+              uploaded_at: a.uploaded_at,
+              uploaded_by: a.uploaded_by,
+            })),
+          }))
+          : [],
       });
-
     } catch (error) {
       console.error("Error in getUserInfo:", error);
       res.status(500).json({

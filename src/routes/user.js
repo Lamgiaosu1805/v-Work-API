@@ -15,6 +15,8 @@ router.get("/documentTypes", async (req, res) => {
   }
 });
 
+router.get("/getUserInfo", authenticate, UserController.getUserInfo)
+
 // POST create user + upload files dynamic
 router.post(
   "/createUser",

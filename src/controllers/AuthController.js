@@ -49,7 +49,7 @@ const AuthController = {
             const refreshToken = jwt.sign(
                 { id: account._id },
                 JWT_REFRESH_SECRET,
-                { expiresIn: "7d" }
+                { expiresIn: "3d" }
             );
 
             // 6️⃣ Lưu refresh token vào DB
@@ -139,7 +139,7 @@ const AuthController = {
             const newRefreshToken = jwt.sign(
                 { id: account._id },
                 JWT_REFRESH_SECRET,
-                { expiresIn: "7d" }
+                { expiresIn: "3d" }
             );
 
             account.refreshTokens = [

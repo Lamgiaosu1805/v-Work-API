@@ -3,7 +3,8 @@ const AccountModel = require("../models/AccountModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
-const bcrypt = require('bcrypt')
+const bcrypt = require('bcrypt');
+const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 
 const UserController = {
   createUser: async (req, res) => {
@@ -21,6 +22,21 @@ const UserController = {
         tinh_trang_hon_nhan,
       } = req.body;
 
+      let { userDepartments = [] } = req.body;
+
+      if (typeof userDepartments === "string") {
+        try {
+          userDepartments = JSON.parse(userDepartments);
+        } catch (e) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            message: "Sai định dạng userDepartments",
+          });
+        }
+      }
+
+      // Kiểm tra trùng CCCD
       const existingUser = await UserInfoModel.findOne({ cccd }).session(session);
       if (existingUser) {
         await session.abortTransaction();
@@ -28,6 +44,7 @@ const UserController = {
         return res.status(400).json({ message: "Thông tin đã tồn tại" });
       }
 
+      // Sinh mã nhân viên và tài khoản
       const stt = await UserInfoModel.countDocuments().session(session);
       const maNV = Utils.getMaNV((stt + 1).toString());
       const username = await Utils.generateUsername(full_name);
@@ -35,6 +52,7 @@ const UserController = {
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
 
+      //Tạo tài khoản
       const [account] = await AccountModel.create(
         [
           {
@@ -45,6 +63,7 @@ const UserController = {
         { session }
       );
 
+      // Tạo thông tin người dùng
       const [userInfo] = await UserInfoModel.create(
         [
           {
@@ -62,6 +81,7 @@ const UserController = {
         { session }
       );
 
+      // Lưu tài liệu người dùng (nếu có upload)
       const documents = [];
       const files = req.files || {};
 
@@ -76,21 +96,47 @@ const UserController = {
         documents.push({ type_id, attachments });
       }
 
-      await UserDocumentModel.create(
-        [
-          {
-            user_id: userInfo._id,
-            documents,
-          },
-        ],
-        { session }
-      );
+      if (documents.length > 0) {
+        await UserDocumentModel.create(
+          [
+            {
+              user_id: userInfo._id,
+              documents,
+            },
+          ],
+          { session }
+        );
+      }
 
+      // Lưu danh sách phòng ban – vị trí
+      if (userDepartments.length > 0) {
+        const invalidItem = userDepartments.find(
+          (item) => !item.department_id || !item.position_id
+        );
+
+        if (invalidItem) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            message: "Thiếu department_id hoặc position_id trong userDepartments",
+          });
+        }
+
+        const udpDocs = userDepartments.map((item) => ({
+          user: userInfo._id,
+          department: item.department_id,
+          position: item.position_id,
+        }));
+
+        await UserDepartmentPositionModel.insertMany(udpDocs, { session });
+      }
+
+      // Commit transaction
       await session.commitTransaction();
       session.endSession();
 
-      res.status(201).json({
-        message: "User, userInfo và documents created successfully",
+      return res.status(201).json({
+        message: "Tạo user, userInfo, documents và mapping thành công",
         account,
         firstPassword: password,
         userInfo,
@@ -98,8 +144,8 @@ const UserController = {
     } catch (err) {
       await session.abortTransaction();
       session.endSession();
-      console.error(err);
-      res.status(500).json({
+      console.error("Error in createUser:", err);
+      return res.status(500).json({
         message: "Internal server error",
         error: err.message,
       });
@@ -136,13 +182,36 @@ const UserController = {
   },
   getUserInfo: async (req, res) => {
     try {
-      const user = await UserInfoModel.findOne({ id_account: req.account._id })
-      res.json(user)
+      // Lấy thông tin user cơ bản
+      const user = await UserInfoModel.findOne({ id_account: req.account._id });
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Lấy danh sách phòng ban + vị trí đảm nhận
+      const userDepartments = await UserDepartmentPositionModel.find({ user: user._id })
+        .populate("department", "department_name department_code")
+        .populate("position", "position_name");
+
+      // Trả về dữ liệu hợp nhất
+      res.json({
+        ...user.toObject(),
+        departments: userDepartments.map(item => ({
+          department: item.department,
+          position: item.position,
+        })),
+      });
+
     } catch (error) {
-      console.log(error)
-      res.status(500).json({ message: "Internal server error", error: error.message });
+      console.error("Error in getUserInfo:", error);
+      res.status(500).json({
+        message: "Internal server error",
+        error: error.message,
+      });
     }
   }
+
 };
 
 module.exports = UserController;

@@ -5,7 +5,7 @@ const BaseSchema = require("./BaseSchema");
 const PositionModel = new mongoose.Schema(
     {
         position_name: { type: String, required: true },
-        description: { type: String },
+        description: { type: String, default: "" },
         ...BaseSchema.obj,
     },
     {

@@ -5,7 +5,7 @@ const DepartmentModel = new mongoose.Schema(
     {
         department_name: { type: String, required: true },
         department_code: { type: String, required: true, unique: true },
-        description: { type: String },
+        description: { type: String, default: "" },
         ...BaseSchema.obj,
     },
     {

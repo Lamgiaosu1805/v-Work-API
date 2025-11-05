@@ -5,15 +5,7 @@ const upload = require("../middlewares/uploadFile");
 const UserController = require("../controllers/UserController");
 const DocumentTypeModel = require("../models/DocumentTypeModel");
 
-// GET danh sách documentType
-router.get("/documentTypes", async (req, res) => {
-  try {
-    const types = await DocumentTypeModel.find({ isDeleted: false });
-    res.json(types);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
+// GET
 
 router.get("/getUserInfo", authenticate, UserController.getUserInfo)
 

@@ -4,8 +4,8 @@ const fs = require('fs');
 
 const uploadDir =
   process.env.NODE_ENV === "production"
-    ? process.env.UPLOAD_DIR_PROD || "/home/vwork/uploads"
-    : process.env.UPLOAD_DIR_DEV || "./uploads";
+    ? process.env.UPLOAD_DIR_PROD
+    : process.env.UPLOAD_DIR_DEV;
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({

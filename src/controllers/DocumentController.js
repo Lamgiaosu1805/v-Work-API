@@ -21,6 +21,18 @@ const DocumentController = {
             return res.status(500).json({ message: 'Lỗi server', error: error.message });
         }
         
+    },
+    getListDocument: async (req, res) => {
+        try {
+            const listDocument = await DocumentTypeModel.find({isDeleted: false})
+            res.status(200).json({
+                message: 'Lấy danh sách document thành công',
+                data: listDocument,
+            });
+        } catch (error) {
+            console.error(error);
+            return res.status(500).json({ message: 'Lỗi server', error: error.message });
+        }
     }
 };
 

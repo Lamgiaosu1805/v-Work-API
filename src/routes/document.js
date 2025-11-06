@@ -13,6 +13,7 @@ router.get("/documentTypes", async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 });
+router.get('/getListDocument', authenticate, DocumentController.getListDocument);
 
 //POST
 router.post('/createTypeDocument', authenticate, isAdmin, DocumentController.createTypeDocument);

@@ -37,6 +37,7 @@ const DocumentController = {
         }
     },
     getFile: async (req, res) => {
+        const { filename } = req.query
         try {
             if (process.env.NODE_ENV === "production") {
                 if (!filename) {

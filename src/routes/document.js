@@ -14,6 +14,7 @@ router.get("/documentTypes", async (req, res) => {
     }
 });
 router.get('/getListDocument', authenticate, DocumentController.getListDocument);
+router.get("/getFile", authenticate, DocumentController.getFile);
 
 //POST
 router.post('/createTypeDocument', authenticate, isAdmin, DocumentController.createTypeDocument);

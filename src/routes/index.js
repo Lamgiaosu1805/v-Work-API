@@ -2,12 +2,14 @@ const userRouter = require('./user')
 const documentRouter = require('./document')
 const authRouter = require('./auth')
 const departmentRouter = require('./department')
+const laborContractRouter = require('./laborContract')
 
 const route = (app) => {
     app.use(`/user`, userRouter)
     app.use(`/document`, documentRouter)
     app.use(`/auth`, authRouter)
     app.use(`/department`, departmentRouter)
+    app.use(`/laborContract`, laborContractRouter)
 }
 
 module.exports = route;

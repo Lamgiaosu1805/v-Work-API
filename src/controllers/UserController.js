@@ -5,6 +5,7 @@ const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
 const bcrypt = require('bcrypt');
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
+const LaborContractModel = require("../models/LaborContractModel");
 
 const UserController = {
   createUser: async (req, res) => {
@@ -182,23 +183,28 @@ const UserController = {
   },
   getUserInfo: async (req, res) => {
     try {
-      //Lấy thông tin user cơ bản
+      // Lấy thông tin user cơ bản
       const user = await UserInfoModel.findOne({ id_account: req.account._id });
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
 
-      //Lấy danh sách phòng ban + vị trí đảm nhận
+      // Lấy danh sách phòng ban + vị trí đảm nhận
       const userDepartments = await UserDepartmentPositionModel.find({ user: user._id })
         .populate("department", "department_name department_code")
         .populate("position", "position_name");
 
-      //Lấy danh sách hồ sơ tài liệu
+      // Lấy danh sách hồ sơ tài liệu
       const userDocuments = await UserDocumentModel.findOne({ user_id: user._id })
         .populate("documents.type_id", "name required")
         .populate("documents.attachments.uploaded_by", "username");
 
-      //Chuẩn hóa dữ liệu trả về
+      // Lấy thông tin hợp đồng lao động của user
+      const laborContracts = await LaborContractModel.find({ id_user_info: user._id })
+        .select("-__v") // bỏ __v nếu muốn
+        .lean(); // trả về plain object
+
+      // Chuẩn hóa dữ liệu trả về
       res.json({
         ...user.toObject(),
         departments: userDepartments.map((item) => ({
@@ -217,6 +223,7 @@ const UserController = {
             })),
           }))
           : [],
+        laborContracts: laborContracts, // thêm info hợp đồng
       });
     } catch (error) {
       console.error("Error in getUserInfo:", error);
@@ -226,7 +233,6 @@ const UserController = {
       });
     }
   }
-
 };
 
 module.exports = UserController;

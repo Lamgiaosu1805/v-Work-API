@@ -12,25 +12,23 @@ const loggingMiddleware = (req, res, next) => {
         return clone;
     };
 
-    // Log request
+    // Log request body
     console.log('\n🔵 Request:', {
-        timestamp: new Date().toISOString(),
         method: req.method,
         url: req.originalUrl,
-        query: sanitize(req.query),
         body: sanitize(req.body),
-        headers: sanitize(req.headers),
     });
 
-    // Capture the original res.json to override it
+    const start = Date.now();
     const originalJson = res.json;
 
-    // Override res.json method
+    // Ghi đè res.json để log response
     res.json = function (data) {
-        // Log response (ẩn thông tin nhạy cảm nếu có)
+        const duration = Date.now() - start;
         console.log('\n🟢 Response:', {
-            timestamp: new Date().toISOString(),
+            url: req.originalUrl,
             statusCode: res.statusCode,
+            duration: `${duration} ms`,
             data: sanitize(data),
         });
 

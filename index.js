@@ -12,6 +12,9 @@ app.use(express.urlencoded({
     extended: true
 }))
 
+// Request and Response logging middleware
+app.use(require('./src/middlewares/loggingMiddleware'))
+
 //routing
 route(app);
 

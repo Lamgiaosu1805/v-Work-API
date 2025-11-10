@@ -1,4 +1,5 @@
 const AllowedWifiLocationModel = require("../models/AllowedWifiLocationModel");
+const ShiftModel = require("../models/ShiftModel");
 
 const AttendanceController = {
     createAllowedWifiLocation: async (req, res) => {
@@ -25,6 +26,37 @@ const AttendanceController = {
         } catch (error) {
             console.error(error);
             res.status(500).json({ message: "Lỗi server.", error: error.message });
+        }
+    },
+    createShift: async (req, res) => {
+        try {
+            const { name, start_time, end_time } = req.body;
+
+            // Validate bắt buộc
+            if (!name || !start_time || !end_time) {
+                return res.status(400).json({ message: "name, start_time, end_time là bắt buộc" });
+            }
+
+            // Kiểm tra trùng tên shift
+            const existing = await ShiftModel.findOne({ name });
+            if (existing) {
+                return res.status(400).json({ message: `Shift ${name} đã tồn tại` });
+            }
+
+            const shift = await ShiftModel.create({
+                name,
+                start_time,
+                end_time,
+                late_allowance_minutes,
+            });
+
+            return res.status(201).json({
+                message: "Tạo ca làm việc thành công",
+                data: shift,
+            });
+        } catch (err) {
+            console.error(err);
+            return res.status(500).json({ message: "Lỗi server", error: err.message });
         }
     },
     attendance: async (req, res) => {

@@ -10,5 +10,6 @@ const router = express.Router()
 //POST
 router.post('/createAllowedWifiLocation', authenticate, isAdmin, AttendanceController.createAllowedWifiLocation);
 router.post('/sendAttendance', authenticate, AttendanceController.attendance);
+router.post('/createShift', authenticate, isAdmin, AttendanceController.createShift);
 
 module.exports = router;

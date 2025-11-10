@@ -6,6 +6,7 @@ const Utils = require("../config/common/utils");
 const bcrypt = require('bcrypt');
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const LaborContractModel = require("../models/LaborContractModel");
+const WorkScheduleModel = require("../models/WorkScheduleModel");
 
 const UserController = {
   createUser: async (req, res) => {
@@ -21,18 +22,63 @@ const UserController = {
         date_of_birth,
         address,
         tinh_trang_hon_nhan,
+        employment_type,
       } = req.body;
 
-      let { userDepartments = [] } = req.body;
+      let { userDepartments = [], schedules = [] } = req.body;
 
+      // Parse nếu là string
       if (typeof userDepartments === "string") {
         try {
           userDepartments = JSON.parse(userDepartments);
         } catch (e) {
           await session.abortTransaction();
           session.endSession();
+          return res.status(400).json({ message: "Sai định dạng userDepartments" });
+        }
+      }
+
+      if (typeof schedules === "string") {
+        try {
+          schedules = JSON.parse(schedules);
+        } catch (e) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({ message: "Sai định dạng schedules" });
+        }
+      }
+
+      // Nếu là parttime, schedules bắt buộc phải có
+      if (employment_type === "parttime") {
+        if (!Array.isArray(schedules) || schedules.length === 0) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({ message: "Schedules bắt buộc cho parttime" });
+        }
+
+        // Validate từng item và tính tổng số buổi
+        let totalShifts = 0;
+        for (const item of schedules) {
+          if (
+            typeof item.dayOfWeek !== "number" ||
+            !Array.isArray(item.shifts) ||
+            item.shifts.length === 0
+          ) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+              message:
+                "Mỗi schedules phải có dayOfWeek (number) và shifts (array chứa ít nhất 1 ca)",
+            });
+          }
+          totalShifts += item.shifts.length; // mỗi ca = 1 buổi
+        }
+
+        if (totalShifts < 6) {
+          await session.abortTransaction();
+          session.endSession();
           return res.status(400).json({
-            message: "Sai định dạng userDepartments",
+            message: "Parttime phải đăng ký ít nhất 6 buổi/tuần",
           });
         }
       }
@@ -53,7 +99,7 @@ const UserController = {
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
 
-      //Tạo tài khoản
+      // Tạo tài khoản
       const [account] = await AccountModel.create(
         [
           {
@@ -77,21 +123,22 @@ const UserController = {
             tinh_trang_hon_nhan,
             id_account: account._id,
             ma_nv: maNV,
+            employment_type,
           },
         ],
         { session }
       );
 
       // Lưu tài liệu người dùng (nếu có upload)
-      const documents = [];
       const files = req.files || {};
+      const documents = [];
 
       for (const [type_id, fileArray] of Object.entries(files)) {
         const attachments = fileArray.map((f) => ({
           file_name: f.originalname,
           file_url: f.path,
           uploaded_at: new Date(),
-          uploaded_by: req.account?._id || null, // admin
+          uploaded_by: req.account?._id || null,
           allowed_users: [userInfo._id],
         }));
         documents.push({ type_id, attachments });
@@ -132,12 +179,22 @@ const UserController = {
         await UserDepartmentPositionModel.insertMany(udpDocs, { session });
       }
 
+      // Nếu là parttime → tạo WorkSchedule
+      if (employment_type === "parttime") {
+        const scheduleDocs = schedules.map((item) => ({
+          userId: userInfo._id,
+          dayOfWeek: item.dayOfWeek,
+          shifts: item.shifts,
+        }));
+        await WorkScheduleModel.insertMany(scheduleDocs, { session });
+      }
+
       // Commit transaction
       await session.commitTransaction();
       session.endSession();
 
       return res.status(201).json({
-        message: "Tạo user, userInfo, documents và mapping thành công",
+        message: "Tạo user, userInfo, documents, mapping và WorkSchedule thành công",
         account,
         firstPassword: password,
         userInfo,

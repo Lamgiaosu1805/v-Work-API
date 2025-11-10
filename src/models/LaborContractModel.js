@@ -34,7 +34,7 @@ const LaborContractModel = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "expired", "terminated"],
+      enum: ["active", "expired", "terminated"], //Đang hoạt động, Đã hết hạn, Đã thanh lý
       default: "active",
     },
     file_url: {

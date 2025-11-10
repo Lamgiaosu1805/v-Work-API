@@ -43,7 +43,7 @@ const LaborContractController = {
                 data: newContract,
             });
         } catch (error) {
-            console.error("❌ Lỗi tạo hợp đồng:", error);
+            console.error("Lỗi tạo hợp đồng:", error);
             res.status(500).json({ message: "Lỗi server.", error: error.message });
         }
     }

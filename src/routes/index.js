@@ -3,6 +3,7 @@ const documentRouter = require('./document')
 const authRouter = require('./auth')
 const departmentRouter = require('./department')
 const laborContractRouter = require('./laborContract')
+const attendanceRouter = require('./attendance')
 
 const route = (app) => {
     app.use(`/user`, userRouter)
@@ -10,6 +11,7 @@ const route = (app) => {
     app.use(`/auth`, authRouter)
     app.use(`/department`, departmentRouter)
     app.use(`/laborContract`, laborContractRouter)
+    app.use(`/attendance`, attendanceRouter)
 }
 
 module.exports = route;

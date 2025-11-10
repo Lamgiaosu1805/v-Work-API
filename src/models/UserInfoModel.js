@@ -12,6 +12,12 @@ const UserInfoModel = new mongoose.Schema(
     tinh_trang_hon_nhan: { type: Number, required: true }, // 0: Độc thân, 1: Đã kết hôn, 2: Khác
     id_account: { type: mongoose.Schema.Types.ObjectId, ref: 'account', required: true },
     ma_nv: { type: String, required: true, unique: true },
+    // ✅ Thêm trường này
+    employment_type: {
+      type: String,
+      enum: ["fulltime", "parttime"],
+      default: "fulltime",
+    },
     ...BaseSchema.obj,
   },
   {

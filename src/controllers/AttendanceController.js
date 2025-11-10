@@ -3,7 +3,7 @@ const AllowedWifiLocationModel = require("../models/AllowedWifiLocationModel");
 const AttendanceController = {
     createAllowedWifiLocation: async (req, res) => {
         try {
-            const { ssid, latitude, longitude, radius = 30 } = req.body;
+            const { ssid, latitude, longitude } = req.body;
 
             if (!ssid || !latitude || !longitude) {
                 return res.status(400).json({ message: 'ssid, latitude, longitude required' });

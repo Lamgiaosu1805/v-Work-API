@@ -11,6 +11,8 @@ const WorkSheetModel = new mongoose.Schema(
         check_out: Date,
         minutes_late: { type: Number, default: 0 },
         minute_early: { type: Number, default: 0 },
+        mergedShift: { type: Boolean, default: false }, // true nếu là 1 ngày full (2 ca hoặc hành chính)
+        ...BaseSchema.obj,
     },
     {
         timestamps: BaseSchema.options.timestamps,

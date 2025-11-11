@@ -1,5 +1,7 @@
 const AllowedWifiLocationModel = require("../models/AllowedWifiLocationModel");
 const ShiftModel = require("../models/ShiftModel");
+const UserInfoModel = require("../models/UserInfoModel");
+const WorkSheetModel = require("../models/WorkSheetModel");
 
 const AttendanceController = {
     createAllowedWifiLocation: async (req, res) => {
@@ -102,6 +104,41 @@ const AttendanceController = {
         } catch (error) {
             console.error(error);
             res.status(500).json({ message: "Lỗi server.", error: error.message });
+        }
+    },
+    getWorkSheet: async (req, res) => {
+        try {
+            // Lấy ngày từ query param, nếu không có thì lấy hôm nay
+            let targetDate = req.query.date ? new Date(req.query.date) : new Date();
+            targetDate.setHours(0, 0, 0, 0);
+
+            const nextDate = new Date(targetDate);
+            nextDate.setDate(nextDate.getDate() + 1);
+
+            // Lấy userId từ account
+            const user = await UserInfoModel.findOne({ id_account: req.account._id });
+            if (!user) {
+                return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+            }
+            const userId = user._id;
+
+            // Query WorkSheet
+            const query = {
+                date: { $gte: targetDate, $lt: nextDate },
+                user_id: userId,
+            };
+
+            const worksheets = await WorkSheetModel.find(query)
+                .populate("user_id", "full_name ma_nv employment_type")
+                .populate("shifts", "name start_time end_time late_allowance_minutes");
+
+            res.json({
+                message: `WorkSheet ngày ${targetDate.toLocaleDateString("vi-VN")}`,
+                data: worksheets,
+            });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ message: "Lỗi server", error: err.message });
         }
     }
 }

@@ -67,12 +67,12 @@ const AttendanceController = {
             if (!ssid || latitude == null || longitude == null)
                 return res.status(400).json({ message: "ssid, latitude, longitude required" });
 
-            // Kiểm tra SSID
+            // ✅ 1. Kiểm tra SSID hợp lệ
             const allowed = await AllowedWifiLocationModel.findOne({ ssid, isDeleted: false });
             if (!allowed) return res.status(400).json({ message: "SSID không hợp lệ." });
 
-            // Kiểm tra khoảng cách
-            const R = 6371000;
+            // ✅ 2. Kiểm tra khoảng cách vị trí
+            const R = 6371000; // mét
             const toRad = x => x * Math.PI / 180;
             const dLat = toRad(latitude - allowed.latitude);
             const dLon = toRad(longitude - allowed.longitude);
@@ -85,59 +85,66 @@ const AttendanceController = {
             if (distance > allowed.radius)
                 return res.status(400).json({ message: "Vị trí không hợp lệ." });
 
+            // ✅ 3. Lấy thông tin user
             const accountId = req.account._id;
             const userInfo = await UserInfoModel.findOne({ id_account: accountId });
             if (!userInfo) return res.status(400).json({ message: "User info không tồn tại" });
 
+            // ✅ 4. Xác định ngày hiện tại
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const tomorrow = new Date(today);
             tomorrow.setDate(today.getDate() + 1);
 
-            // Lấy WorkSheet
+            // ✅ 5. Tìm worksheet hôm nay
             let worksheet = await WorkSheetModel.findOne({
                 user_id: userInfo._id,
-                date: { $gte: today, $lt: tomorrow }
-            }).populate("shifts");
-            console.log("worksheet", worksheet)
+                date: { $gte: today, $lt: tomorrow },
+            });
 
-            // if (worksheet && worksheet.check_in) {
-            //     return res.status(400).json({ message: "Bạn đã check-in hôm nay rồi." });
-            // }
-
+            // ✅ 6. Nếu chưa có worksheet thì tạo mới
             if (!worksheet) {
-                // Nếu chưa có worksheet, tạo mới
-                const shifts = await ShiftModel.find({});
+                const shifts = await ShiftModel.find({ isDeleted: false });
                 worksheet = new WorkSheetModel({
                     user_id: userInfo._id,
                     date: new Date(),
                     shifts: shifts.map(s => s._id),
+                    mergedShift: shifts.length > 1, // nếu parttime có 2 ca -> coi như full-day
                 });
+                await worksheet.save();
             }
 
-            // Lấy ca đầu tiên để tính đi muộn
-            const shifts = worksheet.shifts.length ? worksheet.shifts : await ShiftModel.find({});
-            console.log(worksheet.shifts.length)
-            if (!worksheet.shifts.length) worksheet.shifts = shifts.map(s => s._id);
-            const firstShift = shifts[0];
-            console.log("firstShift", firstShift)
+            // ✅ 7. Nếu đã check-in rồi thì chặn
+            if (worksheet.check_in)
+                return res.status(400).json({ message: "Bạn đã check-in hôm nay rồi." });
+
+            // ✅ 8. Lấy thông tin ca đầu tiên để tính đi muộn
+            const firstShiftId = worksheet.shifts[0];
+            const firstShift = await ShiftModel.findById(firstShiftId);
+            if (!firstShift)
+                return res.status(400).json({ message: "Không tìm thấy thông tin ca làm việc." });
+
+            const now = new Date();
             const [h, m] = firstShift.start_time.split(":").map(Number);
             const shiftStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), h, m, 0);
 
-            const now = new Date();
-            worksheet.check_in = now;
-
-            // Tính đi muộn
+            // ✅ 9. Tính số phút đi muộn (nếu có)
             const lateMinutes = Math.max(0, Math.floor((now - shiftStart) / 60000) - firstShift.late_allowance_minutes);
+
+            // ✅ 10. Ghi nhận check-in
+            worksheet.check_in = now;
             worksheet.minutes_late = lateMinutes;
+            worksheet.status = "pending"; // sẽ chuyển sang present khi checkout
 
             await worksheet.save();
 
             return res.json({
                 message: "Check-in thành công",
                 check_in: worksheet.check_in,
-                minutes_late: worksheet.minutes_late
+                minutes_late: worksheet.minutes_late,
+                mergedShift: worksheet.mergedShift,
             });
+
         } catch (err) {
             console.error(err);
             return res.status(500).json({ message: "Lỗi server", error: err.message });

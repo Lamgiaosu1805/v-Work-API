@@ -5,7 +5,7 @@ const router = express.Router()
 
 
 //GET
-router.get('/getWorkSheetToday', authenticate, AttendanceController.getWorkSheet);
+router.get('/getWorkSheet', authenticate, AttendanceController.getWorkSheet);
 
 
 //POST

@@ -1,3 +1,4 @@
+const { default: mongoose } = require("mongoose");
 const AllowedWifiLocationModel = require("../models/AllowedWifiLocationModel");
 const ShiftModel = require("../models/ShiftModel");
 const UserInfoModel = require("../models/UserInfoModel");
@@ -82,18 +83,34 @@ const AttendanceController = {
             if (!worksheet) return res.status(400).json({ message: "Bạn chưa có ca làm việc hôm nay." });
             if (worksheet.check_in) return res.status(400).json({ message: "Bạn đã check-in hôm nay rồi." });
 
-            // Lấy ca đầu tiên
-            const firstShiftId = worksheet.shifts[0];
-            const firstShift = await ShiftModel.findById(firstShiftId);
-            if (!firstShift) return res.status(400).json({ message: "Không tìm thấy thông tin ca làm việc." });
+            if (!worksheet.shifts.length) return res.status(400).json({ message: "Không có ca làm việc hợp lệ." });
 
-            // Tính số phút đi muộn
-            const now = moment.tz("Asia/Ho_Chi_Minh").toDate();
-            const [h, m] = firstShift.start_time.split(":").map(Number);
-            const shiftStart = moment.tz(today, "Asia/Ho_Chi_Minh").hour(h).minute(m).toDate();
-            const lateMinutes = Math.max(0, Math.floor((now - shiftStart) / 60000) - firstShift.late_allowance_minutes);
+            // Thời gian hiện tại
+            const now = moment.tz("Asia/Ho_Chi_Minh");
 
-            worksheet.check_in = now;
+            // Nếu là part-time và có nhiều ca
+            let firstShift = worksheet.shifts[0];
+            let lastShift = worksheet.shifts[worksheet.shifts.length - 1];
+
+            // Nếu shifts là ObjectId, fetch lại
+            if (typeof firstShift === "string" || firstShift instanceof mongoose.Types.ObjectId) {
+                firstShift = await ShiftModel.findById(firstShift);
+                lastShift = await ShiftModel.findById(lastShift);
+            }
+
+            // Kiểm tra quá giờ: nếu nhiều ca thì lấy giờ out ca cuối
+            const [lastEndH, lastEndM] = lastShift.end_time.split(":").map(Number);
+            const lastShiftEnd = moment.tz(today, "Asia/Ho_Chi_Minh").hour(lastEndH).minute(lastEndM);
+            if (now.isAfter(lastShiftEnd)) {
+                return res.status(400).json({ message: "Đã quá giờ làm việc, không thể check-in." });
+            }
+
+            // Tính số phút đi muộn dựa vào ca đầu tiên
+            const [firstStartH, firstStartM] = firstShift.start_time.split(":").map(Number);
+            const firstShiftStart = moment.tz(today, "Asia/Ho_Chi_Minh").hour(firstStartH).minute(firstStartM);
+            const lateMinutes = Math.max(0, Math.floor((now - firstShiftStart) / 60000) - firstShift.late_allowance_minutes);
+
+            worksheet.check_in = now.toDate();
             worksheet.minutes_late = lateMinutes;
             worksheet.status = "pending";
             await worksheet.save();

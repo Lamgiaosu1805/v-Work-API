@@ -118,6 +118,7 @@ const AttendanceController = {
             const shifts = worksheet.shifts.length ? worksheet.shifts : await ShiftModel.find({});
             if (!worksheet.shifts.length) worksheet.shifts = shifts.map(s => s._id);
             const firstShift = shifts[0];
+            console.log("firstShift", firstShift)
             const [h, m] = firstShift.start_time.split(":").map(Number);
             const shiftStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), h, m, 0);
 

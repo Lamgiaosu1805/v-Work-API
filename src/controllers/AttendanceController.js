@@ -99,10 +99,11 @@ const AttendanceController = {
                 user_id: userInfo._id,
                 date: { $gte: today, $lt: tomorrow }
             }).populate("shifts");
+            console.log("worksheet", worksheet)
 
-            if (worksheet && worksheet.check_in) {
-                return res.status(400).json({ message: "Bạn đã check-in hôm nay rồi." });
-            }
+            // if (worksheet && worksheet.check_in) {
+            //     return res.status(400).json({ message: "Bạn đã check-in hôm nay rồi." });
+            // }
 
             if (!worksheet) {
                 // Nếu chưa có worksheet, tạo mới
@@ -116,6 +117,7 @@ const AttendanceController = {
 
             // Lấy ca đầu tiên để tính đi muộn
             const shifts = worksheet.shifts.length ? worksheet.shifts : await ShiftModel.find({});
+            console.log(worksheet.shifts.length)
             if (!worksheet.shifts.length) worksheet.shifts = shifts.map(s => s._id);
             const firstShift = shifts[0];
             console.log("firstShift", firstShift)

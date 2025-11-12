@@ -10,7 +10,8 @@ router.get('/getWorkSheetToday', authenticate, AttendanceController.getWorkSheet
 
 //POST
 router.post('/createAllowedWifiLocation', authenticate, isAdmin, AttendanceController.createAllowedWifiLocation);
-router.post('/sendAttendance', authenticate, AttendanceController.attendance);
+router.post('/checkIn', authenticate, AttendanceController.checkIn);
+router.post('/checkOut', authenticate, AttendanceController.checkOut);
 router.post('/createShift', authenticate, isAdmin, AttendanceController.createShift);
 
 module.exports = router;

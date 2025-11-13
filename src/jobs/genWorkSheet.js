@@ -76,7 +76,7 @@ async function createDailyWorkSheets() {
 }
 
 // Lên lịch chạy lúc 00:05 mỗi ngày
-cron.schedule("30 8 * * *", async () => {
+cron.schedule("32 8 * * *", async () => {
     console.log("🕐 [Cron] Bắt đầu chạy createDailyWorkSheets");
     await createDailyWorkSheets();
 });

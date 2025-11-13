@@ -131,6 +131,7 @@ const AttendanceController = {
             const allowed = await AllowedWifiLocationModel.findOne({ ssid, isDeleted: false });
             if (!allowed) return res.status(400).json({ message: "SSID không hợp lệ." });
 
+            // Kiểm tra khoảng cách
             const R = 6371000;
             const toRad = x => x * Math.PI / 180;
             const dLat = toRad(latitude - allowed.latitude);
@@ -147,46 +148,46 @@ const AttendanceController = {
             const userInfo = await UserInfoModel.findOne({ id_account: accountId });
             if (!userInfo) return res.status(400).json({ message: "User info không tồn tại" });
 
-            // Ngày hôm nay VN
+            // Xác định ngày hôm nay VN
             const today = moment.tz("Asia/Ho_Chi_Minh").startOf("day").toDate();
             const tomorrow = moment(today).add(1, "day").toDate();
 
-            let worksheet = await WorkSheetModel.findOne({
+            // Lấy worksheet hôm nay
+            const worksheet = await WorkSheetModel.findOne({
                 user_id: userInfo._id,
-                date: { $gte: today, $lt: tomorrow }
+                date: { $gte: today, $lt: tomorrow },
             }).populate("shifts");
 
-            if (!worksheet) {
-                const shifts = await ShiftModel.find({});
-                worksheet = new WorkSheetModel({
-                    user_id: userInfo._id,
-                    date: moment.tz("Asia/Ho_Chi_Minh").toDate(),
-                    shifts: shifts.map(s => s._id),
-                });
+            if (!worksheet) return res.status(400).json({ message: "Bạn chưa có ca làm việc hôm nay, không thể check-out." });
+            if (worksheet.check_out) return res.status(400).json({ message: "Bạn đã check-out hôm nay rồi." });
+            if (!worksheet.shifts.length) return res.status(400).json({ message: "Không có ca làm việc hợp lệ." });
+
+            // Thời gian hiện tại
+            const now = moment.tz("Asia/Ho_Chi_Minh");
+
+            // Lấy ca cuối
+            let lastShift = worksheet.shifts[worksheet.shifts.length - 1];
+            if (typeof lastShift === "string" || lastShift instanceof mongoose.Types.ObjectId) {
+                lastShift = await ShiftModel.findById(lastShift);
             }
 
-            if (worksheet.check_out) return res.status(400).json({ message: "Bạn đã check-out hôm nay rồi." });
+            // Tính phút về sớm dựa trên ca cuối
+            const [lastEndH, lastEndM] = lastShift.end_time.split(":").map(Number);
+            const lastShiftEnd = moment.tz(today, "Asia/Ho_Chi_Minh").hour(lastEndH).minute(lastEndM);
+            const minuteEarly = Math.max(0, Math.floor((lastShiftEnd - now) / 60000));
 
-            // Lấy ca cuối để tính về sớm
-            let shifts = worksheet.shifts.length ? worksheet.shifts : await ShiftModel.find({});
-            if (!worksheet.shifts.length) worksheet.shifts = shifts.map(s => s._id);
-
-            const lastShift = shifts[shifts.length - 1];
-            const [h, m] = lastShift.end_time.split(":").map(Number);
-            const shiftEnd = moment.tz(today, "Asia/Ho_Chi_Minh").hour(h).minute(m).toDate();
-
-            const now = moment.tz("Asia/Ho_Chi_Minh").toDate();
-            worksheet.check_out = now;
-            worksheet.minute_early = Math.max(0, Math.floor((shiftEnd - now) / 60000));
-
+            worksheet.check_out = now.toDate();
+            worksheet.minute_early = minuteEarly;
             await worksheet.save();
 
             return res.json({ message: "Check-out thành công", check_out: worksheet.check_out, minute_early: worksheet.minute_early });
+
         } catch (err) {
             console.error(err);
             return res.status(500).json({ message: "Lỗi server", error: err.message });
         }
     },
+
 
     getWorkSheet: async (req, res) => {
         try {

@@ -16,6 +16,12 @@ async function createDailyWorkSheets() {
 
         const dayOfWeek = today.getDay() === 0 ? 7 : today.getDay(); // 1=Mon ... 7=Sun
 
+        // Nếu là Chủ Nhật thì không chạy
+        if (dayOfWeek === 7) {
+            console.log(`📅 Hôm nay là Chủ Nhật, bỏ qua việc tạo worksheet.`);
+            return;
+        }
+
         console.log(`📅 [Cron] Bắt đầu tạo worksheet cho ngày ${today.toLocaleDateString("vi-VN")}`);
 
         // Lấy toàn bộ user active

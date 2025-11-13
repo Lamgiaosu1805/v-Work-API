@@ -214,6 +214,41 @@ const AttendanceController = {
             console.error(err);
             res.status(500).json({ message: "Lỗi server", error: err.message });
         }
+    },
+    getLichCong: async (req, res) => {
+        try {
+            // Lấy user từ account
+            const user = await UserInfoModel.findOne({ id_account: req.account._id });
+            if (!user) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+
+            // Xác định khoảng 26 tháng t → 25 tháng t+1
+            const today = moment.tz('Asia/Ho_Chi_Minh');
+
+            let startDate, endDate;
+            if (today.date() >= 26) {
+                startDate = today.clone().date(26).startOf('day');
+                endDate = today.clone().add(1, 'month').date(25).endOf('day');
+            } else {
+                startDate = today.clone().subtract(1, 'month').date(26).startOf('day');
+                endDate = today.clone().date(25).endOf('day');
+            }
+
+            // Query WorkSheet trong khoảng
+            const worksheets = await WorkSheetModel.find({
+                user_id: user._id,
+                date: { $gte: startDate.toDate(), $lte: endDate.toDate() },
+            })
+                .populate('shifts', 'name start_time end_time late_allowance_minutes')
+                .sort({ date: 1 });
+
+            res.json({
+                message: `Lịch công từ ${startDate.format('DD/MM/YYYY')} đến ${endDate.format('DD/MM/YYYY')}`,
+                data: worksheets,
+            });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ message: "Lỗi server", error: err.message });
+        }
     }
 };
 

@@ -6,6 +6,8 @@ const router = express.Router()
 
 //GET
 router.get('/getWorkSheet', authenticate, AttendanceController.getWorkSheet);
+router.get('/getLichCong', authenticate, AttendanceController.getLichCong);
+
 
 
 //POST

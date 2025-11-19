@@ -30,17 +30,40 @@ async function createDailyWorkSheets() {
         const parttimeUsers = users.filter(u => u.employment_type === "parttime");
 
         // ---- FULLTIME ----
-        const adminShift = await Shift.findOne({ name: "Ca hành chính" });
-        if (!adminShift) {
-            console.warn("Chưa có ca hành chính trong hệ thống!");
-        } else {
-            for (const user of fulltimeUsers) {
-                const exist = await WorkSheet.findOne({
-                    user_id: user._id,
-                    date: { $gte: start, $lt: end }
-                });
-                if (exist) continue;
+        let adminShift;
+        let morningShift;
 
+        // Lấy ca hành chính & ca sáng
+        adminShift = await Shift.findOne({ name: "Ca hành chính" });
+        morningShift = await Shift.findOne({ name: "Ca sáng" });
+
+        if (!adminShift) console.warn("Không tìm thấy ca hành chính!");
+        if (!morningShift) console.warn("Không tìm thấy ca sáng!");
+
+        for (const user of fulltimeUsers) {
+            // Nếu đã tồn tại sheet hôm nay thì bỏ
+            const exist = await WorkSheet.findOne({
+                user_id: user._id,
+                date: { $gte: start, $lt: end }
+            });
+            if (exist) continue;
+
+            // Nếu hôm nay là thứ 7 → tạo ca sáng
+            if (dayOfWeek === 6) {
+                if (morningShift) {
+                    await WorkSheet.create({
+                        user_id: user._id,
+                        date: today,
+                        shifts: [morningShift._id],
+                        mergedShift: false,
+                        status: "pending",
+                    });
+                }
+                continue;
+            }
+
+            // Các ngày từ thứ 2 → thứ 6 dùng ca hành chính
+            if (adminShift) {
                 await WorkSheet.create({
                     user_id: user._id,
                     date: today,

@@ -222,19 +222,27 @@ const AttendanceController = {
             const user = await UserInfoModel.findOne({ id_account: req.account._id });
             if (!user) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
 
-            // Xác định khoảng 26 tháng t → 25 tháng t+1
+            // Lấy period từ query, mặc định = 0 (kỳ hiện tại)
+            const period = parseInt(req.query.period || 0);
+
             const today = moment.tz('Asia/Ho_Chi_Minh');
 
-            let startDate, endDate;
+            // Xác định kỳ hiện tại dựa vào hôm nay
+            let baseStart, baseEnd;
+
             if (today.date() >= 26) {
-                startDate = today.clone().date(26).startOf('day');
-                endDate = today.clone().add(1, 'month').date(25).endOf('day');
+                baseStart = today.clone().date(26).startOf('day');
+                baseEnd = today.clone().add(1, 'month').date(25).endOf('day');
             } else {
-                startDate = today.clone().subtract(1, 'month').date(26).startOf('day');
-                endDate = today.clone().date(25).endOf('day');
+                baseStart = today.clone().subtract(1, 'month').date(26).startOf('day');
+                baseEnd = today.clone().date(25).endOf('day');
             }
 
-            // Query WorkSheet trong khoảng
+            // Dịch kỳ theo period
+            const startDate = baseStart.clone().add(period, 'month');
+            const endDate = baseEnd.clone().add(period, 'month');
+
+            // Query WorkSheet trong khoảng kỳ đã tính
             const worksheets = await WorkSheetModel.find({
                 user_id: user._id,
                 date: { $gte: startDate.toDate(), $lte: endDate.toDate() },
@@ -246,6 +254,7 @@ const AttendanceController = {
                 message: `Lịch công từ ${startDate.format('DD/MM/YYYY')} đến ${endDate.format('DD/MM/YYYY')}`,
                 data: worksheets,
             });
+
         } catch (err) {
             console.error(err);
             res.status(500).json({ message: "Lỗi server", error: err.message });

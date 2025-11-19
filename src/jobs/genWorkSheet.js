@@ -98,9 +98,9 @@ async function createDailyWorkSheets() {
             });
         }
 
-        console.log("✅ Cron tạo WorkSheet hằng ngày hoàn tất!");
+        console.log("Cron tạo WorkSheet hằng ngày hoàn tất!");
     } catch (error) {
-        console.error("❌ Lỗi cron createDailyWorkSheets:", error);
+        console.error("Lỗi cron createDailyWorkSheets:", error);
     }
 }
 

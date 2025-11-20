@@ -113,55 +113,55 @@ const AuthController = {
             if (!refreshToken)
                 return res.status(400).json({ message: "Thiếu refresh token" });
 
-            const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+            // Giải mã token
+            let decoded;
+            try {
+                decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+            } catch (err) {
+                return res.status(401).json({ message: "Refresh token không hợp lệ hoặc đã hết hạn" });
+            }
 
-            const account = await AccountModel.findById(decoded.id);
-            if (!account)
-                return res.status(404).json({ message: "Không tìm thấy tài khoản" });
-
-            const storedToken = account.refreshTokens.find(
-                (t) => t.token === refreshToken && !t.revoked
-            );
-
-            if (!storedToken)
-                return res
-                    .status(403)
-                    .json({ message: "Refresh token không hợp lệ hoặc đã bị thu hồi" });
-
-            storedToken.revoked = true;
-
+            // Cập nhật token cũ thành revoked & thêm token mới
             const newAccessToken = jwt.sign(
-                { id: account._id, username: account.username, role: account.role },
+                { id: decoded.id },
                 JWT_SECRET,
                 { expiresIn: "30m" }
             );
 
             const newRefreshToken = jwt.sign(
-                { id: account._id },
+                { id: decoded.id },
                 JWT_REFRESH_SECRET,
                 { expiresIn: "3d" }
             );
 
-            account.refreshTokens = [
+            const updatedAccount = await AccountModel.findOneAndUpdate(
+                { _id: decoded.id, "refreshTokens.token": refreshToken, "refreshTokens.revoked": false },
                 {
-                    token: newRefreshToken,
-                    createdAt: new Date(),
-                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                    revoked: false,
+                    $set: { "refreshTokens.$.revoked": true },
+                    $push: {
+                        refreshTokens: {
+                            token: newRefreshToken,
+                            createdAt: new Date(),
+                            expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3 ngày
+                            revoked: false,
+                        },
+                    },
                 },
-            ];
+                { new: true }
+            );
 
-            await account.save();
+            if (!updatedAccount)
+                return res.status(403).json({ message: "Refresh token không hợp lệ hoặc đã bị thu hồi" });
 
-            // 7️⃣ Trả kết quả
             res.status(200).json({
                 message: "Làm mới token thành công",
                 accessToken: newAccessToken,
                 refreshToken: newRefreshToken,
             });
+
         } catch (err) {
             console.error("Refresh Token Error:", err);
-            res.status(401).json({ message: "Refresh token không hợp lệ hoặc đã hết hạn" });
+            res.status(500).json({ message: "Lỗi hệ thống", error: err.message });
         }
     },
 

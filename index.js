@@ -25,6 +25,7 @@ route(app);
 
     // Import cron job sau khi DB connect
     require('./src/jobs/genWorkSheet');
+    // require('./src/jobs/generateFakeWorksheetJob');
 
     const port = process.env.PORT || 3000;
     app.listen(port, () => {

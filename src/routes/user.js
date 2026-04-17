@@ -8,6 +8,7 @@ const DocumentTypeModel = require("../models/DocumentTypeModel");
 // GET
 
 router.get("/getUserInfo", authenticate, UserController.getUserInfo)
+router.get("/getQRSale", authenticate, UserController.generateMyQR)
 
 // POST create user + upload files dynamic
 router.post(

@@ -7,6 +7,7 @@ const bcrypt = require('bcrypt');
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
+// const QRCode = require("qrcode");
 
 const UserController = {
   createUser: async (req, res) => {
@@ -288,6 +289,38 @@ const UserController = {
         message: "Internal server error",
         error: error.message,
       });
+    }
+  },
+  generateMyQR: async (req, res) => {
+    try {
+      const accountId = req.account._id;
+
+      const userInfo = await UserInfoModel.findOne({ id_account: accountId });
+      if (!userInfo) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const ma_nv = userInfo.ma_nv;
+      const deepLink = `vwork://register?ref=${ma_nv}`;
+
+      // const qrImageBase64 = await QRCode.toDataURL(deepLink, {
+      //   errorCorrectionLevel: 'H',
+      //   margin: 2,
+      //   width: 400,
+      //   color: {
+      //     dark: '#000000',
+      //     light: '#FFFFFF'
+      //   }
+      // });
+
+      res.status(200).json({
+        sale_name: userInfo.full_name,
+        ma_nv: ma_nv,
+        link: deepLink,
+        // qr_image: qrImageBase64
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Internal server error", error: error.message });
     }
   }
 };

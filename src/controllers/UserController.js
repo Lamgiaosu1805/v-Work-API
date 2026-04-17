@@ -301,7 +301,7 @@ const UserController = {
       }
 
       const ma_nv = userInfo.ma_nv;
-      const deepLink = `vwork://register?ref=${ma_nv}`;
+      const deepLink = `tikluy://open-account?ref=${ma_nv}`;
 
       // const qrImageBase64 = await QRCode.toDataURL(deepLink, {
       //   errorCorrectionLevel: 'H',

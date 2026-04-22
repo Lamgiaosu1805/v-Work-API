@@ -301,9 +301,10 @@ const UserController = {
       }
 
       const ma_nv = userInfo.ma_nv;
+      const phone_number = userInfo.phone_number;
 
       const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-      const landingUrl = `${BASE_URL}/refer?ref=${ma_nv}`;
+      const landingUrl = `${BASE_URL}/refer?ref=${phone_number + "-" + ma_nv}`;
 
       // Sinh QR trỏ tới landing page
       const qrImageBase64 = await QRCode.toDataURL(landingUrl, {

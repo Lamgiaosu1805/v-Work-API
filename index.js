@@ -2,6 +2,7 @@ process.env.TZ = 'Asia/Ho_Chi_Minh';
 require('dotenv').config();
 const express = require('express');
 const morgan = require('morgan');
+const path = require('path'); // thêm dòng này
 const db = require('./src/config/connectDB');
 const route = require('./src/routes');
 
@@ -11,9 +12,15 @@ const app = express();
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public'))); // sửa dòng này
 
 // Request & Response logging middleware
 app.use(require('./src/middlewares/loggingMiddleware'));
+
+// Route refer — phải đặt TRƯỚC route(app)
+app.get('/refer', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'refer.html'));
+});
 
 // Routing
 route(app);
@@ -23,9 +30,7 @@ route(app);
   try {
     await db.connect();
 
-    // Import cron job sau khi DB connect
     require('./src/jobs/genWorkSheet');
-    // require('./src/jobs/generateFakeWorksheetJob');
 
     const port = process.env.PORT || 3000;
     app.listen(port, () => {
@@ -33,6 +38,6 @@ route(app);
     });
   } catch (err) {
     console.error('MongoDB connection error:', err);
-    process.exit(1); // Dừng app nếu DB không connect được
+    process.exit(1);
   }
 })();

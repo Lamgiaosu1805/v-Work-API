@@ -7,7 +7,7 @@ const bcrypt = require('bcrypt');
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
-// const QRCode = require("qrcode");
+const QRCode = require("qrcode");
 
 const UserController = {
   createUser: async (req, res) => {
@@ -301,28 +301,32 @@ const UserController = {
       }
 
       const ma_nv = userInfo.ma_nv;
-      const deepLink = `tikluy://open-account?ma_nv=${ma_nv}`;
 
-      // const qrImageBase64 = await QRCode.toDataURL(deepLink, {
-      //   errorCorrectionLevel: 'H',
-      //   margin: 2,
-      //   width: 400,
-      //   color: {
-      //     dark: '#000000',
-      //     light: '#FFFFFF'
-      //   }
-      // });
+      const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+      const landingUrl = `${BASE_URL}/refer?ref=${ma_nv}`;
 
-      res.status(200).json({
+      // Sinh QR trỏ tới landing page
+      const qrImageBase64 = await QRCode.toDataURL(landingUrl, {
+        errorCorrectionLevel: "H",
+        margin: 2,
+        width: 400,
+        color: {
+          dark: "#000000",
+          light: "#FFFFFF",
+        },
+      });
+
+      return res.status(200).json({
         sale_name: userInfo.full_name,
-        ma_nv: ma_nv,
-        link: deepLink,
-        // qr_image: qrImageBase64
+        ma_nv,
+        landing_url: landingUrl,
+        qr_image: qrImageBase64, // base64 PNG — frontend dùng <img src="..."> hiển thị trực tiếp
       });
     } catch (error) {
-      res.status(500).json({ message: "Internal server error", error: error.message });
+      console.error("Error in generateMyQR:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
     }
-  }
+  },
 };
 
 module.exports = UserController;

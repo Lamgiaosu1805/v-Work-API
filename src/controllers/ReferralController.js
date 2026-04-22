@@ -9,16 +9,16 @@ function buildFingerprintKey(fp) {
 const ReferralController = {
     track: async (req, res) => {
         try {
-            const { fingerprint, ref } = req.body;
+            const { ref } = req.body;
 
-            if (!fingerprint || !ref) {
-                return res.status(400).json({ message: "Thiếu fingerprint hoặc ref" });
+            if (!ref) {
+                return res.status(400).json({ message: "Thiếu ref" });
             }
 
-            const key = buildFingerprintKey(fingerprint);
-            await redis.setex(`referral:${key}`, 600, ref);
+            const token = crypto.randomBytes(16).toString("hex");
+            await redis.setex(`referral:${token}`, 600, ref); // 10 phút
 
-            return res.status(200).json({ ok: true });
+            return res.status(200).json({ token });
         } catch (error) {
             console.error("Error in track:", error);
             return res.status(500).json({ message: "Internal server error", error: error.message });
@@ -27,17 +27,16 @@ const ReferralController = {
 
     resolve: async (req, res) => {
         try {
-            const { userAgent, screen, timezone } = req.query;
+            const { token } = req.query;
 
-            if (!userAgent || !screen || !timezone) {
-                return res.status(400).json({ message: "Thiếu thông tin fingerprint" });
+            if (!token) {
+                return res.status(400).json({ message: "Thiếu token" });
             }
 
-            const key = buildFingerprintKey({ userAgent, screen, timezone });
-            const ref = await redis.get(`referral:${key}`);
+            const ref = await redis.get(`referral:${token}`);
 
             if (ref) {
-                await redis.del(`referral:${key}`);
+                await redis.del(`referral:${token}`); // dùng 1 lần rồi xóa
             }
 
             return res.status(200).json({ ref: ref ?? null });

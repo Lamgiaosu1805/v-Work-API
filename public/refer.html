@@ -54,64 +54,67 @@
   </head>
   <body>
     <div class="card">
-      <div class="spinner"></div>
+      <div class="spinner" id="spinner"></div>
       <h2 id="title">Đang mở ứng dụng...</h2>
       <p id="msg">Vui lòng chờ trong giây lát</p>
     </div>
 
     <script>
-      const STORE_IOS = "https://apps.apple.com/us/app/tikluy/id6504506939"; // thay link thật
+      const STORE_IOS = "https://apps.apple.com/app/idXXXXXXX";
       const STORE_ANDROID =
-        "https://play.google.com/store/apps/details?id=com.tikluy"; // thay link thật
+        "https://play.google.com/store/apps/details?id=com.yourapp";
 
       const params = new URLSearchParams(window.location.search);
       const ref = params.get("ref");
       const ua = navigator.userAgent;
-
       const isIOS = /iPhone|iPad|iPod/.test(ua);
       const isAndroid = /Android/.test(ua);
 
-      // Bước 1: Lưu fingerprint lên server
-      fetch("/referral/track", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fingerprint: {
-            userAgent: ua,
-            screen: `${screen.width}x${screen.height}`,
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          },
-          ref,
-        }),
-      });
+      async function init() {
+        try {
+          // Bước 1: Gọi track → nhận token 1 lần duy nhất cho lần quét này
+          const res = await fetch("/referral/track", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ref }),
+          });
+          const data = await res.json();
+          const token = data.token;
 
-      // Bước 2: Thử mở app nếu đã cài
-      if (ref) {
-        window.location.href = `tikluy://open-account?ref=${ref}`;
+          // Bước 2: Ghi token vào clipboard
+          if (token) {
+            try {
+              await navigator.clipboard.writeText(`tikluy_ref:${token}`);
+            } catch (e) {
+              console.log("Clipboard write failed:", e);
+            }
+          }
+        } catch (e) {
+          console.log("Track error:", e);
+        }
+
+        // Bước 3: Thử mở app nếu đã cài (deep link)
+        if (ref) {
+          window.location.href = `tikluy://open-account?ref=${ref}`;
+        }
+
+        // Bước 4: Sau 2 giây tự redirect sang store đúng nền tảng
+        setTimeout(() => {
+          if (isIOS) {
+            window.location.href = STORE_IOS;
+          } else if (isAndroid) {
+            window.location.href = STORE_ANDROID;
+          } else {
+            document.getElementById("spinner").style.display = "none";
+            document.getElementById("title").textContent =
+              "Quét mã bằng điện thoại";
+            document.getElementById("msg").textContent =
+              "Vui lòng dùng điện thoại để quét mã QR này";
+          }
+        }, 2000);
       }
 
-      // Bước 3: Sau 2 giây tự redirect sang store đúng nền tảng
-      setTimeout(() => {
-        if (isIOS) {
-          document.getElementById("title").textContent =
-            "Đang chuyển đến App Store...";
-          document.getElementById("msg").textContent =
-            "Tải ứng dụng để tiếp tục đăng ký";
-          window.location.href = STORE_IOS;
-        } else if (isAndroid) {
-          document.getElementById("title").textContent =
-            "Đang chuyển đến Google Play...";
-          document.getElementById("msg").textContent =
-            "Tải ứng dụng để tiếp tục đăng ký";
-          window.location.href = STORE_ANDROID;
-        } else {
-          // Trường hợp mở trên máy tính / không xác định được
-          document.getElementById("title").textContent =
-            "Quét mã bằng điện thoại";
-          document.getElementById("msg").textContent =
-            "Vui lòng dùng điện thoại iOS hoặc Android để quét mã QR này";
-        }
-      }, 2000);
+      init();
     </script>
   </body>
 </html>

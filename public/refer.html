@@ -76,11 +76,9 @@
       <div class="spinner" id="spinner"></div>
       <h2 id="title">Đang chuẩn bị...</h2>
       <p id="msg">Vui lòng chờ trong giây lát</p>
-
-      <!-- Nút tải — ẩn ban đầu, hiện sau khi track xong -->
-      <a id="btn-store" class="btn" style="display: none" href="#">
-        Tải ứng dụng
-      </a>
+      <a id="btn-store" class="btn" style="display: none" href="#"
+        >Tải ứng dụng</a
+      >
     </div>
 
     <script>
@@ -94,13 +92,21 @@
       const isIOS = /iPhone|iPad|iPod/.test(ua);
       const isAndroid = /Android/.test(ua);
 
-      let savedToken = null; // lưu token để dùng khi ấn nút
+      let savedToken = null;
+
+      // Thử mở app bằng iframe ẩn — Safari không hiện popup lỗi
+      function tryOpenApp() {
+        if (!ref) return;
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        iframe.src = `tikluy://open-account?ref=${ref}`;
+        document.body.appendChild(iframe);
+        setTimeout(() => document.body.removeChild(iframe), 2000);
+      }
 
       async function init() {
-        // Bước 1: Thử mở app nếu đã cài (deep link)
-        if (ref) {
-          window.location.href = `tikluy://open-account?ref=${ref}`;
-        }
+        // Bước 1: Thử mở app qua iframe (không hiện popup Safari)
+        tryOpenApp();
 
         // Bước 2: Gọi track → nhận token
         try {
@@ -115,7 +121,7 @@
           console.log("Track error:", e);
         }
 
-        // Bước 3: Sau 2 giây hiện nút tải (nếu app chưa cài thì vẫn còn ở trang này)
+        // Bước 3: Sau 2 giây hiện nút tải
         setTimeout(() => {
           document.getElementById("spinner").style.display = "none";
 
@@ -132,11 +138,10 @@
             btn.className = `btn ${isIOS ? "btn-ios" : "btn-android"}`;
             btn.style.display = "block";
 
-            // Khi ấn nút → copy clipboard TRƯỚC rồi mới redirect store
             btn.addEventListener("click", async (e) => {
               e.preventDefault();
 
-              // Copy token vào clipboard khi user chủ động ấn
+              // Copy token vào clipboard khi user ấn nút
               if (savedToken) {
                 try {
                   await navigator.clipboard.writeText(
@@ -147,11 +152,9 @@
                 }
               }
 
-              // Redirect sang store đúng nền tảng
               window.location.href = isIOS ? STORE_IOS : STORE_ANDROID;
             });
           } else {
-            // PC / không xác định
             document.getElementById("title").textContent =
               "Quét mã bằng điện thoại";
             document.getElementById("msg").textContent =

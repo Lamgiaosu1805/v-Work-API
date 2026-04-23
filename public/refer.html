@@ -50,19 +50,43 @@
           transform: rotate(360deg);
         }
       }
+      .btn {
+        display: inline-block;
+        width: 100%;
+        padding: 0.85rem;
+        border-radius: 10px;
+        border: none;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        color: white;
+        margin-top: 0.5rem;
+      }
+      .btn-ios {
+        background: #007aff;
+      }
+      .btn-android {
+        background: #34a853;
+      }
     </style>
   </head>
   <body>
     <div class="card">
       <div class="spinner" id="spinner"></div>
-      <h2 id="title">Đang mở ứng dụng...</h2>
+      <h2 id="title">Đang chuẩn bị...</h2>
       <p id="msg">Vui lòng chờ trong giây lát</p>
+
+      <!-- Nút tải — ẩn ban đầu, hiện sau khi track xong -->
+      <a id="btn-store" class="btn" style="display: none" href="#">
+        Tải ứng dụng
+      </a>
     </div>
 
     <script>
-      const STORE_IOS = "https://apps.apple.com/us/app/tikluy/id6504506939"; // thay link thật
+      const STORE_IOS = "https://apps.apple.com/us/app/tikluy/id6504506939";
       const STORE_ANDROID =
-        "https://play.google.com/store/apps/details?id=com.tikluy"; // thay link thật
+        "https://play.google.com/store/apps/details?id=com.tikluy";
 
       const params = new URLSearchParams(window.location.search);
       const ref = params.get("ref");
@@ -70,42 +94,64 @@
       const isIOS = /iPhone|iPad|iPod/.test(ua);
       const isAndroid = /Android/.test(ua);
 
+      let savedToken = null; // lưu token để dùng khi ấn nút
+
       async function init() {
+        // Bước 1: Thử mở app nếu đã cài (deep link)
+        if (ref) {
+          window.location.href = `tikluy://open-account?ref=${ref}`;
+        }
+
+        // Bước 2: Gọi track → nhận token
         try {
-          // Bước 1: Gọi track → nhận token 1 lần duy nhất cho lần quét này
           const res = await fetch("/referral/track", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ref }),
           });
           const data = await res.json();
-          const token = data.token;
-
-          // Bước 2: Ghi token vào clipboard
-          if (token) {
-            try {
-              await navigator.clipboard.writeText(`tikluy_ref:${token}`);
-            } catch (e) {
-              console.log("Clipboard write failed:", e);
-            }
-          }
+          savedToken = data.token ?? null;
         } catch (e) {
           console.log("Track error:", e);
         }
 
-        // Bước 3: Thử mở app nếu đã cài (deep link)
-        if (ref) {
-          window.location.href = `tikluy://open-account?ref=${ref}`;
-        }
-
-        // Bước 4: Sau 2 giây tự redirect sang store đúng nền tảng
+        // Bước 3: Sau 2 giây hiện nút tải (nếu app chưa cài thì vẫn còn ở trang này)
         setTimeout(() => {
-          if (isIOS) {
-            window.location.href = STORE_IOS;
-          } else if (isAndroid) {
-            window.location.href = STORE_ANDROID;
+          document.getElementById("spinner").style.display = "none";
+
+          if (isIOS || isAndroid) {
+            document.getElementById("title").textContent =
+              "Tải ứng dụng để tiếp tục";
+            document.getElementById("msg").textContent =
+              "Nhấn nút bên dưới để tải TikLuy về điện thoại của bạn";
+
+            const btn = document.getElementById("btn-store");
+            btn.textContent = isIOS
+              ? "Tải trên App Store"
+              : "Tải trên Google Play";
+            btn.className = `btn ${isIOS ? "btn-ios" : "btn-android"}`;
+            btn.style.display = "block";
+
+            // Khi ấn nút → copy clipboard TRƯỚC rồi mới redirect store
+            btn.addEventListener("click", async (e) => {
+              e.preventDefault();
+
+              // Copy token vào clipboard khi user chủ động ấn
+              if (savedToken) {
+                try {
+                  await navigator.clipboard.writeText(
+                    `tikluy_ref:${savedToken}`,
+                  );
+                } catch (err) {
+                  console.log("Clipboard write failed:", err);
+                }
+              }
+
+              // Redirect sang store đúng nền tảng
+              window.location.href = isIOS ? STORE_IOS : STORE_ANDROID;
+            });
           } else {
-            document.getElementById("spinner").style.display = "none";
+            // PC / không xác định
             document.getElementById("title").textContent =
               "Quét mã bằng điện thoại";
             document.getElementById("msg").textContent =

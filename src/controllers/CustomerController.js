@@ -1,6 +1,5 @@
 const CustomerModel = require("../models/CustomerModel");
 const CustomerInteractionModel = require("../models/CustomerInteractionModel");
-const SaleKpiModel = require("../models/SaleKpiModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AppModel = require("../models/AppModel");
 
@@ -45,7 +44,6 @@ const CustomerController = {
             }
 
             // Parse ref_code format "0901234567-NV001"
-            // Tìm sale khớp cả phone_number lẫn ma_nv
             let referred_by = null;
             let matched_ref_code = null;
             if (ref_code) {
@@ -107,6 +105,7 @@ const CustomerController = {
                     } : {},
                 });
 
+                // Ghi interaction log nếu có sale giới thiệu
                 if (referred_by) {
                     await CustomerInteractionModel.create({
                         app_id: app._id,
@@ -116,18 +115,6 @@ const CustomerController = {
                         content: `Khách hàng đăng ký qua mã giới thiệu ${matched_ref_code}`,
                         result: null,
                     });
-
-                    const now = new Date();
-                    await SaleKpiModel.findOneAndUpdate(
-                        {
-                            app_id: app._id,
-                            sale_id: referred_by,
-                            "period.month": now.getMonth() + 1,
-                            "period.year": now.getFullYear(),
-                        },
-                        { $inc: { "actuals.new_customers": 1 } },
-                        { upsert: true, new: true }
-                    );
                 }
 
                 return res.status(201).json({
@@ -137,14 +124,11 @@ const CustomerController = {
             }
 
             // ============================================
-            // TRƯỜNG HỢP 2: Đã có → update (sau ekyc)
+            // TRƯỜNG HỢP 2: Đã có → update
             // ============================================
-            const isFirstTimeKyc =
-                existingCustomer.status === "registered" ||
-                existingCustomer.status === "kyc_pending";
-
             const updateData = {};
 
+            // Update thông tin ekyc nếu có
             if (hasKycInfo) {
                 updateData.status = "kyc_verified";
                 updateData.identity = {
@@ -167,7 +151,7 @@ const CustomerController = {
                 };
             }
 
-            // Nếu lần đầu có ref_code hợp lệ mà trước đó chưa có → ghi nhận sale
+            // Gán sale nếu chưa có referred_by
             if (referred_by && !existingCustomer.referred_by) {
                 updateData.referred_by = referred_by;
                 updateData.ref_code = matched_ref_code;
@@ -179,14 +163,14 @@ const CustomerController = {
                 { new: true }
             );
 
-            // Sale để ghi interaction + KPI
-            // Ưu tiên referred_by mới (nếu vừa được gán), không thì dùng cái cũ
+            // Ghi interaction log
             const saleId = referred_by && !existingCustomer.referred_by
                 ? referred_by
                 : existingCustomer.referred_by;
 
             if (saleId) {
                 if (hasKycInfo) {
+                    // Log ekyc thành công
                     await CustomerInteractionModel.create({
                         app_id: app._id,
                         customer_id: existingCustomer._id,
@@ -199,24 +183,10 @@ const CustomerController = {
                             new_status: "kyc_verified",
                         },
                     });
-
-                    if (isFirstTimeKyc) {
-                        const now = new Date();
-                        await SaleKpiModel.findOneAndUpdate(
-                            {
-                                app_id: app._id,
-                                sale_id: saleId,
-                                "period.month": now.getMonth() + 1,
-                                "period.year": now.getFullYear(),
-                            },
-                            { $inc: { "actuals.kyc_verified": 1 } },
-                            { upsert: true, new: true }
-                        );
-                    }
                 }
 
-                // Nếu vừa được gán sale mới (chưa có trước đó) → log + cộng KPI new_customers
                 if (referred_by && !existingCustomer.referred_by) {
+                    // Log gán sale mới
                     await CustomerInteractionModel.create({
                         app_id: app._id,
                         customer_id: existingCustomer._id,
@@ -225,18 +195,6 @@ const CustomerController = {
                         content: `Khách hàng được gán cho nhân viên qua mã ${matched_ref_code}`,
                         result: null,
                     });
-
-                    const now = new Date();
-                    await SaleKpiModel.findOneAndUpdate(
-                        {
-                            app_id: app._id,
-                            sale_id: referred_by,
-                            "period.month": now.getMonth() + 1,
-                            "period.year": now.getFullYear(),
-                        },
-                        { $inc: { "actuals.new_customers": 1 } },
-                        { upsert: true, new: true }
-                    );
                 }
             }
 

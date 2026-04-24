@@ -1,0 +1,9 @@
+const express = require("express");
+const router = express.Router();
+const AgentController = require("../controllers/AgentController");
+const verifyInternalRequest = require("../middlewares/verifyInternalRequest");
+
+router.post("/upsert", verifyInternalRequest, AgentController.upsert);
+router.get("/:agent_code/qr", verifyInternalRequest, AgentController.generateQR);
+
+module.exports = router;

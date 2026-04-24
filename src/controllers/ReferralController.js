@@ -9,14 +9,15 @@ function buildFingerprintKey(fp) {
 const ReferralController = {
     track: async (req, res) => {
         try {
-            const { ref } = req.body;
+            const { ref, type = "sale" } = req.body;  // thêm type
 
             if (!ref) {
                 return res.status(400).json({ message: "Thiếu ref" });
             }
 
             const token = crypto.randomBytes(16).toString("hex");
-            await redis.setex(`referral:${token}`, 600, ref); // 10 phút
+            // Lưu cả ref lẫn type
+            await redis.setex(`referral:${token}`, 300, JSON.stringify({ ref, type }));
 
             return res.status(200).json({ token });
         } catch (error) {
@@ -33,13 +34,15 @@ const ReferralController = {
                 return res.status(400).json({ message: "Thiếu token" });
             }
 
-            const ref = await redis.get(`referral:${token}`);
+            const raw = await redis.get(`referral:${token}`);
 
-            if (ref) {
-                await redis.del(`referral:${token}`); // dùng 1 lần rồi xóa
+            if (raw) {
+                await redis.del(`referral:${token}`);
+                const { ref, type } = JSON.parse(raw);
+                return res.status(200).json({ ref, type });
             }
 
-            return res.status(200).json({ ref: ref ?? null });
+            return res.status(200).json({ ref: null, type: null });
         } catch (error) {
             console.error("Error in resolve:", error);
             return res.status(500).json({ message: "Internal server error", error: error.message });

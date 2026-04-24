@@ -88,6 +88,7 @@
 
       const params = new URLSearchParams(window.location.search);
       const ref = params.get("ref");
+      const type = params.get("type"); // "sale" | "agent" | null
       const ua = navigator.userAgent;
       const isIOS = /iPhone|iPad|iPod/.test(ua);
       const isAndroid = /Android/.test(ua);
@@ -99,21 +100,21 @@
         if (!ref) return;
         const iframe = document.createElement("iframe");
         iframe.style.display = "none";
-        iframe.src = `tikluy://open-account?ref=${ref}`;
+        iframe.src = `tikluy://open-account?ref=${ref}&type=${type ?? ""}`;
         document.body.appendChild(iframe);
         setTimeout(() => document.body.removeChild(iframe), 2000);
       }
 
       async function init() {
-        // Bước 1: Thử mở app qua iframe (không hiện popup Safari)
+        // Bước 1: Thử mở app qua iframe
         tryOpenApp();
 
-        // Bước 2: Gọi track → nhận token
+        // Bước 2: Gọi track → nhận token, truyền thêm type
         try {
           const res = await fetch("/referral/track", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ref }),
+            body: JSON.stringify({ ref, type }),
           });
           const data = await res.json();
           savedToken = data.token ?? null;

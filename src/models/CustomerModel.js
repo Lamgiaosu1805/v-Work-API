@@ -4,15 +4,17 @@ const BaseSchema = require("./BaseSchema");
 const CustomerModel = new mongoose.Schema(
     {
         // === ĐỊNH DANH APP ===
-        app_id: { type: mongoose.Schema.Types.ObjectId, ref: "app", required: true }, // phân biệt từng app
+        app_id: { type: mongoose.Schema.Types.ObjectId, ref: "app", required: true },
 
         // === ĐỊNH DANH CƠ BẢN (có ngay khi đăng ký) ===
         phone_number: { type: String, required: true },
         ref_code: { type: String, default: null },
         referred_by: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
-        source: {
-            type: { type: String, enum: ["qr_scan", "direct", "manual"], default: "direct" },
-            scanned_at: { type: Date, default: null },
+        agent_id: { type: mongoose.Schema.Types.ObjectId, ref: "agent", default: null },
+        source_type: {
+            type: String,
+            enum: ["sale", "agent", "marketing"],
+            default: "marketing",
         },
         status: {
             type: String,
@@ -61,7 +63,8 @@ const CustomerModel = new mongoose.Schema(
         ],
 
         // === LIÊN KẾT HỆ THỐNG ĐẦU TƯ ===
-        external_id: { type: String, default: null },  // ID bên hệ thống đầu tư
+        external_id: { type: String, default: null },
+
         ...BaseSchema.obj,
     },
     {
@@ -71,8 +74,6 @@ const CustomerModel = new mongoose.Schema(
     }
 );
 
-// unique theo tổ hợp app_id + phone_number
-// 1 sđt có thể đăng ký nhiều app nhưng không được trùng trong cùng 1 app
 CustomerModel.index({ app_id: 1, phone_number: 1 }, { unique: true });
 
 module.exports = mongoose.model("customer", CustomerModel);

@@ -304,9 +304,9 @@ const UserController = {
       const phone_number = userInfo.phone_number;
 
       const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-      const landingUrl = `${BASE_URL}/refer?ref=${phone_number + "-" + ma_nv}`;
+      // Thêm type=sale vào URL
+      const landingUrl = `${BASE_URL}/refer?ref=${phone_number + "-" + ma_nv}&type=sale`;
 
-      // Sinh QR trỏ tới landing page
       const qrImageBase64 = await QRCode.toDataURL(landingUrl, {
         errorCorrectionLevel: "H",
         margin: 2,
@@ -321,7 +321,7 @@ const UserController = {
         sale_name: userInfo.full_name,
         ma_nv,
         landing_url: landingUrl,
-        qr_image: qrImageBase64, // base64 PNG — frontend dùng <img src="..."> hiển thị trực tiếp
+        qr_image: qrImageBase64,
       });
     } catch (error) {
       console.error("Error in generateMyQR:", error);

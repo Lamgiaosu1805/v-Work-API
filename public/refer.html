@@ -63,11 +63,17 @@
         color: white;
         margin-top: 0.5rem;
       }
-      .btn-ios {
+      .btn-primary {
         background: #007aff;
       }
       .btn-android {
         background: #34a853;
+      }
+      .btn-secondary {
+        background: white;
+        color: #007aff;
+        border: 1.5px solid #007aff;
+        margin-top: 0.5rem;
       }
     </style>
   </head>
@@ -76,8 +82,22 @@
       <div class="spinner" id="spinner"></div>
       <h2 id="title">Đang chuẩn bị...</h2>
       <p id="msg">Vui lòng chờ trong giây lát</p>
-      <a id="btn-store" class="btn" style="display: none" href="#"
+
+      <!-- Nút mở app (nếu đã cài) -->
+      <a id="btn-open" class="btn btn-primary" style="display: none" href="#"
+        >Mở ứng dụng</a
+      >
+      <!-- Nút tải app (nếu chưa cài) -->
+      <a id="btn-store" class="btn btn-primary" style="display: none" href="#"
         >Tải ứng dụng</a
+      >
+      <!-- Nút tải dự phòng sau khi đã thử mở -->
+      <a
+        id="btn-download"
+        class="btn btn-secondary"
+        style="display: none"
+        href="#"
+        >Tải ứng dụng về máy</a
       >
     </div>
 
@@ -85,31 +105,100 @@
       const STORE_IOS = "https://apps.apple.com/us/app/tikluy/id6504506939";
       const STORE_ANDROID =
         "https://play.google.com/store/apps/details?id=com.tikluy";
+      const DEEP_LINK = "tikluy://open-account";
 
       const params = new URLSearchParams(window.location.search);
       const ref = params.get("ref");
-      const type = params.get("type"); // "sale" | "agent" | null
+      const type = params.get("type");
       const ua = navigator.userAgent;
       const isIOS = /iPhone|iPad|iPod/.test(ua);
       const isAndroid = /Android/.test(ua);
 
       let savedToken = null;
+      let appOpened = false; // flag để biết app đã mở chưa
 
-      // Thử mở app bằng iframe ẩn — Safari không hiện popup lỗi
+      const storeUrl = isIOS ? STORE_IOS : STORE_ANDROID;
+      const deepLink = ref
+        ? `${DEEP_LINK}?ref=${ref}&type=${type ?? ""}`
+        : DEEP_LINK;
+
+      // Ghi token vào clipboard
+      async function copyToken() {
+        if (!savedToken) return;
+        try {
+          await navigator.clipboard.writeText(`tikluy_ref:${savedToken}`);
+        } catch (e) {
+          console.log("Clipboard write failed:", e);
+        }
+      }
+
+      // Thử mở app — theo dõi xem có mở được không
       function tryOpenApp() {
         if (!ref) return;
-        const iframe = document.createElement("iframe");
-        iframe.style.display = "none";
-        iframe.src = `tikluy://open-account?ref=${ref}&type=${type ?? ""}`;
-        document.body.appendChild(iframe);
-        setTimeout(() => document.body.removeChild(iframe), 2000);
+
+        // Lắng nghe sự kiện blur — nếu trang bị blur = app đã mở
+        const onBlur = () => {
+          appOpened = true;
+          window.removeEventListener("blur", onBlur);
+        };
+        window.addEventListener("blur", onBlur);
+
+        // Redirect sang deep link
+        window.location.href = deepLink;
+
+        // Sau 2.5 giây nếu vẫn còn ở trang web = chưa cài app
+        setTimeout(() => {
+          window.removeEventListener("blur", onBlur);
+          if (!appOpened) {
+            showDownloadUI();
+          }
+        }, 2500);
+      }
+
+      // Hiện UI khi chưa cài app
+      async function showDownloadUI() {
+        document.getElementById("spinner").style.display = "none";
+        document.getElementById("title").textContent =
+          "Tải ứng dụng để tiếp tục";
+        document.getElementById("msg").textContent =
+          "Nhấn nút bên dưới để tải TikLuy về điện thoại của bạn";
+
+        const btnStore = document.getElementById("btn-store");
+        btnStore.textContent = isIOS
+          ? "Tải trên App Store"
+          : "Tải trên Google Play";
+        btnStore.className = `btn ${isIOS ? "btn-primary" : "btn-android"}`;
+        btnStore.style.display = "block";
+
+        btnStore.addEventListener("click", async (e) => {
+          e.preventDefault();
+          await copyToken(); // copy token trước khi sang store
+          window.location.href = storeUrl;
+        });
+      }
+
+      // Hiện UI khi đã cài app
+      function showOpenUI() {
+        document.getElementById("spinner").style.display = "none";
+        document.getElementById("title").textContent = "Mở ứng dụng TikLuy";
+        document.getElementById("msg").textContent =
+          "Nhấn nút bên dưới để mở ứng dụng";
+
+        const btnOpen = document.getElementById("btn-open");
+        btnOpen.style.display = "block";
+        btnOpen.addEventListener("click", (e) => {
+          e.preventDefault();
+          window.location.href = deepLink;
+        });
+
+        // Hiện thêm nút tải dự phòng — phòng trường hợp app bị gỡ
+        const btnDownload = document.getElementById("btn-download");
+        btnDownload.style.display = "block";
+        btnDownload.href = storeUrl;
       }
 
       async function init() {
-        // Bước 1: Thử mở app qua iframe
-        tryOpenApp();
-
-        // Bước 2: Gọi track → nhận token, truyền thêm type
+        // Bước 1: Gọi track → nhận token
         try {
           const res = await fetch("/referral/track", {
             method: "POST",
@@ -122,46 +211,29 @@
           console.log("Track error:", e);
         }
 
-        // Bước 3: Sau 2 giây hiện nút tải
-        setTimeout(() => {
+        // Bước 2: Xử lý theo nền tảng
+        if (!isIOS && !isAndroid) {
+          // PC → hiện thông báo dùng điện thoại
           document.getElementById("spinner").style.display = "none";
+          document.getElementById("title").textContent =
+            "Quét mã bằng điện thoại";
+          document.getElementById("msg").textContent =
+            "Vui lòng dùng điện thoại để quét mã QR này";
+          return;
+        }
 
-          if (isIOS || isAndroid) {
-            document.getElementById("title").textContent =
-              "Tải ứng dụng để tiếp tục";
-            document.getElementById("msg").textContent =
-              "Nhấn nút bên dưới để tải TikLuy về điện thoại của bạn";
+        if (!ref) {
+          // Không có ref → chỉ hiện nút tải
+          showDownloadUI();
+          return;
+        }
 
-            const btn = document.getElementById("btn-store");
-            btn.textContent = isIOS
-              ? "Tải trên App Store"
-              : "Tải trên Google Play";
-            btn.className = `btn ${isIOS ? "btn-ios" : "btn-android"}`;
-            btn.style.display = "block";
+        // Có ref → thử mở app
+        // Hiện UI mở app trước để user thấy đang xử lý
+        showOpenUI();
 
-            btn.addEventListener("click", async (e) => {
-              e.preventDefault();
-
-              // Copy token vào clipboard khi user ấn nút
-              if (savedToken) {
-                try {
-                  await navigator.clipboard.writeText(
-                    `tikluy_ref:${savedToken}`,
-                  );
-                } catch (err) {
-                  console.log("Clipboard write failed:", err);
-                }
-              }
-
-              window.location.href = isIOS ? STORE_IOS : STORE_ANDROID;
-            });
-          } else {
-            document.getElementById("title").textContent =
-              "Quét mã bằng điện thoại";
-            document.getElementById("msg").textContent =
-              "Vui lòng dùng điện thoại để quét mã QR này";
-          }
-        }, 2000);
+        // Thử mở app — nếu không mở được sau 2.5s thì chuyển sang UI tải
+        tryOpenApp();
       }
 
       init();

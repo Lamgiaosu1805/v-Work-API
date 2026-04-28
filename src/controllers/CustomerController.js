@@ -295,6 +295,82 @@ const CustomerController = {
             });
         }
     },
+    getMyCustomers: async (req, res) => {
+        try {
+            const accountId = req.account._id;
+
+            // Lấy thông tin sale từ account
+            const sale = await UserInfoModel.findOne({ id_account: accountId });
+            if (!sale) {
+                return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+            }
+
+            // Query params
+            const {
+                page = 1,
+                limit = 20,
+                status,         // lọc theo trạng thái
+                search,         // tìm theo tên hoặc sđt
+                app_code,       // lọc theo app
+                from_date,      // lọc theo ngày đăng ký
+                to_date,
+            } = req.query;
+
+            const skip = (Number(page) - 1) * Number(limit);
+
+            // Build filter
+            const filter = { referred_by: sale._id };
+
+            if (status) {
+                filter.status = status;
+            }
+
+            if (app_code) {
+                const app = await AppModel.findOne({ code: app_code, is_active: true });
+                if (app) filter.app_id = app._id;
+            }
+
+            if (from_date || to_date) {
+                filter.createdAt = {};
+                if (from_date) filter.createdAt.$gte = new Date(from_date);
+                if (to_date) filter.createdAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
+            }
+
+            if (search) {
+                filter.$or = [
+                    { phone_number: { $regex: search, $options: "i" } },
+                    { "identity.full_name": { $regex: search, $options: "i" } },
+                ];
+            }
+
+            const [customers, total] = await Promise.all([
+                CustomerModel.find(filter)
+                    .populate("app_id", "name code")
+                    .select("-identity.id_front_url -identity.id_back_url -identity.selfie_url") // ẩn ảnh CCCD
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(Number(limit)),
+                CustomerModel.countDocuments(filter),
+            ]);
+
+            return res.status(200).json({
+                message: "Lấy danh sách khách hàng thành công",
+                data: customers,
+                pagination: {
+                    total,
+                    page: Number(page),
+                    limit: Number(limit),
+                    total_pages: Math.ceil(total / Number(limit)),
+                },
+            });
+        } catch (error) {
+            console.error("Error in getMyCustomers:", error);
+            return res.status(500).json({
+                message: "Internal server error",
+                error: error.message,
+            });
+        }
+    },
 };
 
 module.exports = CustomerController;

@@ -6,6 +6,7 @@ const router = express.Router()
 
 
 //GET
+router.get("/my-customers", authenticate, CustomerController.getMyCustomers);
 
 
 //POST

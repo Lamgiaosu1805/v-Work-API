@@ -5,7 +5,7 @@ const CustomerInteractionModel = new mongoose.Schema(
     {
         app_id: { type: mongoose.Schema.Types.ObjectId, ref: "app", required: true },
         customer_id: { type: mongoose.Schema.Types.ObjectId, ref: "customer", required: true },
-        sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", required: true },
+        sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
         agent_id: { type: mongoose.Schema.Types.ObjectId, ref: "agent", default: null },
         type: {
             type: String,

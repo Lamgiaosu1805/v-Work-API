@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const CustomerModel = require("../models/CustomerModel");
 const CustomerInteractionModel = require("../models/CustomerInteractionModel");
 const UserInfoModel = require("../models/UserInfoModel");
@@ -6,6 +7,9 @@ const AgentModel = require("../models/AgentModel");
 
 const CustomerController = {
     upsert: async (req, res) => {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
         try {
             const {
                 app_code,
@@ -32,13 +36,17 @@ const CustomerController = {
             } = req.body;
 
             if (!app_code || !phone_number || !external_id) {
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(400).json({
                     message: "Thiếu app_code, phone_number hoặc external_id",
                 });
             }
 
-            const app = await AppModel.findOne({ code: app_code, is_active: true });
+            const app = await AppModel.findOne({ code: app_code, is_active: true }).session(session);
             if (!app) {
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(404).json({ message: "App không tồn tại hoặc đã bị khóa" });
             }
 
@@ -60,7 +68,7 @@ const CustomerController = {
                         app_id: app._id,
                         agent_code: ref_code,
                         is_active: true,
-                    });
+                    }).session(session);
                     if (agent) {
                         agent_id = agent._id;
                         matched_ref_code = ref_code;
@@ -74,7 +82,7 @@ const CustomerController = {
                         const sale = await UserInfoModel.findOne({
                             phone_number: salePhone,
                             ma_nv: saleMaNv,
-                        });
+                        }).session(session);
                         if (sale) {
                             referred_by = sale._id;
                             matched_ref_code = ref_code;
@@ -90,7 +98,7 @@ const CustomerController = {
                         const sale = await UserInfoModel.findOne({
                             phone_number: salePhone,
                             ma_nv: saleMaNv,
-                        });
+                        }).session(session);
                         if (sale) {
                             referred_by = sale._id;
                             matched_ref_code = ref_code;
@@ -103,7 +111,7 @@ const CustomerController = {
                             app_id: app._id,
                             agent_code: ref_code,
                             is_active: true,
-                        });
+                        }).session(session);
                         if (agent) {
                             agent_id = agent._id;
                             matched_ref_code = ref_code;
@@ -125,13 +133,13 @@ const CustomerController = {
             const existingCustomer = await CustomerModel.findOne({
                 app_id: app._id,
                 phone_number,
-            });
+            }).session(session);
 
             // ============================================
             // TRƯỜNG HỢP 1: Chưa có → tạo mới
             // ============================================
             if (!existingCustomer) {
-                const customer = await CustomerModel.create({
+                const [customer] = await CustomerModel.create([{
                     app_id: app._id,
                     phone_number,
                     external_id,
@@ -158,11 +166,11 @@ const CustomerController = {
                         verified_at: new Date(),
                         verified_by: "auto",
                     } : {},
-                });
+                }], { session });
 
                 // Ghi interaction log nếu có sale hoặc agent
                 if (referred_by || agent_id) {
-                    await CustomerInteractionModel.create({
+                    await CustomerInteractionModel.create([{
                         app_id: app._id,
                         customer_id: customer._id,
                         sale_id: referred_by ?? null,
@@ -172,8 +180,11 @@ const CustomerController = {
                             ? `Khách hàng đăng ký qua mã đại lý ${matched_ref_code}`
                             : `Khách hàng đăng ký qua mã giới thiệu ${matched_ref_code}`,
                         result: null,
-                    });
+                    }], { session });
                 }
+
+                await session.commitTransaction();
+                session.endSession();
 
                 return res.status(201).json({
                     message: "Tạo khách hàng thành công",
@@ -226,14 +237,14 @@ const CustomerController = {
             const updatedCustomer = await CustomerModel.findByIdAndUpdate(
                 existingCustomer._id,
                 { $set: updateData },
-                { new: true }
+                { new: true, session }
             );
 
             // Ghi interaction log
             const careId = referred_by ?? agent_id ?? null;
             if (careId) {
                 if (hasKycInfo) {
-                    await CustomerInteractionModel.create({
+                    await CustomerInteractionModel.create([{
                         app_id: app._id,
                         customer_id: existingCustomer._id,
                         sale_id: source_type === "sale" ? careId : null,
@@ -245,7 +256,7 @@ const CustomerController = {
                             old_status: existingCustomer.status,
                             new_status: "kyc_verified",
                         },
-                    });
+                    }], { session });
                 }
 
                 const isNewAssignment =
@@ -253,7 +264,7 @@ const CustomerController = {
                     (agent_id && !existingCustomer.agent_id);
 
                 if (isNewAssignment) {
-                    await CustomerInteractionModel.create({
+                    await CustomerInteractionModel.create([{
                         app_id: app._id,
                         customer_id: existingCustomer._id,
                         sale_id: source_type === "sale" ? careId : null,
@@ -263,15 +274,20 @@ const CustomerController = {
                             ? `Khách hàng được gán cho đại lý qua mã ${matched_ref_code}`
                             : `Khách hàng được gán cho nhân viên qua mã ${matched_ref_code}`,
                         result: null,
-                    });
+                    }], { session });
                 }
             }
+
+            await session.commitTransaction();
+            session.endSession();
 
             return res.status(200).json({
                 message: "Cập nhật khách hàng thành công",
                 customer: updatedCustomer,
             });
         } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
             console.error("Error in upsert:", error);
             return res.status(500).json({
                 message: "Internal server error",

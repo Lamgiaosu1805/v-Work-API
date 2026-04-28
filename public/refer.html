@@ -63,17 +63,11 @@
         color: white;
         margin-top: 0.5rem;
       }
-      .btn-primary {
+      .btn-ios {
         background: #007aff;
       }
       .btn-android {
         background: #34a853;
-      }
-      .btn-secondary {
-        background: white;
-        color: #007aff;
-        border: 1.5px solid #007aff;
-        margin-top: 0.5rem;
       }
     </style>
   </head>
@@ -82,22 +76,8 @@
       <div class="spinner" id="spinner"></div>
       <h2 id="title">Đang chuẩn bị...</h2>
       <p id="msg">Vui lòng chờ trong giây lát</p>
-
-      <!-- Nút mở app (nếu đã cài) -->
-      <a id="btn-open" class="btn btn-primary" style="display: none" href="#"
-        >Mở ứng dụng</a
-      >
-      <!-- Nút tải app (nếu chưa cài) -->
-      <a id="btn-store" class="btn btn-primary" style="display: none" href="#"
+      <a id="btn-store" class="btn" style="display: none" href="#"
         >Tải ứng dụng</a
-      >
-      <!-- Nút tải dự phòng sau khi đã thử mở -->
-      <a
-        id="btn-download"
-        class="btn btn-secondary"
-        style="display: none"
-        href="#"
-        >Tải ứng dụng về máy</a
       >
     </div>
 
@@ -115,7 +95,6 @@
       const isAndroid = /Android/.test(ua);
 
       let savedToken = null;
-      let appOpened = false; // flag để biết app đã mở chưa
 
       const storeUrl = isIOS ? STORE_IOS : STORE_ANDROID;
       const deepLink = ref
@@ -132,69 +111,24 @@
         }
       }
 
-      // Thử mở app — theo dõi xem có mở được không
-      function tryOpenApp() {
-        if (!ref) return;
-
-        // Lắng nghe sự kiện blur — nếu trang bị blur = app đã mở
-        const onBlur = () => {
-          appOpened = true;
-          window.removeEventListener("blur", onBlur);
-        };
-        window.addEventListener("blur", onBlur);
-
-        // Redirect sang deep link
-        window.location.href = deepLink;
-
-        // Sau 2.5 giây nếu vẫn còn ở trang web = chưa cài app
-        setTimeout(() => {
-          window.removeEventListener("blur", onBlur);
-          if (!appOpened) {
-            showDownloadUI();
-          }
-        }, 2500);
-      }
-
-      // Hiện UI khi chưa cài app
-      async function showDownloadUI() {
+      // Hiện UI tải app
+      function showDownloadUI() {
         document.getElementById("spinner").style.display = "none";
         document.getElementById("title").textContent =
           "Tải ứng dụng để tiếp tục";
         document.getElementById("msg").textContent =
           "Nhấn nút bên dưới để tải TikLuy về điện thoại của bạn";
 
-        const btnStore = document.getElementById("btn-store");
-        btnStore.textContent = isIOS
-          ? "Tải trên App Store"
-          : "Tải trên Google Play";
-        btnStore.className = `btn ${isIOS ? "btn-primary" : "btn-android"}`;
-        btnStore.style.display = "block";
+        const btn = document.getElementById("btn-store");
+        btn.textContent = isIOS ? "Tải trên App Store" : "Tải trên Google Play";
+        btn.className = `btn ${isIOS ? "btn-ios" : "btn-android"}`;
+        btn.style.display = "block";
 
-        btnStore.addEventListener("click", async (e) => {
+        btn.addEventListener("click", async (e) => {
           e.preventDefault();
           await copyToken(); // copy token trước khi sang store
           window.location.href = storeUrl;
         });
-      }
-
-      // Hiện UI khi đã cài app
-      function showOpenUI() {
-        document.getElementById("spinner").style.display = "none";
-        document.getElementById("title").textContent = "Mở ứng dụng TikLuy";
-        document.getElementById("msg").textContent =
-          "Nhấn nút bên dưới để mở ứng dụng";
-
-        const btnOpen = document.getElementById("btn-open");
-        btnOpen.style.display = "block";
-        btnOpen.addEventListener("click", (e) => {
-          e.preventDefault();
-          window.location.href = deepLink;
-        });
-
-        // Hiện thêm nút tải dự phòng — phòng trường hợp app bị gỡ
-        const btnDownload = document.getElementById("btn-download");
-        btnDownload.style.display = "block";
-        btnDownload.href = storeUrl;
       }
 
       async function init() {
@@ -222,18 +156,13 @@
           return;
         }
 
-        if (!ref) {
-          // Không có ref → chỉ hiện nút tải
+        // Bước 3: Thử mở app bằng deep link
+        window.location.href = deepLink;
+
+        // Bước 4: Sau 2.5 giây nếu vẫn còn ở trang web = chưa cài app → hiện nút tải
+        setTimeout(() => {
           showDownloadUI();
-          return;
-        }
-
-        // Có ref → thử mở app
-        // Hiện UI mở app trước để user thấy đang xử lý
-        showOpenUI();
-
-        // Thử mở app — nếu không mở được sau 2.5s thì chuyển sang UI tải
-        tryOpenApp();
+        }, 2500);
       }
 
       init();

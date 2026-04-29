@@ -371,6 +371,98 @@ const CustomerController = {
             });
         }
     },
+    getMyCustomersAsAgent: async (req, res) => {
+        try {
+            const {
+                page = 1,
+                limit = 20,
+                status,
+                search,
+                app_code,
+                from_date,
+                to_date,
+                agent_code, // mã đại lý — bên hệ thống đầu tư truyền lên
+            } = req.query;
+
+            if (!agent_code || !app_code) {
+                return res.status(400).json({ message: "Thiếu agent_code hoặc app_code" });
+            }
+
+            // Tìm app
+            const app = await AppModel.findOne({ code: app_code, is_active: true });
+            if (!app) {
+                return res.status(404).json({ message: "App không tồn tại hoặc đã bị khóa" });
+            }
+
+            // Tìm agent theo agent_code + app_id
+            const agent = await AgentModel.findOne({
+                app_id: app._id,
+                agent_code,
+                is_active: true,
+            });
+            if (!agent) {
+                return res.status(404).json({ message: "Đại lý không tồn tại hoặc đã bị khóa" });
+            }
+
+            const skip = (Number(page) - 1) * Number(limit);
+
+            // Build filter theo agent_id
+            const filter = {
+                app_id: app._id,
+                agent_id: agent._id,
+            };
+
+            if (status) {
+                filter.status = status;
+            }
+
+            if (from_date || to_date) {
+                filter.createdAt = {};
+                if (from_date) filter.createdAt.$gte = new Date(from_date);
+                if (to_date) filter.createdAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
+            }
+
+            if (search) {
+                filter.$or = [
+                    { phone_number: { $regex: search, $options: "i" } },
+                    { "identity.full_name": { $regex: search, $options: "i" } },
+                ];
+            }
+
+            const [customers, total] = await Promise.all([
+                CustomerModel.find(filter)
+                    .populate("app_id", "name code")
+                    .select("-identity.id_front_url -identity.id_back_url -identity.selfie_url")
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(Number(limit)),
+                CustomerModel.countDocuments(filter),
+            ]);
+
+            return res.status(200).json({
+                message: "Lấy danh sách khách hàng của đại lý thành công",
+                agent: {
+                    agent_code: agent.agent_code,
+                    full_name: agent.full_name,
+                    phone_number: agent.phone_number,
+                },
+                data: customers,
+                pagination: {
+                    total,
+                    page: Number(page),
+                    limit: Number(limit),
+                    total_pages: Math.ceil(total / Number(limit)),
+                },
+            });
+        } catch (error) {
+            console.error("Error in getMyCustomersAsAgent:", error);
+            return res.status(500).json({
+                message: "Internal server error",
+                error: error.message,
+            });
+        }
+    },
+
 };
 
 module.exports = CustomerController;

@@ -550,7 +550,150 @@ const CustomerController = {
             });
         }
     },
+    // POST /customers/apply-referral
+    applyReferral: async (req, res) => {
+        const session = await mongoose.startSession();
+        session.startTransaction();
 
+        try {
+            const {
+                app_code,
+                external_id,
+                ref_code,
+            } = req.body;
+
+            if (!app_code || !external_id || !ref_code) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: "Thiếu app_code, external_id hoặc ref_code" });
+            }
+
+            // Tìm app
+            const app = await AppModel.findOne({ code: app_code, is_active: true }).session(session);
+            if (!app) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "App không tồn tại hoặc đã bị khóa" });
+            }
+
+            // Tìm customer theo external_id + app_id
+            const customer = await CustomerModel.findOne({
+                app_id: app._id,
+                external_id,
+            }).session(session);
+
+            if (!customer) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            }
+
+            // Kiểm tra đã có người chăm sóc chưa
+            if (customer.referred_by || customer.agent_id) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(409).json({
+                    message: "Khách hàng đã có người chăm sóc, không thể thay đổi",
+                    care_by: {
+                        type: customer.source_type,
+                        ref_code: customer.ref_code,
+                    },
+                });
+            }
+
+            // ================================================
+            // DETECT mã giới thiệu theo thứ tự ưu tiên
+            // ================================================
+            let referred_by = null;
+            let agent_id = null;
+            let matched_ref_code = null;
+
+            // Ưu tiên 1: Format "sđt-maNV" → Sale nội bộ CRM
+            const parts = ref_code.split("-");
+            if (parts.length === 2) {
+                const [salePhone, saleMaNv] = parts;
+                const sale = await UserInfoModel.findOne({
+                    phone_number: salePhone,
+                    ma_nv: saleMaNv,
+                }).session(session);
+                if (sale) {
+                    referred_by = sale._id;
+                    matched_ref_code = ref_code;
+                }
+            }
+
+            // Ưu tiên 2: Tìm agent_code
+            if (!referred_by) {
+                const agent = await AgentModel.findOne({
+                    app_id: app._id,
+                    agent_code: ref_code,
+                    is_active: true,
+                }).session(session);
+                if (agent) {
+                    agent_id = agent._id;
+                    matched_ref_code = ref_code;
+                }
+            }
+
+            // Không tìm thấy ai khớp
+            if (!referred_by && !agent_id) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({
+                    message: "Mã giới thiệu không hợp lệ hoặc không tìm thấy người giới thiệu",
+                });
+            }
+
+            const source_type = referred_by ? "sale" : "agent";
+
+            // Cập nhật customer
+            await CustomerModel.findByIdAndUpdate(
+                customer._id,
+                {
+                    $set: {
+                        referred_by: referred_by ?? null,
+                        agent_id: agent_id ?? null,
+                        ref_code: matched_ref_code,
+                        source_type,
+                    },
+                },
+                { session }
+            );
+
+            // Ghi interaction log
+            await CustomerInteractionModel.create([{
+                app_id: app._id,
+                customer_id: customer._id,
+                sale_id: referred_by ?? null,
+                agent_id: agent_id ?? null,
+                type: "note",
+                content: source_type === "agent"
+                    ? `Khách hàng nhập mã giới thiệu đại lý ${matched_ref_code} (muộn)`
+                    : `Khách hàng nhập mã giới thiệu sale ${matched_ref_code} (muộn)`,
+                result: null,
+            }], { session });
+
+            await session.commitTransaction();
+            session.endSession();
+
+            return res.status(200).json({
+                message: "Áp dụng mã giới thiệu thành công",
+                data: {
+                    external_id,
+                    source_type,
+                    ref_code: matched_ref_code,
+                },
+            });
+        } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
+            console.error("Error in applyReferral:", error);
+            return res.status(500).json({
+                message: "Internal server error",
+                error: error.message,
+            });
+        }
+    },
 };
 
 module.exports = CustomerController;

@@ -13,6 +13,8 @@ router.get("/my-info", verifyInternalRequest, CustomerController.getMyInfo);
 
 //POST
 router.post("/upsert", verifyInternalRequest, CustomerController.upsert);
+router.post("/apply-referral", verifyInternalRequest, CustomerController.applyReferral);
+
 
 
 

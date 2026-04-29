@@ -5,7 +5,8 @@ const router = express.Router()
 
 
 //GET
-
+router.get('/getAll', authenticate, DepartmentPositionController.getAllDepartments);
+router.get('/getAllPositions', authenticate, DepartmentPositionController.getAllPositions);
 
 //POST
 router.post('/createDepartment', authenticate, isAdmin, DepartmentPositionController.createDepartment);

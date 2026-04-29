@@ -42,6 +42,30 @@ const DepartmentPositionController = {
             console.error(error);
             return res.status(500).json({ message: 'Lỗi server', error: error.message });
         }
+    },
+    getAllDepartments: async (req, res) => {
+        try {
+            const departments = await DepartmentModel.find();
+            return res.status(200).json({
+                message: 'Lấy danh sách phòng ban thành công',
+                data: departments,
+            });
+        } catch (error) {
+            console.error(error);
+            return res.status(500).json({ message: 'Lỗi server', error: error.message });
+        }
+    },
+    getAllPositions: async (req, res) => {
+        try {
+            const positions = await PositionModel.find();
+            return res.status(200).json({
+                message: 'Lấy danh sách vị trí thành công',
+                data: positions,
+            });
+        } catch (error) {
+            console.error(error);
+            return res.status(500).json({ message: 'Lỗi server', error: error.message });
+        }
     }
 }
 

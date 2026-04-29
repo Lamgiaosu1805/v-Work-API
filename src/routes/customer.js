@@ -8,6 +8,8 @@ const router = express.Router()
 //GET
 router.get("/my-customers", authenticate, CustomerController.getMyCustomers);
 router.get("/agent-customers", verifyInternalRequest, CustomerController.getMyCustomersAsAgent);
+router.get("/my-info", verifyInternalRequest, CustomerController.getMyInfo);
+
 
 //POST
 router.post("/upsert", verifyInternalRequest, CustomerController.upsert);

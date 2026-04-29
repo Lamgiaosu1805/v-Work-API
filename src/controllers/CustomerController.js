@@ -462,6 +462,94 @@ const CustomerController = {
             });
         }
     },
+    // GET /customers/my-info
+    getMyInfo: async (req, res) => {
+        try {
+            const {
+                app_code,
+                external_id, // userId bên hệ thống đầu tư
+            } = req.query;
+
+            if (!app_code || !external_id) {
+                return res.status(400).json({ message: "Thiếu app_code hoặc external_id" });
+            }
+
+            // Tìm app
+            const app = await AppModel.findOne({ code: app_code, is_active: true });
+            if (!app) {
+                return res.status(404).json({ message: "App không tồn tại hoặc đã bị khóa" });
+            }
+
+            // Tìm customer theo external_id + app_id
+            const customer = await CustomerModel.findOne({
+                app_id: app._id,
+                external_id,
+            })
+                .select("-identity.id_front_url -identity.id_back_url -identity.selfie_url")
+                .populate("app_id", "name code");
+
+            if (!customer) {
+                return res.status(404).json({ message: "Không tìm thấy thông tin khách hàng" });
+            }
+
+            // Lấy thông tin sale nếu có
+            let sale_info = null;
+            if (customer.referred_by) {
+                const sale = await UserInfoModel.findById(customer.referred_by)
+                    .select("full_name phone_number ma_nv");
+                if (sale) {
+                    sale_info = {
+                        ma_nv: sale.ma_nv,
+                        full_name: sale.full_name,
+                        phone_number: sale.phone_number,
+                    };
+                }
+            }
+
+            // Lấy thông tin đại lý nếu có
+            let agent_info = null;
+            if (customer.agent_id) {
+                const agent = await AgentModel.findById(customer.agent_id)
+                    .select("agent_code full_name phone_number email");
+                if (agent) {
+                    agent_info = {
+                        agent_code: agent.agent_code,
+                        full_name: agent.full_name,
+                        phone_number: agent.phone_number,
+                        email: agent.email,
+                    };
+                }
+            }
+
+            return res.status(200).json({
+                message: "Lấy thông tin khách hàng thành công",
+                data: {
+                    customer_id: customer._id,
+                    phone_number: customer.phone_number,
+                    external_id: customer.external_id,
+                    status: customer.status,
+                    source_type: customer.source_type,
+                    ref_code: customer.ref_code,
+                    identity: customer.identity,
+                    app: customer.app_id,
+                    // Người chăm sóc
+                    care_by: {
+                        type: customer.source_type, // "sale" | "agent" | "marketing"
+                        sale: sale_info,            // null nếu không có sale
+                        agent: agent_info,          // null nếu không có agent
+                    },
+                    createdAt: customer.createdAt,
+                    updatedAt: customer.updatedAt,
+                },
+            });
+        } catch (error) {
+            console.error("Error in getMyInfo:", error);
+            return res.status(500).json({
+                message: "Internal server error",
+                error: error.message,
+            });
+        }
+    },
 
 };
 

@@ -5,14 +5,14 @@ const router = express.Router()
 
 
 //GET
-router.get("/documentTypes", async (req, res) => {
-    try {
-        const types = await DocumentTypeModel.find({ isDeleted: false });
-        res.json(types);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-});
+// router.get("/documentTypes", async (req, res) => {
+//     try {
+//         const types = await DocumentTypeModel.find({ isDeleted: false });
+//         res.json(types);
+//     } catch (err) {
+//         res.status(500).json({ message: err.message });
+//     }
+// });
 router.get('/getListDocument', authenticate, DocumentController.getListDocument);
 router.get("/getFile", authenticate, DocumentController.getFile);
 

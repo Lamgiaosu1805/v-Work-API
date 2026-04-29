@@ -7,6 +7,7 @@ const router = express.Router()
 //GET
 router.get('/getWorkSheet', authenticate, AttendanceController.getWorkSheet);
 router.get('/getLichCong', authenticate, AttendanceController.getLichCong);
+router.get('/getAllShifts', authenticate, AttendanceController.getAllShifts);
 
 
 

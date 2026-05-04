@@ -259,6 +259,18 @@ const AttendanceController = {
             console.error(err);
             res.status(500).json({ message: "Lỗi server", error: err.message });
         }
+    },
+    getAllShifts: async (req, res) => {
+        try {
+            const shifts = await ShiftModel.find();
+            return res.status(200).json({
+                message: 'Lấy danh sách ca làm việc thành công',
+                data: shifts,
+            });
+        } catch (error) {
+            console.error(error);
+            return res.status(500).json({ message: 'Lỗi server', error: error.message });
+        }
     }
 };
 

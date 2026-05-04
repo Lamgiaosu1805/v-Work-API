@@ -284,7 +284,93 @@ const UserController = {
       });
     }
   },
+  getUsers: async (req, res) => {
+    try {
+      const {
+        page = 1,
+        limit = 20,
+        search,
+        employment_type,
+        department_id,
+        from_date,
+        to_date,
+      } = req.query;
 
+      const skip = (Number(page) - 1) * Number(limit);
+
+      const filter = { isDeleted: false };
+
+      if (employment_type) filter.employment_type = employment_type;
+
+      if (from_date || to_date) {
+        filter.createdAt = {};
+        if (from_date) filter.createdAt.$gte = new Date(from_date);
+        if (to_date) filter.createdAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
+      }
+
+      if (search) {
+        filter.$or = [
+          { full_name: { $regex: search, $options: "i" } },
+          { ma_nv: { $regex: search, $options: "i" } },
+          { phone_number: { $regex: search, $options: "i" } },
+          { cccd: { $regex: search, $options: "i" } },
+        ];
+      }
+
+      if (department_id) {
+        const udpIds = await UserDepartmentPositionModel.find({
+          department: department_id,
+          isDeleted: false,
+        }).distinct("user");
+        filter._id = { $in: udpIds };
+      }
+
+      const [users, total] = await Promise.all([
+        UserInfoModel.find(filter)
+          .select("-id_account -__v")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(Number(limit))
+          .lean(),
+        UserInfoModel.countDocuments(filter),
+      ]);
+
+      const userIds = users.map((u) => u._id);
+      const udpList = await UserDepartmentPositionModel.find({
+        user: { $in: userIds },
+        isDeleted: false,
+      })
+        .populate("department", "department_name department_code")
+        .populate("position", "position_name")
+        .lean();
+
+      const udpMap = {};
+      for (const item of udpList) {
+        const uid = item.user.toString();
+        if (!udpMap[uid]) udpMap[uid] = [];
+        udpMap[uid].push({ department: item.department, position: item.position });
+      }
+
+      const data = users.map((u) => ({
+        ...u,
+        departments: udpMap[u._id.toString()] || [],
+      }));
+
+      return res.status(200).json({
+        message: "Lấy danh sách nhân viên thành công",
+        data,
+        pagination: {
+          total,
+          page: Number(page),
+          limit: Number(limit),
+          total_pages: Math.ceil(total / Number(limit)),
+        },
+      });
+    } catch (error) {
+      console.error("Error in getUsers:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
   generateMyQR: async (req, res) => {
     try {
       const accountId = req.account._id;

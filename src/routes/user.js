@@ -7,6 +7,7 @@ const DocumentTypeModel = require("../models/DocumentTypeModel");
 
 // GET
 
+router.get("/getUsers", authenticate, isAdmin, UserController.getUsers)
 router.get("/getUserInfo", authenticate, UserController.getUserInfo)
 router.get("/getQRSale", authenticate, UserController.generateMyQR)
 

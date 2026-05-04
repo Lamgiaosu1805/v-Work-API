@@ -32,6 +32,7 @@ router.post(
   },
   UserController.createUser
 );
+router.post("/uploadAvatar", authenticate, upload.single("avatar"), UserController.uploadAvatar);
 
 // router.post("/createAdmin", UserController.createAdmin);
 

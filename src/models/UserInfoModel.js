@@ -20,6 +20,7 @@ const UserInfoModel = new mongoose.Schema(
     leave_balance: { // phép đang có (số ngày, có thể là float: 0.5)
       annual: { type: Number, default: 0 }, // phép năm hiện có
     },
+    avatar: { type: String, default: null }, // lưu tên file sau khi upload
     ...BaseSchema.obj,
   },
   {

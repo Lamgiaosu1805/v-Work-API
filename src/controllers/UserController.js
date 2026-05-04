@@ -8,6 +8,13 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
 const QRCode = require("qrcode");
+const path = require("path");
+const fs = require("fs");
+
+const uploadDir =
+  process.env.NODE_ENV === "production"
+    ? process.env.UPLOAD_DIR_PROD
+    : process.env.UPLOAD_DIR_DEV;
 
 const UserController = {
   createUser: async (req, res) => {
@@ -72,7 +79,7 @@ const UserController = {
                 "Mỗi schedules phải có dayOfWeek (number) và shifts (array chứa ít nhất 1 ca)",
             });
           }
-          totalShifts += item.shifts.length; // mỗi ca = 1 buổi
+          totalShifts += item.shifts.length;
         }
 
         if (totalShifts < 6) {
@@ -102,12 +109,7 @@ const UserController = {
 
       // Tạo tài khoản
       const [account] = await AccountModel.create(
-        [
-          {
-            username,
-            password: hashedPassword,
-          },
-        ],
+        [{ username, password: hashedPassword }],
         { session }
       );
 
@@ -147,12 +149,7 @@ const UserController = {
 
       if (documents.length > 0) {
         await UserDocumentModel.create(
-          [
-            {
-              user_id: userInfo._id,
-              documents,
-            },
-          ],
+          [{ user_id: userInfo._id, documents }],
           { session }
         );
       }
@@ -190,7 +187,6 @@ const UserController = {
         await WorkScheduleModel.insertMany(scheduleDocs, { session });
       }
 
-      // Commit transaction
       await session.commitTransaction();
       session.endSession();
 
@@ -210,6 +206,7 @@ const UserController = {
       });
     }
   },
+
   createAdmin: async (req, res) => {
     try {
       const { username, password } = req.body;
@@ -239,30 +236,26 @@ const UserController = {
       res.status(500).json({ message: "Internal server error", error: error.message });
     }
   },
+
   getUserInfo: async (req, res) => {
     try {
-      // Lấy thông tin user cơ bản
       const user = await UserInfoModel.findOne({ id_account: req.account._id });
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
 
-      // Lấy danh sách phòng ban + vị trí đảm nhận
       const userDepartments = await UserDepartmentPositionModel.find({ user: user._id })
         .populate("department", "department_name department_code")
         .populate("position", "position_name");
 
-      // Lấy danh sách hồ sơ tài liệu
       const userDocuments = await UserDocumentModel.findOne({ user_id: user._id })
         .populate("documents.type_id", "name required")
         .populate("documents.attachments.uploaded_by", "username");
 
-      // Lấy thông tin hợp đồng lao động của user
       const laborContracts = await LaborContractModel.find({ id_user_info: user._id })
-        .select("-__v") // bỏ __v nếu muốn
-        .lean(); // trả về plain object
+        .select("-__v")
+        .lean();
 
-      // Chuẩn hóa dữ liệu trả về
       res.json({
         ...user.toObject(),
         departments: userDepartments.map((item) => ({
@@ -281,7 +274,7 @@ const UserController = {
             })),
           }))
           : [],
-        laborContracts: laborContracts, // thêm info hợp đồng
+        laborContracts,
       });
     } catch (error) {
       console.error("Error in getUserInfo:", error);
@@ -291,6 +284,7 @@ const UserController = {
       });
     }
   },
+
   generateMyQR: async (req, res) => {
     try {
       const accountId = req.account._id;
@@ -304,7 +298,6 @@ const UserController = {
       const phone_number = userInfo.phone_number;
 
       const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-      // Thêm type=sale vào URL
       const landingUrl = `${BASE_URL}/refer?ref=${phone_number + "-" + ma_nv}&type=sale`;
 
       const qrImageBase64 = await QRCode.toDataURL(landingUrl, {
@@ -325,6 +318,41 @@ const UserController = {
       });
     } catch (error) {
       console.error("Error in generateMyQR:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
+  uploadAvatar: async (req, res) => {
+    try {
+      const accountId = req.account._id;
+
+      const userInfo = await UserInfoModel.findOne({ id_account: accountId });
+      if (!userInfo) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: "Không có file được upload" });
+      }
+
+      // Xóa avatar cũ nếu có
+      if (userInfo.avatar) {
+        const oldPath = path.join(uploadDir, userInfo.avatar);
+        if (fs.existsSync(oldPath)) {
+          fs.unlinkSync(oldPath);
+        }
+      }
+
+      // Lưu tên file mới vào DB
+      const fileName = req.file.filename;
+      await UserInfoModel.findByIdAndUpdate(userInfo._id, { avatar: fileName });
+
+      return res.status(200).json({
+        message: "Upload avatar thành công",
+        avatar: fileName,
+      });
+    } catch (error) {
+      console.error("Error in uploadAvatar:", error);
       return res.status(500).json({ message: "Internal server error", error: error.message });
     }
   },

@@ -10,6 +10,27 @@ const DocumentTypeModel = require("../models/DocumentTypeModel");
 router.get("/getUsers", authenticate, isAdmin, UserController.getUsers)
 router.get("/getUserInfo", authenticate, UserController.getUserInfo)
 router.get("/getQRSale", authenticate, UserController.generateMyQR)
+router.get("/getUserById/:id", authenticate, isAdmin, UserController.getUserById)
+
+// PUT
+router.put(
+  "/updateUser/:id",
+  authenticate,
+  isAdmin,
+  async (req, res, next) => {
+    try {
+      const docTypes = await DocumentTypeModel.find({ isDeleted: false });
+      const fields = docTypes.map((doc) => ({ name: doc._id.toString(), maxCount: 10 }));
+      upload.fields(fields)(req, res, function (err) {
+        if (err) return res.status(400).json({ message: err.message });
+        next();
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+  UserController.updateUser
+)
 
 // POST create user + upload files dynamic
 router.post(

@@ -408,6 +408,139 @@ const UserController = {
     }
   },
 
+  getUserById: async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ message: "ID không hợp lệ" });
+      }
+
+      const user = await UserInfoModel.findOne({ _id: id, isDeleted: false });
+      if (!user) {
+        return res.status(404).json({ message: "Không tìm thấy user" });
+      }
+
+      const [userDepartments, userDocuments, laborContracts] = await Promise.all([
+        UserDepartmentPositionModel.find({ user: user._id })
+          .populate("department", "department_name department_code")
+          .populate("position", "position_name"),
+        UserDocumentModel.findOne({ user_id: user._id })
+          .populate("documents.type_id", "name required")
+          .populate("documents.attachments.uploaded_by", "username"),
+        LaborContractModel.find({ id_user_info: user._id }).select("-__v").lean(),
+      ]);
+
+      return res.status(200).json({
+        ...user.toObject(),
+        departments: userDepartments.map((item) => ({
+          department: item.department,
+          position: item.position,
+        })),
+        documents: userDocuments
+          ? userDocuments.documents.map((doc) => ({
+              type: doc.type_id,
+              note: doc.note,
+              attachments: doc.attachments.map((a) => ({
+                file_name: a.file_name,
+                file_url: a.file_url,
+                uploaded_at: a.uploaded_at,
+                uploaded_by: a.uploaded_by,
+              })),
+            }))
+          : [],
+        laborContracts,
+      });
+    } catch (error) {
+      console.error("Error in getUserById:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
+  updateUser: async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ message: "ID không hợp lệ" });
+      }
+
+      const user = await UserInfoModel.findOne({ _id: id, isDeleted: false });
+      if (!user) {
+        return res.status(404).json({ message: "Không tìm thấy user" });
+      }
+
+      const allowedFields = [
+        "full_name",
+        "cccd",
+        "phone_number",
+        "sex",
+        "date_of_birth",
+        "address",
+        "tinh_trang_hon_nhan",
+        "employment_type",
+      ];
+
+      const updates = {};
+      for (const field of allowedFields) {
+        if (req.body[field] !== undefined) {
+          updates[field] = req.body[field];
+        }
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "Không có trường nào được cập nhật" });
+      }
+
+      if (updates.cccd && updates.cccd !== user.cccd) {
+        const existed = await UserInfoModel.findOne({ cccd: updates.cccd, _id: { $ne: id } });
+        if (existed) {
+          return res.status(400).json({ message: "CCCD đã tồn tại" });
+        }
+      }
+
+      const updated = await UserInfoModel.findByIdAndUpdate(id, updates, { new: true }).select("-id_account -__v");
+
+      // Xử lý documents nếu có file upload
+      const files = req.files || {};
+      if (Object.keys(files).length > 0) {
+        let userDocument = await UserDocumentModel.findOne({ user_id: id });
+
+        if (!userDocument) {
+          userDocument = new UserDocumentModel({ user_id: id, documents: [] });
+        }
+
+        for (const [type_id, fileArray] of Object.entries(files)) {
+          const newAttachments = fileArray.map((f) => ({
+            file_name: f.originalname,
+            file_url: f.path,
+            uploaded_at: new Date(),
+            uploaded_by: req.account._id,
+            allowed_users: [id],
+          }));
+
+          const existingDoc = userDocument.documents.find(
+            (doc) => doc.type_id.toString() === type_id
+          );
+
+          if (existingDoc) {
+            existingDoc.attachments.push(...newAttachments);
+          } else {
+            userDocument.documents.push({ type_id, attachments: newAttachments });
+          }
+        }
+
+        await userDocument.save();
+      }
+
+      return res.status(200).json({
+        message: "Cập nhật thông tin user thành công",
+        data: updated,
+      });
+    } catch (error) {
+      console.error("Error in updateUser:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
   uploadAvatar: async (req, res) => {
     try {
       const accountId = req.account._id;

@@ -457,14 +457,21 @@ const UserController = {
   },
 
   updateUser: async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
       const { id } = req.params;
       if (!mongoose.Types.ObjectId.isValid(id)) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json({ message: "ID không hợp lệ" });
       }
 
-      const user = await UserInfoModel.findOne({ _id: id, isDeleted: false });
+      const user = await UserInfoModel.findOne({ _id: id, isDeleted: false }).session(session);
       if (!user) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(404).json({ message: "Không tìm thấy user" });
       }
 
@@ -486,23 +493,29 @@ const UserController = {
         }
       }
 
-      if (Object.keys(updates).length === 0) {
+      if (Object.keys(updates).length === 0 && Object.keys(req.files || {}).length === 0) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json({ message: "Không có trường nào được cập nhật" });
       }
 
       if (updates.cccd && updates.cccd !== user.cccd) {
-        const existed = await UserInfoModel.findOne({ cccd: updates.cccd, _id: { $ne: id } });
+        const existed = await UserInfoModel.findOne({ cccd: updates.cccd, _id: { $ne: id } }).session(session);
         if (existed) {
+          await session.abortTransaction();
+          session.endSession();
           return res.status(400).json({ message: "CCCD đã tồn tại" });
         }
       }
 
-      const updated = await UserInfoModel.findByIdAndUpdate(id, updates, { new: true }).select("-id_account -__v");
-
-      // Xử lý documents nếu có file upload
+      let updated = user;
+      if (Object.keys(updates).length > 0) {
+        updated = await UserInfoModel.findByIdAndUpdate(id, updates, { new: true, session }).select("-id_account -__v");
+      }
+      console.log("files", req.files)
       const files = req.files || {};
       if (Object.keys(files).length > 0) {
-        let userDocument = await UserDocumentModel.findOne({ user_id: id });
+        let userDocument = await UserDocumentModel.findOne({ user_id: id }).session(session);
 
         if (!userDocument) {
           userDocument = new UserDocumentModel({ user_id: id, documents: [] });
@@ -522,20 +535,29 @@ const UserController = {
           );
 
           if (existingDoc) {
-            existingDoc.attachments.push(...newAttachments);
+            for (const attachment of existingDoc.attachments) {
+              const oldFilePath = path.resolve(uploadDir, path.basename(attachment.file_url));
+              if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
+            }
+            existingDoc.attachments = newAttachments;
           } else {
             userDocument.documents.push({ type_id, attachments: newAttachments });
           }
         }
 
-        await userDocument.save();
+        await userDocument.save({ session });
       }
+
+      await session.commitTransaction();
+      session.endSession();
 
       return res.status(200).json({
         message: "Cập nhật thông tin user thành công",
         data: updated,
       });
     } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
       console.error("Error in updateUser:", error);
       return res.status(500).json({ message: "Internal server error", error: error.message });
     }

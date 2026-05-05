@@ -284,7 +284,93 @@ const UserController = {
       });
     }
   },
+  getUsers: async (req, res) => {
+    try {
+      const {
+        page = 1,
+        limit = 20,
+        search,
+        employment_type,
+        department_id,
+        from_date,
+        to_date,
+      } = req.query;
 
+      const skip = (Number(page) - 1) * Number(limit);
+
+      const filter = { isDeleted: false };
+
+      if (employment_type) filter.employment_type = employment_type;
+
+      if (from_date || to_date) {
+        filter.createdAt = {};
+        if (from_date) filter.createdAt.$gte = new Date(from_date);
+        if (to_date) filter.createdAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
+      }
+
+      if (search) {
+        filter.$or = [
+          { full_name: { $regex: search, $options: "i" } },
+          { ma_nv: { $regex: search, $options: "i" } },
+          { phone_number: { $regex: search, $options: "i" } },
+          { cccd: { $regex: search, $options: "i" } },
+        ];
+      }
+
+      if (department_id) {
+        const udpIds = await UserDepartmentPositionModel.find({
+          department: department_id,
+          isDeleted: false,
+        }).distinct("user");
+        filter._id = { $in: udpIds };
+      }
+
+      const [users, total] = await Promise.all([
+        UserInfoModel.find(filter)
+          .select("-id_account -__v")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(Number(limit))
+          .lean(),
+        UserInfoModel.countDocuments(filter),
+      ]);
+
+      const userIds = users.map((u) => u._id);
+      const udpList = await UserDepartmentPositionModel.find({
+        user: { $in: userIds },
+        isDeleted: false,
+      })
+        .populate("department", "department_name department_code")
+        .populate("position", "position_name")
+        .lean();
+
+      const udpMap = {};
+      for (const item of udpList) {
+        const uid = item.user.toString();
+        if (!udpMap[uid]) udpMap[uid] = [];
+        udpMap[uid].push({ department: item.department, position: item.position });
+      }
+
+      const data = users.map((u) => ({
+        ...u,
+        departments: udpMap[u._id.toString()] || [],
+      }));
+
+      return res.status(200).json({
+        message: "Lấy danh sách nhân viên thành công",
+        data,
+        pagination: {
+          total,
+          page: Number(page),
+          limit: Number(limit),
+          total_pages: Math.ceil(total / Number(limit)),
+        },
+      });
+    } catch (error) {
+      console.error("Error in getUsers:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
   generateMyQR: async (req, res) => {
     try {
       const accountId = req.account._id;
@@ -318,6 +404,161 @@ const UserController = {
       });
     } catch (error) {
       console.error("Error in generateMyQR:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
+  getUserById: async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ message: "ID không hợp lệ" });
+      }
+
+      const user = await UserInfoModel.findOne({ _id: id, isDeleted: false });
+      if (!user) {
+        return res.status(404).json({ message: "Không tìm thấy user" });
+      }
+
+      const [userDepartments, userDocuments, laborContracts] = await Promise.all([
+        UserDepartmentPositionModel.find({ user: user._id })
+          .populate("department", "department_name department_code")
+          .populate("position", "position_name"),
+        UserDocumentModel.findOne({ user_id: user._id })
+          .populate("documents.type_id", "name required")
+          .populate("documents.attachments.uploaded_by", "username"),
+        LaborContractModel.find({ id_user_info: user._id }).select("-__v").lean(),
+      ]);
+
+      return res.status(200).json({
+        ...user.toObject(),
+        departments: userDepartments.map((item) => ({
+          department: item.department,
+          position: item.position,
+        })),
+        documents: userDocuments
+          ? userDocuments.documents.map((doc) => ({
+              type: doc.type_id,
+              note: doc.note,
+              attachments: doc.attachments.map((a) => ({
+                file_name: a.file_name,
+                file_url: a.file_url,
+                uploaded_at: a.uploaded_at,
+                uploaded_by: a.uploaded_by,
+              })),
+            }))
+          : [],
+        laborContracts,
+      });
+    } catch (error) {
+      console.error("Error in getUserById:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
+  updateUser: async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "ID không hợp lệ" });
+      }
+
+      const user = await UserInfoModel.findOne({ _id: id, isDeleted: false }).session(session);
+      if (!user) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({ message: "Không tìm thấy user" });
+      }
+
+      const allowedFields = [
+        "full_name",
+        "cccd",
+        "phone_number",
+        "sex",
+        "date_of_birth",
+        "address",
+        "tinh_trang_hon_nhan",
+        "employment_type",
+      ];
+
+      const updates = {};
+      for (const field of allowedFields) {
+        if (req.body[field] !== undefined) {
+          updates[field] = req.body[field];
+        }
+      }
+
+      if (Object.keys(updates).length === 0 && Object.keys(req.files || {}).length === 0) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Không có trường nào được cập nhật" });
+      }
+
+      if (updates.cccd && updates.cccd !== user.cccd) {
+        const existed = await UserInfoModel.findOne({ cccd: updates.cccd, _id: { $ne: id } }).session(session);
+        if (existed) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({ message: "CCCD đã tồn tại" });
+        }
+      }
+
+      let updated = user;
+      if (Object.keys(updates).length > 0) {
+        updated = await UserInfoModel.findByIdAndUpdate(id, updates, { new: true, session }).select("-id_account -__v");
+      }
+      console.log("files", req.files)
+      const files = req.files || {};
+      if (Object.keys(files).length > 0) {
+        let userDocument = await UserDocumentModel.findOne({ user_id: id }).session(session);
+
+        if (!userDocument) {
+          userDocument = new UserDocumentModel({ user_id: id, documents: [] });
+        }
+
+        for (const [type_id, fileArray] of Object.entries(files)) {
+          const newAttachments = fileArray.map((f) => ({
+            file_name: f.originalname,
+            file_url: f.path,
+            uploaded_at: new Date(),
+            uploaded_by: req.account._id,
+            allowed_users: [id],
+          }));
+
+          const existingDoc = userDocument.documents.find(
+            (doc) => doc.type_id.toString() === type_id
+          );
+
+          if (existingDoc) {
+            for (const attachment of existingDoc.attachments) {
+              const oldFilePath = path.resolve(uploadDir, path.basename(attachment.file_url));
+              if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
+            }
+            existingDoc.attachments = newAttachments;
+          } else {
+            userDocument.documents.push({ type_id, attachments: newAttachments });
+          }
+        }
+
+        await userDocument.save({ session });
+      }
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.status(200).json({
+        message: "Cập nhật thông tin user thành công",
+        data: updated,
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      console.error("Error in updateUser:", error);
       return res.status(500).json({ message: "Internal server error", error: error.message });
     }
   },

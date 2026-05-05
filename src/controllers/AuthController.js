@@ -1,6 +1,7 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const AccountModel = require("../models/AccountModel");
+const { accessTokenCookieOptions, refreshTokenCookieOptions } = require("../config/cookieConfig");
 
 const JWT_SECRET = process.env.SECRET_KEY;
 const JWT_REFRESH_SECRET = process.env.REFRESH_SECRET_KEY;
@@ -30,7 +31,7 @@ const AuthController = {
                 const tempToken = jwt.sign(
                     { id: account._id, purpose: "password_reset" },
                     JWT_SECRET,
-                    { expiresIn: "10m" }
+                    { expiresIn: "10s" }
                 );
                 return res.status(200).json({
                     message: "Đây là lần đầu đăng nhập, vui lòng đổi mật khẩu",
@@ -43,7 +44,7 @@ const AuthController = {
             const accessToken = jwt.sign(
                 { id: account._id, username: account.username, role: account.role },
                 JWT_SECRET,
-                { expiresIn: "30m" }
+                { expiresIn: "30s" }
             );
 
             const refreshToken = jwt.sign(
@@ -60,10 +61,11 @@ const AuthController = {
             });
             await account.save();
 
+            res.cookie("accessToken", accessToken, accessTokenCookieOptions);
+            res.cookie("refreshToken", refreshToken, refreshTokenCookieOptions);
+
             res.status(200).json({
                 message: "Đăng nhập thành công",
-                accessToken,
-                refreshToken,
                 account: {
                     id: account._id,
                     username: account.username,
@@ -109,7 +111,7 @@ const AuthController = {
 
     refreshToken: async (req, res) => {
         try {
-            const { refreshToken } = req.body;
+            const refreshToken = req.cookies?.refreshToken;
             if (!refreshToken)
                 return res.status(400).json({ message: "Thiếu refresh token" });
 
@@ -146,13 +148,13 @@ const AuthController = {
             const newAccessToken = jwt.sign(
                 { id: decoded.id },
                 JWT_SECRET,
-                { expiresIn: "30m" }
+                { expiresIn: "30s" }
             );
 
             const newRefreshToken = jwt.sign(
                 { id: decoded.id },
                 JWT_REFRESH_SECRET,
-                { expiresIn: "3d" }
+                { expiresIn: "1m" }
             );
 
             // 5️⃣ Thêm refresh token mới vào danh sách (tách riêng để tránh conflict)
@@ -170,12 +172,11 @@ const AuthController = {
                 }
             );
 
-            // 6️⃣ Trả về token mới
-            res.status(200).json({
-                message: "Làm mới token thành công",
-                accessToken: newAccessToken,
-                refreshToken: newRefreshToken
-            });
+            // 6️⃣ Set cookie mới
+            res.cookie("accessToken", newAccessToken, accessTokenCookieOptions);
+            res.cookie("refreshToken", newRefreshToken, refreshTokenCookieOptions);
+
+            res.status(200).json({ message: "Làm mới token thành công" });
 
         } catch (err) {
             console.error("Refresh Token Error:", err);
@@ -185,7 +186,7 @@ const AuthController = {
 
     logout: async (req, res) => {
         try {
-            const { refreshToken } = req.body;
+            const refreshToken = req.cookies?.refreshToken;
             if (!refreshToken)
                 return res.status(400).json({ message: "Thiếu refresh token" });
 
@@ -205,6 +206,8 @@ const AuthController = {
             if (tokenEntry) {
                 tokenEntry.revoked = true;
                 await account.save();
+                res.clearCookie("accessToken");
+                res.clearCookie("refreshToken");
                 return res.status(200).json({ message: "Đăng xuất thành công" });
             }
 

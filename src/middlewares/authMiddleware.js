@@ -4,15 +4,13 @@ const AccountModel = require("../models/AccountModel");
 
 async function authenticate(req, res, next) {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const token = req.cookies?.accessToken || req.headers.authorization?.split(" ")[1];
+    if (!token) {
       return res.status(401).json({
         errorCode: "MISSING_TOKEN",
         message: "Không có access token",
       });
     }
-
-    const token = authHeader.split(" ")[1]; // "Bearer <token>"
 
     // ✅ Verify token
     const decoded = jwt.verify(token, process.env.SECRET_KEY);

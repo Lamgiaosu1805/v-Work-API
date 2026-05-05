@@ -1,5 +1,5 @@
-process.env.TZ = 'Asia/Ho_Chi_Minh';
 require('dotenv').config();
+process.env.TZ = 'Asia/Ho_Chi_Minh';
 const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');

@@ -108,6 +108,65 @@ const AgentController = {
             return res.status(500).json({ message: "Internal server error", error: error.message });
         }
     },
+    getAll: async (req, res) => {
+        try {
+            const {
+                app_code,
+                page = 1,
+                limit = 20,
+                search,
+                is_active,
+            } = req.query;
+
+            if (!app_code) {
+                return res.status(400).json({ message: "Thiếu app_code" });
+            }
+
+            const app = await AppModel.findOne({ code: app_code, is_active: true });
+            if (!app) {
+                return res.status(404).json({ message: "App không tồn tại hoặc đã bị khóa" });
+            }
+
+            const skip = (Number(page) - 1) * Number(limit);
+
+            // Build filter
+            const filter = { app_id: app._id };
+
+            if (is_active !== undefined) {
+                filter.is_active = is_active === "true";
+            }
+
+            if (search) {
+                filter.$or = [
+                    { full_name: { $regex: search, $options: "i" } },
+                    { phone_number: { $regex: search, $options: "i" } },
+                    { agent_code: { $regex: search, $options: "i" } },
+                ];
+            }
+
+            const [agents, total] = await Promise.all([
+                AgentModel.find(filter)
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(Number(limit)),
+                AgentModel.countDocuments(filter),
+            ]);
+
+            return res.status(200).json({
+                message: "Lấy danh sách đại lý thành công",
+                data: agents,
+                pagination: {
+                    total,
+                    page: Number(page),
+                    limit: Number(limit),
+                    total_pages: Math.ceil(total / Number(limit)),
+                },
+            });
+        } catch (error) {
+            console.error("Error in getAll agents:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
 };
 
 module.exports = AgentController;

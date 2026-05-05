@@ -584,7 +584,7 @@ const UserController = {
       }
 
       // Lưu tên file mới vào DB
-      const fileName = req.file.filename;
+      const fileName = req.file.filename ?? req.file.originalname;
       await UserInfoModel.findByIdAndUpdate(userInfo._id, { avatar: fileName });
 
       return res.status(200).json({

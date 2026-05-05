@@ -1,13 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const DocumentTypeModel = require("../models/DocumentTypeModel");
-const UserInfoModel = require("../models/UserInfoModel");
-const UserDocumentModel = require("../models/UserDocumentModel");
 
-const uploadDir =
-  process.env.NODE_ENV === "production"
-    ? process.env.UPLOAD_DIR_PROD
-    : process.env.UPLOAD_DIR_DEV;
 const DocumentController = {
     createTypeDocument: async (req, res) => {
         try {

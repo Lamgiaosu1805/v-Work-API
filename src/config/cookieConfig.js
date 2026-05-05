@@ -4,6 +4,7 @@ const base = {
   httpOnly: true,
   secure: isProd,
   sameSite: isProd ? "strict" : "lax",
+  path: "/",
 };
 
 const accessTokenCookieOptions = {

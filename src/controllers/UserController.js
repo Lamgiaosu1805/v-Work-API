@@ -512,7 +512,6 @@ const UserController = {
       if (Object.keys(updates).length > 0) {
         updated = await UserInfoModel.findByIdAndUpdate(id, updates, { new: true, session }).select("-id_account -__v");
       }
-      console.log("files", req.files)
       const files = req.files || {};
       if (Object.keys(files).length > 0) {
         let userDocument = await UserDocumentModel.findOne({ user_id: id }).session(session);
@@ -524,7 +523,7 @@ const UserController = {
         for (const [type_id, fileArray] of Object.entries(files)) {
           const newAttachments = fileArray.map((f) => ({
             file_name: f.originalname,
-            file_url: f.path,
+            file_url: f.path ?? f.originalname,
             uploaded_at: new Date(),
             uploaded_by: req.account._id,
             allowed_users: [id],

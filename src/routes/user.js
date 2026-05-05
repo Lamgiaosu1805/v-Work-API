@@ -2,8 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { isAdmin, authenticate } = require("../middlewares/authMiddleware");
 const upload = require("../middlewares/uploadFile");
+const uploadDocuments = require("../middlewares/uploadDocuments");
 const UserController = require("../controllers/UserController");
-const DocumentTypeModel = require("../models/DocumentTypeModel");
 
 // GET
 
@@ -13,47 +13,10 @@ router.get("/getQRSale", authenticate, UserController.generateMyQR)
 router.get("/getUserById/:id", authenticate, isAdmin, UserController.getUserById)
 
 // PUT
-router.put(
-  "/updateUser/:id",
-  authenticate,
-  isAdmin,
-  async (req, res, next) => {
-    try {
-      const docTypes = await DocumentTypeModel.find({ isDeleted: false });
-      const fields = docTypes.map((doc) => ({ name: doc._id.toString(), maxCount: 10 }));
-      upload.fields(fields)(req, res, function (err) {
-        if (err) return res.status(400).json({ message: err.message });
-        next();
-      });
-    } catch (err) {
-      res.status(500).json({ message: err.message });
-    }
-  },
-  UserController.updateUser
-)
+router.put("/updateUser/:id", authenticate, isAdmin, uploadDocuments, UserController.updateUser);
 
-// POST create user + upload files dynamic
-router.post(
-  "/createUser",
-  authenticate,
-  isAdmin,
-  async (req, res, next) => {
-    try {
-      // Lấy tất cả documentType hiện tại
-      const docTypes = await DocumentTypeModel.find({ isDeleted: false });
-      const fields = docTypes.map((doc) => ({ name: doc._id.toString(), maxCount: 10 }));
-
-      // Gọi multer.fields dynamic
-      upload.fields(fields)(req, res, function (err) {
-        if (err) return res.status(400).json({ message: err.message });
-        next();
-      });
-    } catch (err) {
-      res.status(500).json({ message: err.message });
-    }
-  },
-  UserController.createUser
-);
+// POST
+router.post("/createUser", authenticate, isAdmin, uploadDocuments, UserController.createUser);
 router.post("/uploadAvatar", authenticate, upload.single("avatar"), UserController.uploadAvatar);
 
 // router.post("/createAdmin", UserController.createAdmin);

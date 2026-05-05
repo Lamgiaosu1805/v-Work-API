@@ -420,7 +420,7 @@ const UserController = {
         return res.status(404).json({ message: "Không tìm thấy user" });
       }
 
-      const [userDepartments, userDocuments, laborContracts] = await Promise.all([
+      const [userDepartments, userDocuments, laborContracts, workSchedules] = await Promise.all([
         UserDepartmentPositionModel.find({ user: user._id })
           .populate("department", "department_name department_code")
           .populate("position", "position_name"),
@@ -428,6 +428,7 @@ const UserController = {
           .populate("documents.type_id", "name required")
           .populate("documents.attachments.uploaded_by", "username"),
         LaborContractModel.find({ id_user_info: user._id }).select("-__v").lean(),
+        WorkScheduleModel.find({ userId: user._id }).select("dayOfWeek shifts").lean(),
       ]);
 
       return res.status(200).json({
@@ -449,6 +450,7 @@ const UserController = {
             }))
           : [],
         laborContracts,
+        schedules: workSchedules.map((s) => ({ dayOfWeek: s.dayOfWeek, shifts: s.shifts })),
       });
     } catch (error) {
       console.error("Error in getUserById:", error);
@@ -493,7 +495,11 @@ const UserController = {
         }
       }
 
-      if (Object.keys(updates).length === 0 && Object.keys(req.files || {}).length === 0) {
+      const hasFiles = Object.keys(req.files || {}).length > 0;
+      const hasDepartments = req.body.userDepartments !== undefined;
+      const hasSchedules = req.body.schedules !== undefined;
+
+      if (Object.keys(updates).length === 0 && !hasFiles && !hasDepartments && !hasSchedules) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({ message: "Không có trường nào được cập nhật" });
@@ -512,6 +518,50 @@ const UserController = {
       if (Object.keys(updates).length > 0) {
         updated = await UserInfoModel.findByIdAndUpdate(id, updates, { new: true, session }).select("-id_account -__v");
       }
+      // Update departments
+      if (hasDepartments) {
+        let userDepartmentsData = req.body.userDepartments;
+        if (typeof userDepartmentsData === "string") {
+          try { userDepartmentsData = JSON.parse(userDepartmentsData); }
+          catch {
+            await session.abortTransaction(); session.endSession();
+            return res.status(400).json({ message: "Sai định dạng userDepartments" });
+          }
+        }
+        if (Array.isArray(userDepartmentsData) && userDepartmentsData.length > 0) {
+          const invalid = userDepartmentsData.find((i) => !i.department_id || !i.position_id);
+          if (invalid) {
+            await session.abortTransaction(); session.endSession();
+            return res.status(400).json({ message: "Thiếu department_id hoặc position_id" });
+          }
+          await UserDepartmentPositionModel.deleteMany({ user: id }).session(session);
+          await UserDepartmentPositionModel.insertMany(
+            userDepartmentsData.map((i) => ({ user: id, department: i.department_id, position: i.position_id })),
+            { session }
+          );
+        }
+      }
+
+      // Update schedules
+      if (hasSchedules) {
+        let schedulesData = req.body.schedules;
+        if (typeof schedulesData === "string") {
+          try { schedulesData = JSON.parse(schedulesData); }
+          catch {
+            await session.abortTransaction(); session.endSession();
+            return res.status(400).json({ message: "Sai định dạng schedules" });
+          }
+        }
+        const effectiveType = updates.employment_type || user.employment_type;
+        await WorkScheduleModel.deleteMany({ userId: id }).session(session);
+        if (effectiveType === "parttime" && Array.isArray(schedulesData) && schedulesData.length > 0) {
+          await WorkScheduleModel.insertMany(
+            schedulesData.map((s) => ({ userId: id, dayOfWeek: s.dayOfWeek, shifts: s.shifts })),
+            { session }
+          );
+        }
+      }
+
       const files = req.files || {};
       if (Object.keys(files).length > 0) {
         let userDocument = await UserDocumentModel.findOne({ user_id: id }).session(session);

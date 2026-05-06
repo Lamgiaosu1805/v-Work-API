@@ -2,21 +2,20 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-let storage;
+const uploadDir =
+  process.env.NODE_ENV === "production"
+    ? process.env.UPLOAD_DIR_PROD
+    : process.env.UPLOAD_DIR_DEV;
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-if (process.env.NODE_ENV === "production") {
-  const uploadDir = process.env.UPLOAD_DIR_PROD;
-  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
+});
 
-  storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, uploadDir),
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-      cb(null, uniqueSuffix + path.extname(file.originalname));
-    },
-  });
-} else {
-  storage = multer.memoryStorage();
-}
+const upload = multer({ storage });
 
-module.exports = multer({ storage });
+module.exports = upload;

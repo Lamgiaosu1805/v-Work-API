@@ -1,6 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const DocumentTypeModel = require("../models/DocumentTypeModel");
+
 const DocumentController = {
     createTypeDocument: async (req, res) => {
         try {

@@ -240,17 +240,19 @@ const UserController = {
   getUserInfo: async (req, res) => {
     try {
       const account = req.account;
-
-      // Trả về thông tin account role trước
       const isAdmin = account.role === "admin";
 
       const user = await UserInfoModel.findOne({ id_account: account._id });
 
-      // Tài khoản admin không có userInfo → trả null
+      // Tài khoản admin không có userInfo → trả isAdmin + các field null
       if (!user) {
         return res.status(200).json({
           isAdmin,
-          userInfo: null,
+          full_name: null,
+          ma_nv: null,
+          departments: [],
+          documents: [],
+          laborContracts: [],
         });
       }
 
@@ -268,26 +270,24 @@ const UserController = {
 
       return res.status(200).json({
         isAdmin,
-        userInfo: {
-          ...user.toObject(),
-          departments: userDepartments.map((item) => ({
-            department: item.department,
-            position: item.position,
-          })),
-          documents: userDocuments
-            ? userDocuments.documents.map((doc) => ({
-              type: doc.type_id,
-              note: doc.note,
-              attachments: doc.attachments.map((a) => ({
-                file_name: a.file_name,
-                file_url: a.file_url,
-                uploaded_at: a.uploaded_at,
-                uploaded_by: a.uploaded_by,
-              })),
-            }))
-            : [],
-          laborContracts,
-        },
+        ...user.toObject(),
+        departments: userDepartments.map((item) => ({
+          department: item.department,
+          position: item.position,
+        })),
+        documents: userDocuments
+          ? userDocuments.documents.map((doc) => ({
+            type: doc.type_id,
+            note: doc.note,
+            attachments: doc.attachments.map((a) => ({
+              file_name: a.file_name,
+              file_url: a.file_url,
+              uploaded_at: a.uploaded_at,
+              uploaded_by: a.uploaded_by,
+            })),
+          }))
+          : [],
+        laborContracts,
       });
     } catch (error) {
       console.error("Error in getUserInfo:", error);

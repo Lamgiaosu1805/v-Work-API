@@ -43,20 +43,20 @@ const AuthController = {
             const accessToken = jwt.sign(
                 { id: account._id, username: account.username, role: account.role },
                 JWT_SECRET,
-                { expiresIn: "30m" }
+                { expiresIn: "7d" }
             );
 
             const refreshToken = jwt.sign(
                 { id: account._id },
                 JWT_REFRESH_SECRET,
-                { expiresIn: "3d" }
+                { expiresIn: "10d" }
             );
 
             // 6️⃣ Lưu refresh token vào DB
             account.refreshTokens.push({
                 token: refreshToken,
                 createdAt: new Date(),
-                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
             });
             await account.save();
 

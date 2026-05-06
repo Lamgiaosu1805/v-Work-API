@@ -239,42 +239,55 @@ const UserController = {
 
   getUserInfo: async (req, res) => {
     try {
-      const user = await UserInfoModel.findOne({ id_account: req.account._id });
+      const account = req.account;
+
+      // Trả về thông tin account role trước
+      const isAdmin = account.role === "admin";
+
+      const user = await UserInfoModel.findOne({ id_account: account._id });
+
+      // Tài khoản admin không có userInfo → trả null
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        return res.status(200).json({
+          isAdmin,
+          userInfo: null,
+        });
       }
 
-      const userDepartments = await UserDepartmentPositionModel.find({ user: user._id })
-        .populate("department", "department_name department_code")
-        .populate("position", "position_name");
+      const [userDepartments, userDocuments, laborContracts] = await Promise.all([
+        UserDepartmentPositionModel.find({ user: user._id })
+          .populate("department", "department_name department_code")
+          .populate("position", "position_name"),
+        UserDocumentModel.findOne({ user_id: user._id })
+          .populate("documents.type_id", "name required")
+          .populate("documents.attachments.uploaded_by", "username"),
+        LaborContractModel.find({ id_user_info: user._id })
+          .select("-__v")
+          .lean(),
+      ]);
 
-      const userDocuments = await UserDocumentModel.findOne({ user_id: user._id })
-        .populate("documents.type_id", "name required")
-        .populate("documents.attachments.uploaded_by", "username");
-
-      const laborContracts = await LaborContractModel.find({ id_user_info: user._id })
-        .select("-__v")
-        .lean();
-
-      res.json({
-        ...user.toObject(),
-        departments: userDepartments.map((item) => ({
-          department: item.department,
-          position: item.position,
-        })),
-        documents: userDocuments
-          ? userDocuments.documents.map((doc) => ({
-            type: doc.type_id,
-            note: doc.note,
-            attachments: doc.attachments.map((a) => ({
-              file_name: a.file_name,
-              file_url: a.file_url,
-              uploaded_at: a.uploaded_at,
-              uploaded_by: a.uploaded_by,
-            })),
-          }))
-          : [],
-        laborContracts,
+      return res.status(200).json({
+        isAdmin,
+        userInfo: {
+          ...user.toObject(),
+          departments: userDepartments.map((item) => ({
+            department: item.department,
+            position: item.position,
+          })),
+          documents: userDocuments
+            ? userDocuments.documents.map((doc) => ({
+              type: doc.type_id,
+              note: doc.note,
+              attachments: doc.attachments.map((a) => ({
+                file_name: a.file_name,
+                file_url: a.file_url,
+                uploaded_at: a.uploaded_at,
+                uploaded_by: a.uploaded_by,
+              })),
+            }))
+            : [],
+          laborContracts,
+        },
       });
     } catch (error) {
       console.error("Error in getUserInfo:", error);
@@ -439,15 +452,15 @@ const UserController = {
         })),
         documents: userDocuments
           ? userDocuments.documents.map((doc) => ({
-              type: doc.type_id,
-              note: doc.note,
-              attachments: doc.attachments.map((a) => ({
-                file_name: a.file_name,
-                file_url: a.file_url,
-                uploaded_at: a.uploaded_at,
-                uploaded_by: a.uploaded_by,
-              })),
-            }))
+            type: doc.type_id,
+            note: doc.note,
+            attachments: doc.attachments.map((a) => ({
+              file_name: a.file_name,
+              file_url: a.file_url,
+              uploaded_at: a.uploaded_at,
+              uploaded_by: a.uploaded_by,
+            })),
+          }))
           : [],
         laborContracts,
         schedules: workSchedules.map((s) => ({ dayOfWeek: s.dayOfWeek, shifts: s.shifts })),

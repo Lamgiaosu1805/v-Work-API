@@ -8,6 +8,7 @@ const referralRouter = require('./referral')
 const customerRouter = require('./customer')
 const appRouter = require('./app')
 const agentRouter = require('./agent')
+const investmentRouter = require('./investment')
 
 const route = (app) => {
     app.use(`/user`, userRouter)
@@ -20,6 +21,7 @@ const route = (app) => {
     app.use(`/customer`, customerRouter)
     app.use(`/app`, appRouter)
     app.use(`/agents`, agentRouter)
+    app.use(`/investments`, investmentRouter)
 }
 
 module.exports = route;

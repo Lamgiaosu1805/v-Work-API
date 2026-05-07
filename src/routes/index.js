@@ -9,6 +9,7 @@ const customerRouter = require('./customer')
 const appRouter = require('./app')
 const agentRouter = require('./agent')
 const investmentRouter = require('./investment')
+const claimPeriodRouter = require('./claimPeriod')
 
 const route = (app) => {
     app.use(`/user`, userRouter)
@@ -22,6 +23,7 @@ const route = (app) => {
     app.use(`/app`, appRouter)
     app.use(`/agents`, agentRouter)
     app.use(`/investments`, investmentRouter)
+    app.use(`/claim-period`, claimPeriodRouter)
 }
 
 module.exports = route;

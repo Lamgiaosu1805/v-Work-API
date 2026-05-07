@@ -694,6 +694,176 @@ const CustomerController = {
             });
         }
     },
+    // GET /customers/all — Admin xem toàn bộ khách hàng
+    getAll: async (req, res) => {
+        try {
+            const {
+                page = 1,
+                limit = 20,
+                status,
+                search,
+                app_code,
+                source_type,    // "sale" | "agent" | "marketing"
+                from_date,
+                to_date,
+            } = req.query;
+
+            const skip = (Number(page) - 1) * Number(limit);
+
+            const filter = {};
+
+            if (status) filter.status = status;
+            if (source_type) filter.source_type = source_type;
+
+            if (app_code) {
+                const app = await AppModel.findOne({ code: app_code, is_active: true });
+                if (app) filter.app_id = app._id;
+            }
+
+            if (from_date || to_date) {
+                filter.createdAt = {};
+                if (from_date) filter.createdAt.$gte = new Date(from_date);
+                if (to_date) filter.createdAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
+            }
+
+            if (search) {
+                filter.$or = [
+                    { phone_number: { $regex: search, $options: "i" } },
+                    { "identity.full_name": { $regex: search, $options: "i" } },
+                    { external_id: { $regex: search, $options: "i" } },
+                ];
+            }
+
+            const [customers, total] = await Promise.all([
+                CustomerModel.find(filter)
+                    .populate("app_id", "name code")
+                    .populate("referred_by", "full_name phone_number ma_nv")
+                    .populate("agent_id", "agent_code full_name phone_number")
+                    .select("-identity.id_front_url -identity.id_back_url -identity.selfie_url")
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(Number(limit)),
+                CustomerModel.countDocuments(filter),
+            ]);
+
+            return res.status(200).json({
+                message: "Lấy danh sách khách hàng thành công",
+                data: customers,
+                pagination: {
+                    total,
+                    page: Number(page),
+                    limit: Number(limit),
+                    total_pages: Math.ceil(total / Number(limit)),
+                },
+            });
+        } catch (error) {
+            console.error("Error in getAll:", error);
+            return res.status(500).json({
+                message: "Internal server error",
+                error: error.message,
+            });
+        }
+    },
+    // POST /customers/bulk-upsert
+    bulkUpsert: async (req, res) => {
+        try {
+            const { app_code, customers } = req.body;
+
+            if (!app_code || !Array.isArray(customers) || customers.length === 0) {
+                return res.status(400).json({ message: "Thiếu app_code hoặc customers" });
+            }
+
+            if (customers.length > 500) {
+                return res.status(400).json({ message: "Tối đa 500 khách hàng mỗi lần" });
+            }
+
+            const app = await AppModel.findOne({ code: app_code, is_active: true });
+            if (!app) {
+                return res.status(404).json({ message: "App không tồn tại" });
+            }
+
+            const results = {
+                total: customers.length,
+                created: 0,
+                skipped: 0,  // đã tồn tại → bỏ qua
+                failed: [],
+            };
+
+            for (const item of customers) {
+                try {
+                    if (!item.phone_number || !item.external_id) {
+                        results.failed.push({
+                            external_id: item.external_id ?? null,
+                            phone_number: item.phone_number ?? null,
+                            reason: "Thiếu phone_number hoặc external_id",
+                        });
+                        continue;
+                    }
+
+                    // Kiểm tra đã tồn tại chưa theo phone_number
+                    const existing = await CustomerModel.findOne({
+                        app_id: app._id,
+                        phone_number: item.phone_number,
+                    });
+
+                    if (existing) {
+                        // Đã tồn tại → bỏ qua hoàn toàn, không ghi đè bất cứ thứ gì
+                        results.skipped++;
+                        continue;
+                    }
+
+                    // Chuyển đổi gender: 0 → "male", 1 → "female"
+                    const genderMap = { 0: "male", 1: "female" };
+                    const mappedGender = item.gender !== undefined && item.gender !== null
+                        ? (genderMap[Number(item.gender)] ?? null)
+                        : null;
+
+                    // Tạo mới — source_type = "marketing" vì KH cũ chưa biết thuộc ai
+                    await CustomerModel.create({
+                        app_id: app._id,
+                        phone_number: item.phone_number,
+                        external_id: item.external_id,
+                        ref_code: null,
+                        referred_by: null,
+                        agent_id: null,
+                        source_type: "marketing",
+                        status: item.is_kyc ? "kyc_verified" : "registered",
+                        identity: item.is_kyc ? {
+                            full_name: item.full_name ?? null,
+                            date_of_birth: item.date_of_birth ?? null,
+                            gender: mappedGender,
+                            id_number: item.id_number ?? null,
+                            id_type: item.id_type ?? null,
+                            id_issued_date: item.id_issued_date ?? null,
+                            id_issued_place: item.id_issued_place ?? null,
+                            address: item.address ?? null,
+                            province: item.province ?? null,
+                            district: item.district ?? null,
+                            ward: item.ward ?? null,
+                            verified_at: new Date(),
+                            verified_by: "auto",
+                        } : {},
+                    });
+
+                    results.created++;
+                } catch (err) {
+                    results.failed.push({
+                        external_id: item.external_id ?? null,
+                        phone_number: item.phone_number ?? null,
+                        reason: err.message,
+                    });
+                }
+            }
+
+            return res.status(200).json({
+                message: "Đồng bộ khách hàng hoàn tất",
+                results,
+            });
+        } catch (error) {
+            console.error("Error in bulkUpsert:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
 };
 
 module.exports = CustomerController;

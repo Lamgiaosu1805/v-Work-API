@@ -9,11 +9,13 @@ const router = express.Router()
 router.get("/my-customers", authenticate, CustomerController.getMyCustomers);
 router.get("/agent-customers", verifyInternalRequest, CustomerController.getMyCustomersAsAgent);
 router.get("/my-info", verifyInternalRequest, CustomerController.getMyInfo);
+router.get("/all", authenticate, isAdmin, CustomerController.getAll);
 
 
 //POST
 router.post("/upsert", verifyInternalRequest, CustomerController.upsert);
 router.post("/apply-referral", verifyInternalRequest, CustomerController.applyReferral);
+router.post("/bulk-upsert", verifyInternalRequest, CustomerController.bulkUpsert);
 
 
 

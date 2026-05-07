@@ -343,6 +343,130 @@ const InvestmentController = {
             return res.status(500).json({ message: "Internal server error", error: error.message });
         }
     },
+    // POST /investments/bulk-sync
+    // Đồng bộ khoản đầu tư cũ — KHÔNG tính hoa hồng
+    bulkSync: async (req, res) => {
+        try {
+            const { app_code, investments } = req.body;
+
+            if (!app_code || !Array.isArray(investments) || investments.length === 0) {
+                return res.status(400).json({ message: "Thiếu app_code hoặc investments" });
+            }
+
+            if (investments.length > 500) {
+                return res.status(400).json({ message: "Tối đa 500 khoản đầu tư mỗi lần" });
+            }
+
+            const app = await AppModel.findOne({ code: app_code, is_active: true });
+            if (!app) {
+                return res.status(404).json({ message: "App không tồn tại" });
+            }
+
+            const results = {
+                total: investments.length,
+                created: 0,
+                skipped: 0,
+                failed: [],
+            };
+
+            for (const item of investments) {
+                try {
+                    // Validate bắt buộc
+                    if (!item.external_id || !item.external_investment_id
+                        || !item.product_name || !item.amount
+                        || !item.term_type || !item.term_value
+                        || !item.interest_rate || !item.invested_at || !item.maturity_at) {
+                        results.failed.push({
+                            external_investment_id: item.external_investment_id ?? null,
+                            reason: "Thiếu thông tin bắt buộc",
+                        });
+                        continue;
+                    }
+
+                    if (!["week", "month"].includes(item.term_type)) {
+                        results.failed.push({
+                            external_investment_id: item.external_investment_id,
+                            reason: "term_type phải là 'week' hoặc 'month'",
+                        });
+                        continue;
+                    }
+
+                    // Kiểm tra đã tồn tại chưa
+                    const existing = await InvestmentModel.findOne({
+                        app_id: app._id,
+                        external_investment_id: item.external_investment_id,
+                    });
+
+                    if (existing) {
+                        results.skipped++;
+                        continue;
+                    }
+
+                    // Tìm customer theo external_id
+                    const customer = await CustomerModel.findOne({
+                        app_id: app._id,
+                        external_id: item.external_id,
+                    });
+
+                    if (!customer) {
+                        results.failed.push({
+                            external_investment_id: item.external_investment_id,
+                            reason: `Không tìm thấy khách hàng với external_id: ${item.external_id}`,
+                        });
+                        continue;
+                    }
+
+                    // Kỳ hoa hồng — lưu theo tháng đầu tư nhưng không tính
+                    const investedDate = new Date(item.invested_at);
+                    const period_month = investedDate.getMonth() + 1;
+                    const period_year = investedDate.getFullYear();
+
+                    // Tạo khoản đầu tư — commission.status = "none" hoàn toàn
+                    await InvestmentModel.create({
+                        app_id: app._id,
+                        customer_id: customer._id,
+                        external_investment_id: item.external_investment_id,
+                        product_name: item.product_name,
+                        amount: item.amount,
+                        term_type: item.term_type,
+                        term_value: item.term_value,
+                        interest_rate: item.interest_rate,
+                        invested_at: new Date(item.invested_at),
+                        maturity_at: new Date(item.maturity_at),
+                        status: item.status ?? "active",
+                        commission: {
+                            receiver_type: null,
+                            sale_id: null,
+                            agent_id: null,
+                            period_month,
+                            period_year,
+                            commission_rate: 0,
+                            gross_amount: 0,
+                            tncn_rate: null,
+                            tncn_amount: 0,
+                            net_amount: 0,
+                            status: "none", // không tính hoa hồng
+                        },
+                    });
+
+                    results.created++;
+                } catch (err) {
+                    results.failed.push({
+                        external_investment_id: item.external_investment_id ?? null,
+                        reason: err.message,
+                    });
+                }
+            }
+
+            return res.status(200).json({
+                message: "Đồng bộ khoản đầu tư hoàn tất",
+                results,
+            });
+        } catch (error) {
+            console.error("Error in bulkSync:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
 };
 
 module.exports = InvestmentController;

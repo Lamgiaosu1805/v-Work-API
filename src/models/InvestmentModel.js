@@ -21,7 +21,7 @@ const InvestmentSchema = new mongoose.Schema(
         maturity_at: { type: Date, required: true },
         status: {
             type: String,
-            enum: ["active", "matured", "cancelled", "renewed"],
+            enum: ["active", "matured", "cancelled", "renewed", "early_terminated"],
             default: "active",
         },
 

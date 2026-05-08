@@ -183,6 +183,30 @@ const AuthController = {
         }
     },
 
+    resetPassword: async (req, res) => {
+        try {
+            const { accountId, newPassword } = req.body;
+
+            if (!accountId || !newPassword)
+                return res.status(400).json({ message: "Thiếu accountId hoặc newPassword" });
+
+            const account = await AccountModel.findById(accountId);
+            if (!account || account.isDeleted)
+                return res.status(404).json({ message: "Không tìm thấy tài khoản" });
+
+            const salt = await bcrypt.genSalt(10);
+            account.password = await bcrypt.hash(newPassword, salt);
+            account.isFirstLogin = true;
+            account.refreshTokens = [];
+            await account.save();
+
+            res.status(200).json({ message: "Reset mật khẩu thành công" });
+        } catch (err) {
+            console.error("Reset Password Error:", err);
+            res.status(500).json({ message: "Internal server error", error: err.message });
+        }
+    },
+
     logout: async (req, res) => {
         try {
             const { refreshToken } = req.body;

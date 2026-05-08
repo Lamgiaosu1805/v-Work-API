@@ -340,7 +340,8 @@ const UserController = {
 
       const [users, total] = await Promise.all([
         UserInfoModel.find(filter)
-          .select("-id_account -__v")
+          .select("-__v")
+          .populate("id_account", "username")
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(Number(limit))

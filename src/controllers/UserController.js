@@ -207,6 +207,58 @@ const UserController = {
     }
   },
 
+  getBirthdayThisMonth: async (req, res) => {
+  try {
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1; 
+
+    const data = await UserInfoModel.aggregate([
+      {
+        $match: {
+          isDeleted: false,
+          date_of_birth: { $exists: true, $ne: null },
+        },
+      },
+      {
+        $addFields: {
+          birth_month: { $month: "$date_of_birth" },
+        },
+      },
+      {
+        $match: {
+          birth_month: currentMonth,
+        },
+      },
+      {
+        $project: {
+          full_name: 1,
+          ma_nv: 1,
+          date_of_birth: 1,
+          age : { 
+            $subtract: [
+              { $year: new Date() },
+              { $year: "$date_of_birth" }
+            ]
+        },
+      },
+     },
+    ]);
+
+    return res.status(200).json({
+      message: `Danh sách nhân viên sinh nhật tháng ${currentMonth}`,
+      month: currentMonth,
+      total: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error("Error in getBirthdayThisMonth:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+},
+
   createAdmin: async (req, res) => {
     try {
       const { username, password } = req.body;

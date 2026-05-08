@@ -11,6 +11,7 @@ router.get("/getUsers", authenticate, isAdmin, UserController.getUsers)
 router.get("/getUserInfo", authenticate, UserController.getUserInfo)
 router.get("/getQRSale", authenticate, UserController.generateMyQR)
 router.get("/getUserById/:id", authenticate, isAdmin, UserController.getUserById)
+router.get("/birthday/this-month", authenticate, UserController.getBirthdayThisMonth);
 
 // PUT
 router.put("/updateUser/:id", authenticate, isAdmin, uploadDocuments, UserController.updateUser);

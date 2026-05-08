@@ -1,5 +1,3 @@
-const fs = require("fs");
-const path = require("path");
 const admin = require("firebase-admin");
 
 const getFirebaseAdmin = () => {
@@ -7,17 +5,22 @@ const getFirebaseAdmin = () => {
     return admin;
   }
 
-  const serviceAccountPath =
-    path.join(process.cwd(), "serviceAccountKey.json");
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
-  if (!fs.existsSync(serviceAccountPath)) {
-    throw new Error(`Firebase service account file not found: ${serviceAccountPath}`);
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error(
+      "Missing Firebase env config: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY"
+    );
   }
 
-  const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
-
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+    credential: admin.credential.cert({
+      projectId,
+      clientEmail,
+      privateKey,
+    }),
   });
 
   return admin;

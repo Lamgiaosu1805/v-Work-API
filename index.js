@@ -33,6 +33,7 @@ route(app);
     await db.connect();
 
     require('./src/jobs/genWorkSheet');
+    require('./src/jobs/cleanupDeviceTokens');
 
     const port = process.env.PORT || 3000;
     app.listen(port, () => {

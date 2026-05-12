@@ -210,9 +210,9 @@ const UserController = {
   getBirthdayThisMonth: async (req, res) => {
   try {
     const now = new Date();
-    const currentMonth = now.getMonth() + 1; 
+    const currentMonth = now.getMonth() + 1;
 
-    const data = await UserInfoModel.aggregate([
+    const users = await UserInfoModel.aggregate([
       {
         $match: {
           isDeleted: false,
@@ -240,9 +240,31 @@ const UserController = {
               { $year: "$date_of_birth" }
             ]
         },
+        },
       },
-     },
+      { $sort: { date_of_birth: 1 } },
     ]);
+
+    
+    const userIds = users.map((u) => u._id);
+    const udpList = await UserDepartmentPositionModel.find({
+      user: { $in: userIds },
+      isDeleted: false,
+    })
+      .populate("department", "department_name department_code")
+      .lean();
+
+    const udpMap = {};
+    for (const item of udpList) {
+      const uid = item.user.toString();
+      if (!udpMap[uid]) udpMap[uid] = [];
+      udpMap[uid].push({ department: item.department });
+    }
+
+    const data = users.map((u) => ({
+      ...u,
+      departments: udpMap[u._id.toString()] || [],
+    }));
 
     return res.status(200).json({
       message: `Danh sách nhân viên sinh nhật tháng ${currentMonth}`,

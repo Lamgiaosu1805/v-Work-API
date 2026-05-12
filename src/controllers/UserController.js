@@ -332,6 +332,7 @@ const UserController = {
             type: doc.type_id,
             note: doc.note,
             attachments: doc.attachments.map((a) => ({
+              _id: a._id,
               file_name: a.file_name,
               file_url: a.file_url,
               uploaded_at: a.uploaded_at,
@@ -508,6 +509,7 @@ const UserController = {
             type: doc.type_id,
             note: doc.note,
             attachments: doc.attachments.map((a) => ({
+              _id: a._id,
               file_name: a.file_name,
               file_url: a.file_url,
               uploaded_at: a.uploaded_at,
@@ -564,8 +566,9 @@ const UserController = {
       const hasFiles = Object.keys(req.files || {}).length > 0;
       const hasDepartments = req.body.userDepartments !== undefined;
       const hasSchedules = req.body.schedules !== undefined;
+      const hasDeletedAttachments = req.body.deletedAttachments !== undefined;
 
-      if (Object.keys(updates).length === 0 && !hasFiles && !hasDepartments && !hasSchedules) {
+      if (Object.keys(updates).length === 0 && !hasFiles && !hasDepartments && !hasSchedules && !hasDeletedAttachments) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({ message: "Không có trường nào được cập nhật" });
@@ -628,12 +631,50 @@ const UserController = {
         }
       }
 
+      let deletedAttachments = [];
+      if (hasDeletedAttachments) {
+        try {
+          deletedAttachments = typeof req.body.deletedAttachments === "string"
+            ? JSON.parse(req.body.deletedAttachments)
+            : req.body.deletedAttachments;
+        } catch {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({ message: "Sai định dạng deletedAttachments" });
+        }
+
+        if (!Array.isArray(deletedAttachments)) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({ message: "deletedAttachments phải là array" });
+        }
+      }
+
       const files = req.files || {};
-      if (Object.keys(files).length > 0) {
+      if (Object.keys(files).length > 0 || deletedAttachments.length > 0) {
         let userDocument = await UserDocumentModel.findOne({ user_id: id }).session(session);
 
         if (!userDocument) {
           userDocument = new UserDocumentModel({ user_id: id, documents: [] });
+        }
+
+        for (const item of deletedAttachments) {
+          const { documentTypeId, attachmentId } = item;
+          const existingDoc = userDocument.documents.find(
+            (doc) => doc.type_id.toString() === documentTypeId
+          );
+
+          if (!existingDoc) continue;
+
+          const attachmentIndex = existingDoc.attachments.findIndex((attachment) => (
+            attachment._id?.toString() === attachmentId || attachment.file_url === attachmentId
+          ));
+
+          if (attachmentIndex === -1) continue;
+
+          const [removedAttachment] = existingDoc.attachments.splice(attachmentIndex, 1);
+          const oldFilePath = path.resolve(uploadDir, path.basename(removedAttachment.file_url));
+          if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
         }
 
         for (const [type_id, fileArray] of Object.entries(files)) {
@@ -650,11 +691,7 @@ const UserController = {
           );
 
           if (existingDoc) {
-            for (const attachment of existingDoc.attachments) {
-              const oldFilePath = path.resolve(uploadDir, path.basename(attachment.file_url));
-              if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
-            }
-            existingDoc.attachments = newAttachments;
+            existingDoc.attachments.push(...newAttachments);
           } else {
             userDocument.documents.push({ type_id, attachments: newAttachments });
           }

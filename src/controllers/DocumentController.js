@@ -45,7 +45,7 @@ const DocumentController = {
                     return res.status(400).json({ message: "Thiếu tham số filename" });
                 }
 
-                const filePath = path.join("/var/www/vWork/private", filename);
+                const filePath = path.join(process.env.UPLOAD_DIR_PROD, filename);
 
                 if (!fs.existsSync(filePath)) {
                     return res.status(404).json({ message: "Không tìm thấy file trên server" });

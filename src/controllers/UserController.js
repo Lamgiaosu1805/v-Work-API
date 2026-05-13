@@ -1,5 +1,8 @@
 const mongoose = require("mongoose");
 const AccountModel = require("../models/AccountModel");
+
+// Multer decode originalname bằng latin1 — cần re-encode sang UTF-8 để giữ tiếng Việt
+const decodeFilename = (name) => Buffer.from(name, 'latin1').toString('utf8');
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
@@ -138,7 +141,7 @@ const UserController = {
 
       for (const [type_id, fileArray] of Object.entries(files)) {
         const attachments = fileArray.map((f) => ({
-          file_name: f.originalname,
+          file_name: decodeFilename(f.originalname),
           file_url: f.path,
           uploaded_at: new Date(),
           uploaded_by: req.account?._id || null,
@@ -702,7 +705,7 @@ const UserController = {
 
         for (const [type_id, fileArray] of Object.entries(files)) {
           const newAttachments = fileArray.map((f) => ({
-            file_name: f.originalname,
+            file_name: decodeFilename(f.originalname),
             file_url: f.path ?? f.originalname,
             uploaded_at: new Date(),
             uploaded_by: req.account._id,

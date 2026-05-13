@@ -252,13 +252,14 @@ const UserController = {
       isDeleted: false,
     })
       .populate("department", "department_name department_code")
+      .populate("position", "position_name")
       .lean();
 
     const udpMap = {};
     for (const item of udpList) {
       const uid = item.user.toString();
       if (!udpMap[uid]) udpMap[uid] = [];
-      udpMap[uid].push({ department: item.department });
+      udpMap[uid].push({ department: item.department, position: item.position });
     }
 
     const data = users.map((u) => ({

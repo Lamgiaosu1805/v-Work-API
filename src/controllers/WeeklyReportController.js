@@ -4,6 +4,7 @@ const moment = require("moment-timezone");
 const WeeklyReportModel = require("../models/WeeklyReportModel");
 const InternalFileModel = require("../models/InternalFileModel");
 const AccountModel = require("../models/AccountModel");
+const DepartmentModel = require("../models/DepartmentModel");
 const { getUserDeptIds, canViewDept, getFullNameMap } = require("./InternalFileController");
 const { getInternalFilePath } = require("../middlewares/uploadInternal");
 const { WEEKLY_REPORT_SUBFOLDER } = require("../middlewares/uploadWeeklyReport");
@@ -67,11 +68,35 @@ const WeeklyReportController = {
             const weekStart = getWeekStart(weekDate);
             const deadline = getDeadlineOfWeek(weekStart);
 
-            const reports = await WeeklyReportModel.find({ weekStart })
-                .populate("department", "department_name department_code")
-                .populate("file", "originalName mimeType size")
-                .populate("submittedBy", "username")
-                .sort({ status: 1 });
+            const [departments, reports] = await Promise.all([
+                DepartmentModel.find({ isDeleted: false }).select("_id department_name department_code"),
+                WeeklyReportModel.find({ weekStart })
+                    .populate("department", "department_name department_code")
+                    .populate("file", "originalName mimeType size")
+                    .populate("submittedBy", "username"),
+            ]);
+
+            const reportMap = new Map(reports.map((r) => [r.department._id.toString(), r]));
+
+            // Thứ tự ưu tiên hiển thị: chưa nộp trước, đã nộp sau
+            const STATUS_ORDER = { missing: 0, pending: 1, not_started: 2, late: 3, submitted: 4 };
+
+            const allEntries = departments
+                .map((dept) => {
+                    const report = reportMap.get(dept._id.toString());
+                    if (report) return report;
+                    return {
+                        department: { _id: dept._id, department_name: dept.department_name, department_code: dept.department_code },
+                        weekStart,
+                        deadline,
+                        status: "not_started",
+                        file: null,
+                        submittedBy: null,
+                        submittedAt: null,
+                        note: null,
+                    };
+                })
+                .sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9));
 
             return res.status(200).json({
                 message: "Thành công",
@@ -79,7 +104,7 @@ const WeeklyReportController = {
                     weekStart: moment(weekStart).tz(TZ).format("DD/MM/YYYY"),
                     deadline: moment(deadline).tz(TZ).format("HH:mm DD/MM/YYYY"),
                 },
-                data: await mergeFullNames(reports),
+                data: await mergeFullNames(allEntries),
             });
         } catch (error) {
             return res.status(500).json({ message: "Lỗi server", error: error.message });

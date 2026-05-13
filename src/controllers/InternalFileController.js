@@ -7,6 +7,14 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const AccountModel = require("../models/AccountModel");
 const { getInternalFilePath } = require("../middlewares/uploadInternal");
 
+// Trả về map { accountId → full_name } cho danh sách accountIds
+async function getFullNameMap(accountIds) {
+    const ids = accountIds.filter(Boolean);
+    if (!ids.length) return {};
+    const infos = await UserInfoModel.find({ id_account: { $in: ids }, isDeleted: false }).select("id_account full_name");
+    return Object.fromEntries(infos.map((u) => [u.id_account.toString(), u.full_name]));
+}
+
 // Lấy danh sách department IDs mà account này thuộc về
 async function getUserDeptIds(accountId) {
     const userInfo = await UserInfoModel.findOne({ id_account: accountId, isDeleted: false });
@@ -85,7 +93,14 @@ const InternalFileController = {
                 .populate("uploadedBy", "username")
                 .sort({ createdAt: -1 });
 
-            return res.status(200).json({ message: "Thành công", data: files });
+            const fullNameMap = await getFullNameMap(files.map((f) => f.uploadedBy?._id));
+            const data = files.map((f) => {
+                const obj = f.toJSON();
+                if (obj.uploadedBy) obj.uploadedBy.full_name = fullNameMap[obj.uploadedBy._id?.toString()] || null;
+                return obj;
+            });
+
+            return res.status(200).json({ message: "Thành công", data });
         } catch (error) {
             return res.status(500).json({ message: "Lỗi server", error: error.message });
         }
@@ -238,4 +253,4 @@ const InternalFileController = {
     },
 };
 
-module.exports = { InternalFileController, getUserDeptIds, canViewDept };
+module.exports = { InternalFileController, getUserDeptIds, canViewDept, getFullNameMap };

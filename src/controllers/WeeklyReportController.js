@@ -4,7 +4,7 @@ const moment = require("moment-timezone");
 const WeeklyReportModel = require("../models/WeeklyReportModel");
 const InternalFileModel = require("../models/InternalFileModel");
 const AccountModel = require("../models/AccountModel");
-const { getUserDeptIds, canViewDept } = require("./InternalFileController");
+const { getUserDeptIds, canViewDept, getFullNameMap } = require("./InternalFileController");
 const { getInternalFilePath } = require("../middlewares/uploadInternal");
 const { WEEKLY_REPORT_SUBFOLDER } = require("../middlewares/uploadWeeklyReport");
 
@@ -18,19 +18,26 @@ function getDeadlineOfWeek(weekStartDate) {
     return moment(weekStartDate).tz(TZ).add(4, "days").set({ hour: 18, minute: 0, second: 0, millisecond: 0 }).toDate();
 }
 
-// Xác định status khi nộp/nộp lại
 function resolveStatus(existingStatus, deadline) {
     const isLate = moment().tz(TZ).isAfter(moment(deadline).tz(TZ));
-
-    if (existingStatus === "submitted") return "submitted"; // đã nộp đúng hạn, update không bị phạt
-    if (existingStatus === "late") return "late";           // đã muộn, vẫn muộn
-    // pending hoặc missing → xem có còn trong deadline không
+    if (existingStatus === "submitted") return "submitted";
+    if (existingStatus === "late") return "late";
     return isLate ? "late" : "submitted";
+}
+
+// Merge full_name vào field submittedBy của danh sách report
+async function mergeFullNames(reports) {
+    const accountIds = reports.map((r) => r.submittedBy?._id).filter(Boolean);
+    const fullNameMap = await getFullNameMap(accountIds);
+    return reports.map((r) => {
+        const obj = r.toJSON ? r.toJSON() : r;
+        if (obj.submittedBy) obj.submittedBy.full_name = fullNameMap[obj.submittedBy._id?.toString()] || null;
+        return obj;
+    });
 }
 
 const WeeklyReportController = {
     // GET /weekly-reports/my-dept
-    // Trạng thái báo cáo tuần hiện tại của phòng ban user (hoặc ?week=2025-05-12)
     getMyDeptStatus: async (req, res) => {
         try {
             const accountId = req.account._id;
@@ -42,22 +49,18 @@ const WeeklyReportController = {
                 return res.status(404).json({ message: "Bạn chưa thuộc phòng ban nào" });
             }
 
-            const reports = await WeeklyReportModel.find({
-                department: { $in: userDeptIds },
-                weekStart,
-            })
+            const reports = await WeeklyReportModel.find({ department: { $in: userDeptIds }, weekStart })
                 .populate("department", "department_name department_code")
                 .populate("file", "originalName mimeType size")
                 .populate("submittedBy", "username");
 
-            return res.status(200).json({ message: "Thành công", data: reports });
+            return res.status(200).json({ message: "Thành công", data: await mergeFullNames(reports) });
         } catch (error) {
             return res.status(500).json({ message: "Lỗi server", error: error.message });
         }
     },
 
     // GET /weekly-reports/admin?week=2025-05-12
-    // Admin xem trạng thái tất cả phòng ban trong tuần
     getAdminDashboard: async (req, res) => {
         try {
             const weekDate = req.query.week ? new Date(req.query.week) : new Date();
@@ -76,7 +79,7 @@ const WeeklyReportController = {
                     weekStart: moment(weekStart).tz(TZ).format("DD/MM/YYYY"),
                     deadline: moment(deadline).tz(TZ).format("HH:mm DD/MM/YYYY"),
                 },
-                data: reports,
+                data: await mergeFullNames(reports),
             });
         } catch (error) {
             return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -84,7 +87,6 @@ const WeeklyReportController = {
     },
 
     // GET /weekly-reports/:deptId/history?page=1&limit=10
-    // Lịch sử nộp báo cáo của phòng ban
     getHistory: async (req, res) => {
         try {
             const { deptId } = req.params;
@@ -106,7 +108,7 @@ const WeeklyReportController = {
 
             return res.status(200).json({
                 message: "Thành công",
-                data: reports,
+                data: await mergeFullNames(reports),
                 pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
             });
         } catch (error) {
@@ -115,14 +117,11 @@ const WeeklyReportController = {
     },
 
     // POST /weekly-reports/:deptId/submit
-    // Nộp hoặc nộp lại báo cáo tuần
-    // multer (uploadWeeklyReport) đã chạy trước, file nằm trong req.file
     submitReport: async (req, res) => {
         const { deptId } = req.params;
         const accountId = req.account._id;
         const { note = "" } = req.body;
 
-        // Kiểm tra quyền trước — không cần giữ transaction trong lúc auth check
         const account = await AccountModel.findById(accountId);
         const userDeptIds = await getUserDeptIds(accountId);
         const isAdmin = account?.role === "admin";
@@ -139,8 +138,6 @@ const WeeklyReportController = {
 
         const session = await mongoose.startSession();
         session.startTransaction();
-
-        // Path file cũ — chỉ xóa vật lý SAU KHI transaction commit thành công
         let oldFilePath = null;
 
         try {
@@ -152,7 +149,6 @@ const WeeklyReportController = {
                 report = new WeeklyReportModel({ department: deptId, weekStart, deadline, status: "pending" });
             }
 
-            // Soft-delete InternalFile cũ trong transaction
             if (report.file) {
                 const oldFile = await InternalFileModel.findById(report.file).session(session);
                 if (oldFile) {
@@ -162,7 +158,6 @@ const WeeklyReportController = {
                 }
             }
 
-            // Tạo InternalFile mới trong transaction (dùng array syntax khi có session)
             const [newFile] = await InternalFileModel.create([{
                 originalName: req.file.originalname,
                 filename: req.file.filename,
@@ -175,7 +170,6 @@ const WeeklyReportController = {
                 department: deptId,
             }], { session });
 
-            // Cập nhật WeeklyReport trong transaction
             report.file = newFile._id;
             report.submittedAt = new Date();
             report.submittedBy = accountId;
@@ -185,20 +179,22 @@ const WeeklyReportController = {
 
             await session.commitTransaction();
 
-            // Xóa file vật lý cũ chỉ sau khi DB đã commit thành công
             if (oldFilePath && fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
+
+            await report.populate([
+                { path: "file", select: "originalName mimeType size" },
+                { path: "submittedBy", select: "username" },
+                { path: "department", select: "department_name department_code" },
+            ]);
+
+            const [data] = await mergeFullNames([report]);
 
             return res.status(200).json({
                 message: report.status === "late" ? "Nộp báo cáo thành công (trễ hạn)" : "Nộp báo cáo thành công",
-                data: await report.populate([
-                    { path: "file", select: "originalName mimeType size" },
-                    { path: "submittedBy", select: "username" },
-                    { path: "department", select: "department_name department_code" },
-                ]),
+                data,
             });
         } catch (error) {
             await session.abortTransaction();
-            // Xóa file mới vừa upload vì transaction thất bại
             if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
             return res.status(500).json({ message: "Lỗi server", error: error.message });
         } finally {
@@ -207,7 +203,6 @@ const WeeklyReportController = {
     },
 
     // GET /weekly-reports/file/:reportId/view
-    // Xem file báo cáo (check quyền)
     viewReportFile: async (req, res) => {
         try {
             const { reportId } = req.params;

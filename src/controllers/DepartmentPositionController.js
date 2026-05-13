@@ -1,11 +1,12 @@
 const DepartmentModel = require("../models/DepartmentModel");
 const PositionModel = require("../models/PositionModel");
+const { ensureFolderForDept } = require("../jobs/ensureDeptFolders");
 
 const DepartmentPositionController = {
     createDepartment: async (req, res) => {
         try {
             const { department_name, department_code, description } = req.body
-            if (!department_name, !department_code) {
+            if (!department_name || !department_code) {
                 return res.status(400).json({ message: 'Tên và mã phòng ban là bắt buộc' });
             }
             const newDepartment = new DepartmentModel({
@@ -14,6 +15,7 @@ const DepartmentPositionController = {
                 description
             })
             await newDepartment.save();
+            ensureFolderForDept(department_code);
             return res.status(201).json({
                 message: 'Tạo phòng ban thành công',
                 data: newDepartment,

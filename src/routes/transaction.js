@@ -3,6 +3,6 @@ const router = express.Router();
 const TransactionController = require("../controllers/TransactionController");
 const verifyInternalRequest = require("../middlewares/verifyInternalRequest");
 
-router.post("/sync-history", TransactionController.syncHistory);
+router.post("/sync-history", verifyInternalRequest, TransactionController.syncHistory);
 
 module.exports = router;

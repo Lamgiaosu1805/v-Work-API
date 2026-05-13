@@ -15,7 +15,7 @@ function getWeekStart(date) {
 }
 
 function getDeadlineOfWeek(weekStartDate) {
-    return moment(weekStartDate).tz(TZ).add(4, "days").set({ hour: 18, minute: 0, second: 0, millisecond: 0 }).toDate();
+    return moment(weekStartDate).tz(TZ).add(4, "days").set({ hour: 17, minute: 0, second: 0, millisecond: 0 }).toDate();
 }
 
 function resolveStatus(existingStatus, deadline) {

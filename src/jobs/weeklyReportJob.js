@@ -13,7 +13,7 @@ function getWeekStart() {
 }
 
 function getDeadline() {
-    return moment().tz(TZ).startOf("isoWeek").add(4, "days").set({ hour: 18, minute: 0, second: 0, millisecond: 0 }).toDate(); // Thứ 6 18:00
+    return moment().tz(TZ).startOf("isoWeek").add(4, "days").set({ hour: 17, minute: 0, second: 0, millisecond: 0 }).toDate(); // Thứ 6 17:00
 }
 
 async function getAccountIdsInDept(deptId) {
@@ -72,8 +72,8 @@ cron.schedule("0 8 * * 5", async () => {
     }
 }, { timezone: TZ });
 
-// Thứ 6 lúc 18:00 — chốt deadline, đánh dấu missing
-cron.schedule("0 18 * * 5", async () => {
+// Thứ 6 lúc 17:00 — chốt deadline, đánh dấu missing
+cron.schedule("0 17 * * 5", async () => {
     try {
         const weekStart = getWeekStart();
         const pendingReports = await WeeklyReportModel.find({ weekStart, status: "pending" }).select("department");
@@ -97,7 +97,7 @@ cron.schedule("0 18 * * 5", async () => {
             )
         );
 
-        console.log(`[Weekly Report] Thứ 6 18:00 — Đánh dấu ${pendingReports.length} phòng ban không nộp (missing)`);
+        console.log(`[Weekly Report] Thứ 6 17:00 — Đánh dấu ${pendingReports.length} phòng ban không nộp (missing)`);
     } catch (err) {
         console.error("[Weekly Report] Lỗi cron 18:00:", err.message);
     }

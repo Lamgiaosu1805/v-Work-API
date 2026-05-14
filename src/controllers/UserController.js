@@ -34,6 +34,7 @@ const UserController = {
         address,
         tinh_trang_hon_nhan,
         employment_type,
+        branch_id,
       } = req.body;
 
       let { userDepartments = [], schedules = [] } = req.body;
@@ -130,6 +131,7 @@ const UserController = {
             id_account: account._id,
             ma_nv: maNV,
             employment_type,
+            branch_id: branch_id || null,
           },
         ],
         { session }
@@ -580,6 +582,7 @@ const UserController = {
         "address",
         "tinh_trang_hon_nhan",
         "employment_type",
+        "branch_id",
       ];
 
       const updates = {};

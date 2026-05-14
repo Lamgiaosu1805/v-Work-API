@@ -14,6 +14,7 @@ const notificationRouter = require('./notification')
 const internalFileRouter = require('./internalFile')
 const weeklyReportRouter = require('./weeklyReport')
 const transactionRouter = require('./transaction')
+const branchRouter = require('./branch')
 
 const route = (app) => {
     app.use(`/user`, userRouter)
@@ -32,6 +33,7 @@ const route = (app) => {
     app.use(`/transactions`, transactionRouter)
     app.use(`/internal-files`, internalFileRouter)
     app.use(`/weekly-reports`, weeklyReportRouter)
+    app.use(`/branch`, branchRouter)
 }
 
 module.exports = route;

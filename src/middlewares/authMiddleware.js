@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const AccountModel = require("../models/AccountModel");
+const redis = require('../config/redis');
 
 async function authenticate(req, res, next) {
   try {
@@ -8,7 +9,17 @@ async function authenticate(req, res, next) {
       return res.status(401).json({ errorCode: "MISSING_TOKEN", message: "Không có access token" });
     }
 
-    const token = authHeader.split(" ")[1];
+    const token = authHeader.split(" ")[1]; // "Bearer <token>"
+
+    const isBlacklisted = await redis.get(`blacklist:${token}`);
+    if (isBlacklisted) {
+      return res.status(401).json({
+      errorCode: 'TOKEN_REVOKED',
+      message: 'Token đã bị thu hồi, vui lòng đăng nhập lại'
+      });
+    }
+
+    // ✅ Verify token
     const decoded = jwt.verify(token, process.env.SECRET_KEY);
 
     const account = await AccountModel.findById(decoded.id);

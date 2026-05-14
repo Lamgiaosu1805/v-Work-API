@@ -14,6 +14,7 @@ const notificationRouter = require('./notification')
 const internalFileRouter = require('./internalFile')
 const weeklyReportRouter = require('./weeklyReport')
 const transactionRouter = require('./transaction')
+const adminCustomerRouter = require('./adminCustomer')
 
 const route = (app) => {
     app.use(`/user`, userRouter)
@@ -24,6 +25,7 @@ const route = (app) => {
     app.use(`/attendance`, attendanceRouter)
     app.use(`/referral`, referralRouter)
     app.use(`/customer`, customerRouter)
+    app.use(`/admin/customers`, adminCustomerRouter)
     app.use(`/app`, appRouter)
     app.use(`/agents`, agentRouter)
     app.use(`/investments`, investmentRouter)

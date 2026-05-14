@@ -10,7 +10,7 @@ router.get("/getUsers", authenticate, hasModuleAccess("hrm"), UserController.get
 router.get("/getUserInfo", authenticate, UserController.getUserInfo);
 router.get("/getQRSale", authenticate, UserController.generateMyQR);
 router.get("/getUserById/:id", authenticate, hasModuleAccess("hrm"), UserController.getUserById);
-router.get("/birthday/this-month", authenticate, hasModuleAccess("hrm"), UserController.getBirthdayThisMonth);
+router.get("/birthday/this-month", authenticate, UserController.getBirthdayThisMonth);
 
 // PUT
 router.put("/updateUser/:id", authenticate, canManage("hrm"), uploadDocuments, UserController.updateUser);

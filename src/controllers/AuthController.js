@@ -68,6 +68,8 @@ const AuthController = {
                     id: account._id,
                     username: account.username,
                     role: account.role,
+                    module_access: account.module_access || [],
+                    dept_scope: account.dept_scope,
                 },
             });
         } catch (err) {

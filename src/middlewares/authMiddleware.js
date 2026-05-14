@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const AccountModel = require("../models/AccountModel");
+const redis = require('../config/redis');
 
 async function authenticate(req, res, next) {
   try {
@@ -13,6 +14,14 @@ async function authenticate(req, res, next) {
     }
 
     const token = authHeader.split(" ")[1]; // "Bearer <token>"
+
+    const isBlacklisted = await redis.get(`blacklist:${token}`);
+    if (isBlacklisted) {
+      return res.status(401).json({
+      errorCode: 'TOKEN_REVOKED',
+      message: 'Token đã bị thu hồi, vui lòng đăng nhập lại'
+      });
+    }
 
     // ✅ Verify token
     const decoded = jwt.verify(token, process.env.SECRET_KEY);

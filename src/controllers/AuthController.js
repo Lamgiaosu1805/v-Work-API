@@ -1,6 +1,7 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const AccountModel = require("../models/AccountModel");
+const redis = require('../config/redis');
 
 const JWT_SECRET = process.env.SECRET_KEY;
 const JWT_REFRESH_SECRET = process.env.REFRESH_SECRET_KEY;
@@ -180,6 +181,45 @@ const AuthController = {
         } catch (err) {
             console.error("Refresh Token Error:", err);
             res.status(500).json({ message: "Lỗi hệ thống", error: err.message });
+        }
+    },
+    
+    changePassword: async (req, res) => {
+        try {
+            const { currentPassword, newPassword } = req.body;
+            const accountId = req.account._id;
+
+        if (!currentPassword || !newPassword)
+            return res.status(400).json({ message: "Thiếu currentPassword hoặc newPassword" });
+
+        const account = await AccountModel.findById(accountId);
+        if (!account || account.isDeleted)
+            return res.status(404).json({ message: "Không tìm thấy tài khoản" });
+
+        const isMatch = await bcrypt.compare(currentPassword, account.password);
+        if (!isMatch)
+            return res.status(400).json({ message: "Mật khẩu hiện tại không đúng" });
+
+        const isSame = await bcrypt.compare(newPassword, account.password);
+        if (isSame)
+            return res.status(400).json({ message: "Mật khẩu mới không được trùng mật khẩu cũ" });
+
+        account.password = await bcrypt.hash(newPassword, 10);
+        account.refreshTokens = [];
+        // Blacklist access token hiện tại
+        const authHeader = req.headers.authorization;
+        const currentToken = authHeader.split(' ')[1];
+        const decoded = jwt.decode(currentToken);
+        const ttl = decoded.exp - Math.floor(Date.now() / 1000); // số giây còn lại
+        if (ttl > 0) {
+            await redis.set(`blacklist:${currentToken}`, '1', 'EX', ttl);
+        }
+        await account.save();
+
+        res.status(200).json({ message: "Đổi mật khẩu thành công, vui lòng đăng nhập lại" });
+        } catch (err) {
+        console.error("Change Password Error:", err);
+        res.status(500).json({ message: "Internal server error", error: err.message });
         }
     },
 

@@ -11,6 +11,7 @@ const UserInfoModel = new mongoose.Schema(
     address: { type: String, required: true },
     tinh_trang_hon_nhan: { type: Number, required: true }, // 0: Độc thân, 1: Đã kết hôn, 2: Khác
     id_account: { type: mongoose.Schema.Types.ObjectId, ref: 'account', required: true },
+    branch_id: { type: mongoose.Schema.Types.ObjectId, ref: "branch", default: null },
     ma_nv: { type: String, required: true, unique: true },
     employment_type: {
       type: String,

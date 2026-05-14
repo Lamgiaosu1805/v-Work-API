@@ -240,7 +240,52 @@ const AuthController = {
                 error: err.message,
             });
         }
-    }
+    },
+
+    setPermission: async (req, res) => {
+        try {
+            const { accountId } = req.params;
+            const { role, module_access, dept_scope } = req.body;
+
+            const account = await AccountModel.findById(accountId);
+            if (!account || account.isDeleted)
+                return res.status(404).json({ message: "Không tìm thấy tài khoản" });
+
+            if (role !== undefined) {
+                if (!["admin", "manager", "user"].includes(role))
+                    return res.status(400).json({ message: "role không hợp lệ" });
+                account.role = role;
+            }
+
+            if (module_access !== undefined) {
+                const valid = ["hrm", "workplace", "crm"];
+                if (!Array.isArray(module_access) || module_access.some((m) => !valid.includes(m)))
+                    return res.status(400).json({ message: "module_access không hợp lệ" });
+                account.module_access = module_access;
+            }
+
+            if (dept_scope !== undefined) {
+                if (!["all", "own"].includes(dept_scope))
+                    return res.status(400).json({ message: "dept_scope không hợp lệ" });
+                account.dept_scope = dept_scope;
+            }
+
+            await account.save();
+
+            return res.status(200).json({
+                message: "Cập nhật quyền thành công",
+                data: {
+                    _id: account._id,
+                    username: account.username,
+                    role: account.role,
+                    module_access: account.module_access,
+                    dept_scope: account.dept_scope,
+                },
+            });
+        } catch (err) {
+            return res.status(500).json({ message: "Lỗi server", error: err.message });
+        }
+    },
 
 };
 

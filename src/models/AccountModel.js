@@ -6,7 +6,9 @@ const AccountModel = new mongoose.Schema(
     username: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     isFirstLogin: { type: Boolean, default: true },
-    role: { type: String, enum: ["admin", "user"], default: "user" },
+    role: { type: String, enum: ["admin", "manager", "user"], default: "user" },
+    module_access: { type: [String], enum: ["hrm", "workplace", "crm"], default: [] },
+    dept_scope: { type: String, enum: ["all", "own"], default: "own" },
     refreshTokens: [
       {
         token: String,

@@ -11,4 +11,7 @@ router.get('/getAllPositions', authenticate, DepartmentPositionController.getAll
 router.post('/createDepartment', authenticate, isAdmin, DepartmentPositionController.createDepartment);
 router.post('/createPosition', authenticate, isAdmin, DepartmentPositionController.createPosition);
 
+// PUT
+router.put('/update/:id', authenticate, isAdmin, DepartmentPositionController.updateDepartment);
+
 module.exports = router;

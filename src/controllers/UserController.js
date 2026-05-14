@@ -318,15 +318,18 @@ const UserController = {
   getUserInfo: async (req, res) => {
     try {
       const account = req.account;
-      const isAdmin = account.role === "admin";
 
       const user = await UserInfoModel.findOne({ id_account: account._id });
 
-      // Tài khoản admin không có userInfo → trả isAdmin + các field null
       if (!user) {
         return res.status(200).json({
-          isAdmin,
+          id: account._id,
+          username: account.username,
+          role: account.role,
+          module_access: account.module_access || [],
+          dept_scope: account.dept_scope,
           full_name: null,
+          avatar: null,
           ma_nv: null,
           departments: [],
           documents: [],
@@ -347,7 +350,11 @@ const UserController = {
       ]);
 
       return res.status(200).json({
-        isAdmin,
+        id: account._id,
+        username: account.username,
+        role: account.role,
+        module_access: account.module_access || [],
+        dept_scope: account.dept_scope,
         ...user.toObject(),
         departments: userDepartments.map((item) => ({
           department: item.department,
@@ -420,7 +427,7 @@ const UserController = {
       const [users, total] = await Promise.all([
         UserInfoModel.find(filter)
           .select("-__v")
-          .populate("id_account", "username")
+          .populate("id_account", "username role module_access dept_scope")
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(Number(limit))

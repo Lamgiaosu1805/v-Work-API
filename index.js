@@ -12,8 +12,8 @@ const app = express();
 // Middlewares
 app.use(cors()); // Mở hoàn toàn
 app.use(morgan('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '500kb' }));
+app.use(express.urlencoded({ limit: '500kb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Request & Response logging middleware

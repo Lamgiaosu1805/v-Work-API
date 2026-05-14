@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { authenticate, isAdmin } = require("../middlewares/authMiddleware");
+const { authenticate, canManage } = require("../middlewares/authMiddleware");
 const { uploadWeeklyReport } = require("../middlewares/uploadWeeklyReport");
 const WeeklyReportController = require("../controllers/WeeklyReportController");
 
@@ -8,7 +8,7 @@ const WeeklyReportController = require("../controllers/WeeklyReportController");
 router.get("/my-dept", authenticate, WeeklyReportController.getMyDeptStatus);
 
 // Admin: xem tất cả phòng ban trong tuần (?week=YYYY-MM-DD)
-router.get("/admin", authenticate, isAdmin, WeeklyReportController.getAdminDashboard);
+router.get("/admin", authenticate, canManage("workplace"), WeeklyReportController.getAdminDashboard);
 
 // Lịch sử nộp của 1 phòng ban (?page=1&limit=10)
 router.get("/:deptId/history", authenticate, WeeklyReportController.getHistory);

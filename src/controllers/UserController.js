@@ -95,6 +95,12 @@ const UserController = {
         }
       }
 
+      if (!branch_id) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Vui lòng nhập thông tin chi nhánh" });
+      }
+
       // Kiểm tra trùng CCCD
       const existingUser = await UserInfoModel.findOne({ cccd }).session(session);
       if (existingUser) {
@@ -169,7 +175,7 @@ const UserController = {
           await session.abortTransaction();
           session.endSession();
           return res.status(400).json({
-            message: "Thiếu department_id hoặc position_id trong userDepartments",
+            message: "Vui lòng chọn vị trí phòng ban",
           });
         }
 
@@ -630,7 +636,7 @@ const UserController = {
           const invalid = userDepartmentsData.find((i) => !i.department_id || !i.position_id);
           if (invalid) {
             await session.abortTransaction(); session.endSession();
-            return res.status(400).json({ message: "Thiếu department_id hoặc position_id" });
+            return res.status(400).json({ message: "Vui lòng chọn vị trí phòng ban" });
           }
           await UserDepartmentPositionModel.deleteMany({ user: id }).session(session);
           await UserDepartmentPositionModel.insertMany(

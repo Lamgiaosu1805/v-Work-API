@@ -1,9 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const BranchController = require("../controllers/BranchController");
-const { authenticate, isAdmin } = require("../middlewares/authMiddleware");
+const { authenticate, isAdmin, hasModuleAccess } = require("../middlewares/authMiddleware");
 
-router.get("/getAll", authenticate, BranchController.getAll);
+router.get("/getAll", authenticate, hasModuleAccess("hrm"), BranchController.getAll);
 
 router.post("/create", authenticate, isAdmin, BranchController.create);
 

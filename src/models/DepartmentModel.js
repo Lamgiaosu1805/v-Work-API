@@ -6,6 +6,8 @@ const DepartmentModel = new mongoose.Schema(
         department_name: { type: String, required: true },
         department_code: { type: String, required: true, unique: true },
         description: { type: String, default: "" },
+        branch: { type: mongoose.Schema.Types.ObjectId, ref: "branch", required: true },
+        parent: { type: mongoose.Schema.Types.ObjectId, ref: "department", default: null },
         ...BaseSchema.obj,
     },
     {

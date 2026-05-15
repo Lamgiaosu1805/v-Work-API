@@ -30,10 +30,16 @@ router.post('/', authenticate, upload.single('file'), async (req, res) => {
     try {
         const form = new FormData();
         form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
-        if (req.body.copies)              form.append('copies', String(req.body.copies));
-        if (req.body.duplex !== undefined) form.append('duplex', String(req.body.duplex));
+
+        const { copies, duplex, paperSize, orientation, pageRange, fitToPage, jobName } = req.body;
+        if (copies)               form.append('copies',      String(copies));
+        if (duplex !== undefined)  form.append('duplex',      String(duplex));
+        if (paperSize)             form.append('paperSize',   String(paperSize));
+        if (orientation)           form.append('orientation', String(orientation));
+        if (pageRange)             form.append('pageRange',   String(pageRange));
+        if (fitToPage !== undefined) form.append('fitToPage', String(fitToPage));
         form.append('user', req.account.username);
-        if (req.body.jobName)             form.append('jobName', String(req.body.jobName));
+        if (jobName)               form.append('jobName',     String(jobName));
 
         const { data } = await axios.post(`${PRINT_URL}/api/print`, form, {
             headers: { 'x-api-secret': PRINT_SECRET },

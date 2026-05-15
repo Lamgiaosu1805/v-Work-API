@@ -14,4 +14,7 @@ router.post('/createPosition', authenticate, isAdmin, DepartmentPositionControll
 // PUT
 router.put('/update/:id', authenticate, isAdmin, DepartmentPositionController.updateDepartment);
 
+// DELETE
+router.delete('/delete/:id', authenticate, isAdmin, DepartmentPositionController.deleteDepartment);
+
 module.exports = router;

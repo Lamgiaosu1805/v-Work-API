@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const DepartmentModel = require("../models/DepartmentModel");
+const { LEAF_TYPES } = require("../models/DepartmentModel");
 
 const getBaseDir = () => {
     const dir = process.env.NODE_ENV === "production"
@@ -22,10 +23,10 @@ function ensureFolderForDept(departmentCode) {
     return false;
 }
 
-// Chạy khi server khởi động: tạo folder cho tất cả phòng ban chưa có
+// Chạy khi server khởi động: tạo folder cho node lá (department + branch)
 async function ensureAllDeptFolders() {
     try {
-        const departments = await DepartmentModel.find({ isDeleted: false });
+        const departments = await DepartmentModel.find({ isDeleted: false, type: { $in: LEAF_TYPES } });
         let created = 0;
 
         for (const dept of departments) {

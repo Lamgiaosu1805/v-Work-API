@@ -8,6 +8,8 @@ const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
 const bcrypt = require('bcrypt');
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
+const { LEAF_TYPES } = require("../models/DepartmentModel");
+const DepartmentModel = require("../models/DepartmentModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
 const QRCode = require("qrcode");
@@ -177,6 +179,16 @@ const UserController = {
           return res.status(400).json({
             message: "Vui lòng chọn vị trí phòng ban",
           });
+        }
+
+        // Chỉ cho phép gán vào node lá (department/branch)
+        const deptIds = userDepartments.map((i) => i.department_id);
+        const depts = await DepartmentModel.find({ _id: { $in: deptIds }, isDeleted: false }).select("type").session(session);
+        const nonLeaf = depts.find((d) => !LEAF_TYPES.includes(d.type));
+        if (nonLeaf) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({ message: "Chỉ được gán nhân viên vào phòng ban hoặc chi nhánh (không phải khối/ban)" });
         }
 
         const udpDocs = userDepartments.map((item) => ({
@@ -644,6 +656,14 @@ const UserController = {
           if (invalid) {
             await session.abortTransaction(); session.endSession();
             return res.status(400).json({ message: "Vui lòng chọn vị trí phòng ban" });
+          }
+          // Chỉ cho phép gán vào node lá
+          const deptIds = userDepartmentsData.map((i) => i.department_id);
+          const depts = await DepartmentModel.find({ _id: { $in: deptIds }, isDeleted: false }).select("type").session(session);
+          const nonLeaf = depts.find((d) => !LEAF_TYPES.includes(d.type));
+          if (nonLeaf) {
+            await session.abortTransaction(); session.endSession();
+            return res.status(400).json({ message: "Chỉ được gán nhân viên vào phòng ban hoặc chi nhánh (không phải khối/ban)" });
           }
           await UserDepartmentPositionModel.deleteMany({ user: id }).session(session);
           await UserDepartmentPositionModel.insertMany(

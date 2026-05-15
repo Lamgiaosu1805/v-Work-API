@@ -1,7 +1,7 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const AccountModel = require("../models/AccountModel");
-const redis = require('../config/redis');
+
 
 const JWT_SECRET = process.env.SECRET_KEY;
 const JWT_REFRESH_SECRET = process.env.REFRESH_SECRET_KEY;
@@ -207,14 +207,9 @@ const AuthController = {
             return res.status(400).json({ message: "Mật khẩu mới không được trùng mật khẩu cũ" });
 
         account.password = await bcrypt.hash(newPassword, 10);
-        account.refreshTokens = [];
-        // Blacklist access token hiện tại
-        const authHeader = req.headers.authorization;
-        const currentToken = authHeader.split(' ')[1];
-        const decoded = jwt.decode(currentToken);
-        const ttl = decoded.exp - Math.floor(Date.now() / 1000); // số giây còn lại
-        if (ttl > 0) {
-            await redis.set(`blacklist:${currentToken}`, '1', 'EX', ttl);
+        account.refreshTokens = account.refreshTokens.map((t) => ({...t.toObject(), revoked: true, }));  
+        if (account.isFirstLogin) {
+            account.isFirstLogin = false;
         }
         await account.save();
 

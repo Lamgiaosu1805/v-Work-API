@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const AccountModel = require("../models/AccountModel");
 
+
 async function authenticate(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
@@ -8,7 +9,9 @@ async function authenticate(req, res, next) {
       return res.status(401).json({ errorCode: "MISSING_TOKEN", message: "Không có access token" });
     }
 
-    const token = authHeader.split(" ")[1];
+    const token = authHeader.split(" ")[1]; // "Bearer <token>"
+
+    // ✅ Verify token
     const decoded = jwt.verify(token, process.env.SECRET_KEY);
 
     const account = await AccountModel.findById(decoded.id);

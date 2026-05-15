@@ -14,8 +14,7 @@ const PRINT_SECRET = process.env.PRINT_SERVICE_SECRET;
 
 router.get('/status', authenticate, async (_req, res) => {
     try {
-        const { data } = await axios.get(`${PRINT_URL}/api/status`, {
-            headers: { 'x-api-secret': PRINT_SECRET },
+        const { data } = await axios.get(`${PRINT_URL}/health`, {
             timeout: 8000,
         });
         return res.json(data);

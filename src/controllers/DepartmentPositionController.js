@@ -174,6 +174,45 @@ const DepartmentPositionController = {
             return res.status(500).json({ message: "Lỗi server", error: error.message });
         }
     },
+
+    updatePosition: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { position_name, description } = req.body;
+
+            const position = await PositionModel.findOne({ _id: id, isDeleted: false });
+            if (!position)
+                return res.status(404).json({ message: "Chức vụ không tồn tại" });
+
+            if (position_name) position.position_name = position_name;
+            if (description !== undefined) position.description = description;
+
+            await position.save();
+            return res.status(200).json({ message: "Cập nhật chức vụ thành công", data: position });
+        } catch (error) {
+            return res.status(500).json({ message: "Lỗi server", error: error.message });
+        }
+    },
+
+    deletePosition: async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            const position = await PositionModel.findOne({ _id: id, isDeleted: false });
+            if (!position)
+                return res.status(404).json({ message: "Chức vụ không tồn tại" });
+
+            const inUse = await UserDepartmentPositionModel.exists({ position: id, isDeleted: false });
+            if (inUse)
+                return res.status(409).json({ message: "Không thể xóa chức vụ đang có nhân viên đảm nhiệm" });
+
+            position.isDeleted = true;
+            await position.save();
+            return res.status(200).json({ message: "Xóa chức vụ thành công" });
+        } catch (error) {
+            return res.status(500).json({ message: "Lỗi server", error: error.message });
+        }
+    },
 };
 
 module.exports = DepartmentPositionController;

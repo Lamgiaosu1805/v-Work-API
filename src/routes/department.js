@@ -12,9 +12,11 @@ router.post('/createDepartment', authenticate, isAdmin, DepartmentPositionContro
 router.post('/createPosition', authenticate, isAdmin, DepartmentPositionController.createPosition);
 
 // PUT
-router.put('/update/:id', authenticate, isAdmin, DepartmentPositionController.updateDepartment);
+router.put('/update/:id',         authenticate, isAdmin, DepartmentPositionController.updateDepartment);
+router.put('/updatePosition/:id', authenticate, isAdmin, DepartmentPositionController.updatePosition);
 
 // DELETE
-router.delete('/delete/:id', authenticate, isAdmin, DepartmentPositionController.deleteDepartment);
+router.delete('/delete/:id',         authenticate, isAdmin, DepartmentPositionController.deleteDepartment);
+router.delete('/deletePosition/:id', authenticate, isAdmin, DepartmentPositionController.deletePosition);
 
 module.exports = router;

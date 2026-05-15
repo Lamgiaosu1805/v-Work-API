@@ -29,10 +29,12 @@ router.post('/', authenticate, upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ message: 'Vui lòng chọn file để in' });
 
     const { copies, duplex, paperSize, orientation, pageRange, fitToPage, jobName } = req.body;
+    // Multer nhận UTF-8 bytes nhưng interpret là Latin-1 — decode lại đúng charset
+    const filename = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
 
     try {
         const form = new FormData();
-        form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
+        form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype }), filename);
 
         if (copies)                 form.append('copies',      String(copies));
         if (duplex !== undefined)   form.append('duplex',      String(duplex));
@@ -62,7 +64,7 @@ router.post('/', authenticate, upload.single('file'), async (req, res) => {
         await PrintJobModel.create({
             account:     req.account._id,
             username:    req.account.username,
-            filename:    req.file.originalname,
+            filename,
             pages:       pagesNum,
             copies:      copiesNum,
             duplex:      isDuplex,

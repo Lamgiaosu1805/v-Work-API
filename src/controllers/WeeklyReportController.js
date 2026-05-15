@@ -5,6 +5,7 @@ const WeeklyReportModel = require("../models/WeeklyReportModel");
 const InternalFileModel = require("../models/InternalFileModel");
 const AccountModel = require("../models/AccountModel");
 const DepartmentModel = require("../models/DepartmentModel");
+const { LEAF_TYPES } = require("../models/DepartmentModel");
 const { getUserDeptIds, canViewDept, getFullNameMap } = require("./InternalFileController");
 const { getInternalFilePath } = require("../middlewares/uploadInternal");
 const { WEEKLY_REPORT_SUBFOLDER } = require("../middlewares/uploadWeeklyReport");
@@ -69,7 +70,7 @@ const WeeklyReportController = {
             const deadline = getDeadlineOfWeek(weekStart);
 
             const [departments, reports] = await Promise.all([
-                DepartmentModel.find({ isDeleted: false }).select("_id department_name department_code"),
+                DepartmentModel.find({ isDeleted: false, type: { $in: LEAF_TYPES } }).select("_id department_name department_code type"),
                 WeeklyReportModel.find({ weekStart })
                     .populate("department", "department_name department_code")
                     .populate("file", "originalName mimeType size")

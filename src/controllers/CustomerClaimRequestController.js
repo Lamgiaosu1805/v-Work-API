@@ -4,6 +4,7 @@ const CustomerClaimRequestModel = require("../models/CustomerClaimRequestModel")
 const CustomerInteractionModel = require("../models/CustomerInteractionModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AppModel = require("../models/AppModel");
+const InvestmentModel = require("../models/InvestmentModel");
 const { createCifCommission, createEkycCommission } = require("../helpers/commissionCalculator");
 
 const CustomerClaimRequestController = {
@@ -175,7 +176,6 @@ const CustomerClaimRequestController = {
         session.startTransaction();
         try {
             const { id } = req.params;
-            const { include_cif_hh = true, include_ekyc_hh = false } = req.body;
             const accountId = req.account._id;
 
             const claimReq = await CustomerClaimRequestModel.findOne({
@@ -229,16 +229,32 @@ const CustomerClaimRequestController = {
                 referred_at: new Date(),
             };
 
-            if (include_cif_hh && customer.cif_commission?.status !== "pending") {
+            // Auto-grant HH theo trạng thái KH tại thời điểm duyệt
+            const cifGranted = customer.cif_commission?.status !== "pending";
+            const ekycGranted = isEkycDone && customer.ekyc_commission?.status !== "pending";
+
+            if (cifGranted) {
                 updateData.cif_commission = createCifCommission(sale._id, accountId);
             }
-            if (include_ekyc_hh && !isEkycDone && customer.ekyc_commission?.status !== "pending") {
+            if (ekycGranted) {
                 updateData.ekyc_commission = createEkycCommission(sale._id, accountId);
             }
 
             await CustomerModel.findByIdAndUpdate(
                 customer._id,
                 { $set: updateData },
+                { session }
+            );
+
+            // Gán sale vào các gói đầu tư chưa có sale (KH đã đầu tư trước khi được nhận)
+            await InvestmentModel.updateMany(
+                {
+                    customer_id: customer._id,
+                    "commission.sale_id": null,
+                    status: { $ne: "cancelled" },
+                    isDeleted: false,
+                },
+                { $set: { "commission.sale_id": sale._id } },
                 { session }
             );
 
@@ -272,8 +288,8 @@ const CustomerClaimRequestController = {
                 metadata: {
                     claim_request_id: claimReq._id,
                     approved_by: accountId,
-                    include_cif_hh,
-                    include_ekyc_hh,
+                    cif_hh_granted: cifGranted,
+                    ekyc_hh_granted: ekycGranted,
                 },
             }], { session });
 

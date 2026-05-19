@@ -928,8 +928,6 @@ const CustomerController = {
             const {
                 sale_user_info_id,
                 reason,
-                include_cif_hh = false,
-                include_ekyc_hh = false,
             } = req.body;
             const accountId = req.account._id;
 
@@ -972,13 +970,9 @@ const CustomerController = {
                 ref_code: `${newSale.phone_number}-${newSale.ma_nv}`,
                 // Giữ nguyên referred_at gốc nếu đã có, nếu chưa thì set mới
                 ...(customer.referred_at ? {} : { referred_at: new Date() }),
-                // Hoa hồng: reset theo lựa chọn của admin
-                cif_commission: include_cif_hh
-                    ? createCifCommission(newSale._id, accountId)
-                    : { status: "none", amount: 0, sale_id: null, granted_by: null, granted_at: null },
-                ekyc_commission: include_ekyc_hh && !isEkycDone
-                    ? createEkycCommission(newSale._id, accountId)
-                    : { status: "none", amount: 0, sale_id: null, granted_by: null, granted_at: null },
+                // Chuyển sale: reset HH cũ, không cấp mới — eKYC HH sẽ auto-trigger khi KH eKYC sau
+                cif_commission: { status: "none", amount: 0, sale_id: null, granted_by: null, granted_at: null },
+                ekyc_commission: { status: "none", amount: 0, sale_id: null, granted_by: null, granted_at: null },
             };
 
             await CustomerModel.findByIdAndUpdate(
@@ -1000,8 +994,6 @@ const CustomerController = {
                     to_sale_id: newSale._id,
                     reason,
                     assigned_by: accountId,
-                    cif_hh_granted: include_cif_hh,
-                    ekyc_hh_granted: include_ekyc_hh && !isEkycDone,
                 },
             }], { session });
 
@@ -1018,8 +1010,6 @@ const CustomerController = {
                         ma_nv: newSale.ma_nv,
                         full_name: newSale.full_name,
                     },
-                    cif_hh_granted: include_cif_hh,
-                    ekyc_hh_granted: include_ekyc_hh && !isEkycDone,
                 },
             });
         } catch (error) {
@@ -1038,9 +1028,7 @@ const CustomerController = {
             const { id: customer_id } = req.params;
             const {
                 sale_user_info_id,
-                include_cif_hh = false,
-                include_ekyc_hh = false,
-                confirm_sale_source = false, // true = KH do sale giới thiệu → source_type "sale"; false = giữ "marketing"
+                confirm_sale_source = false,
             } = req.body;
             const accountId = req.account._id;
 
@@ -1082,14 +1070,6 @@ const CustomerController = {
                 referred_at: new Date(),
             };
 
-            if (include_cif_hh && customer.cif_commission?.status !== "pending") {
-                updateData.cif_commission = createCifCommission(sale._id, accountId);
-            }
-
-            if (include_ekyc_hh && customer.ekyc_commission?.status !== "pending") {
-                updateData.ekyc_commission = createEkycCommission(sale._id, accountId);
-            }
-
             await CustomerModel.findByIdAndUpdate(
                 customer._id,
                 { $set: updateData },
@@ -1109,8 +1089,6 @@ const CustomerController = {
                 metadata: {
                     assigned_by: accountId,
                     confirm_sale_source,
-                    include_cif_hh,
-                    include_ekyc_hh,
                 },
             }], { session });
 
@@ -1126,8 +1104,6 @@ const CustomerController = {
                         ma_nv: sale.ma_nv,
                         full_name: sale.full_name,
                     },
-                    cif_hh_granted: include_cif_hh && customer.cif_commission?.status !== "pending",
-                    ekyc_hh_granted: include_ekyc_hh && customer.ekyc_commission?.status !== "pending",
                 },
             });
         } catch (error) {

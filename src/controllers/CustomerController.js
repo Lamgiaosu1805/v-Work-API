@@ -4,6 +4,8 @@ const CustomerInteractionModel = require("../models/CustomerInteractionModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AppModel = require("../models/AppModel");
 const AgentModel = require("../models/AgentModel");
+const { createCifCommission, createEkycCommission } = require("../helpers/commissionCalculator");
+const { computeClaimWindow } = require("../helpers/claimWindowHelper");
 
 const CustomerController = {
     upsert: async (req, res) => {
@@ -139,7 +141,8 @@ const CustomerController = {
             // TRƯỜNG HỢP 1: Chưa có → tạo mới
             // ============================================
             if (!existingCustomer) {
-                const [customer] = await CustomerModel.create([{
+                const now = new Date();
+                const newDoc = {
                     app_id: app._id,
                     phone_number,
                     external_id,
@@ -163,10 +166,27 @@ const CustomerController = {
                         id_front_url,
                         id_back_url,
                         selfie_url,
-                        verified_at: new Date(),
+                        verified_at: now,
                         verified_by: "auto",
                     } : {},
-                }], { session });
+                };
+
+                // Tính cửa sổ thời gian để sale gửi yêu cầu nhận khách (chỉ với KH không có ref_code)
+                if (!referred_by && !agent_id) {
+                    newDoc.claim_window_until = computeClaimWindow(now);
+                }
+
+                // Gán HH CIF nếu đăng ký có mã sale
+                if (referred_by) {
+                    newDoc.referred_at = now;
+                    newDoc.cif_commission = createCifCommission(referred_by);
+                    // Nếu cùng lúc eKYC → HH eKYC luôn
+                    if (hasKycInfo) {
+                        newDoc.ekyc_commission = createEkycCommission(referred_by);
+                    }
+                }
+
+                const [customer] = await CustomerModel.create([newDoc], { session });
 
                 // Ghi interaction log nếu có sale hoặc agent
                 if (referred_by || agent_id) {
@@ -196,6 +216,8 @@ const CustomerController = {
             // TRƯỜNG HỢP 2: Đã có → update
             // ============================================
             const updateData = {};
+            const now = new Date();
+            const isFirstEkyc = hasKycInfo && !existingCustomer.identity?.verified_at;
 
             // Update ekyc nếu có
             if (hasKycInfo) {
@@ -215,7 +237,7 @@ const CustomerController = {
                     id_front_url,
                     id_back_url,
                     selfie_url,
-                    verified_at: new Date(),
+                    verified_at: now,
                     verified_by: "auto",
                 };
             }
@@ -225,6 +247,20 @@ const CustomerController = {
                 updateData.referred_by = referred_by;
                 updateData.ref_code = matched_ref_code;
                 updateData.source_type = "sale";
+                updateData.referred_at = now;
+                // HH CIF: sale được gán lần đầu
+                if (existingCustomer.cif_commission?.status !== "pending") {
+                    updateData.cif_commission = createCifCommission(referred_by);
+                }
+                // Nếu cùng lúc eKYC → HH eKYC luôn
+                if (isFirstEkyc && existingCustomer.ekyc_commission?.status !== "pending") {
+                    updateData.ekyc_commission = createEkycCommission(referred_by);
+                }
+            } else if (isFirstEkyc && existingCustomer.referred_by && existingCustomer.referred_at) {
+                // eKYC lần đầu, đã có sale từ trước → HH eKYC tự động
+                if (existingCustomer.ekyc_commission?.status !== "pending") {
+                    updateData.ekyc_commission = createEkycCommission(existingCustomer.referred_by);
+                }
             }
 
             // Gán agent nếu chưa có
@@ -550,8 +586,17 @@ const CustomerController = {
             });
         }
     },
-    // POST /customers/apply-referral
+    // POST /customers/apply-referral — ĐÃ VÔ HIỆU HÓA
+    // Khách không thể tự nhập mã giới thiệu sau khi đăng ký.
+    // Mọi trường hợp cần gán sale → liên hệ Admin/Manager để phân khách hoặc chuyển sale.
     applyReferral: async (req, res) => {
+        return res.status(410).json({
+            message: "Tính năng nhập mã giới thiệu sau đăng ký đã bị vô hiệu hóa. Vui lòng liên hệ Admin hoặc Manager để được hỗ trợ gán mã giới thiệu.",
+        });
+    },
+
+    // POST /customers/apply-referral — ORIGINAL (disabled above)
+    _applyReferral_disabled: async (req, res) => {
         const session = await mongoose.startSession();
         session.startTransaction();
 
@@ -647,16 +692,26 @@ const CustomerController = {
             const source_type = referred_by ? "sale" : "agent";
 
             // Cập nhật customer
+            const applyUpdate = {
+                referred_by: referred_by ?? null,
+                agent_id: agent_id ?? null,
+                ref_code: matched_ref_code,
+                source_type,
+            };
+
+            // Gán referred_at và HH CIF khi sale nhập mã muộn
+            if (referred_by) {
+                applyUpdate.referred_at = new Date();
+                if (customer.cif_commission?.status !== "pending") {
+                    applyUpdate.cif_commission = createCifCommission(referred_by);
+                }
+                // Không tự grant eKYC HH — nếu khách đã eKYC trước khi nhập mã
+                // thì referred_at > verified_at → không tính theo quy tắc
+            }
+
             await CustomerModel.findByIdAndUpdate(
                 customer._id,
-                {
-                    $set: {
-                        referred_by: referred_by ?? null,
-                        agent_id: agent_id ?? null,
-                        ref_code: matched_ref_code,
-                        source_type,
-                    },
-                },
+                { $set: applyUpdate },
                 { session }
             );
 
@@ -861,6 +916,224 @@ const CustomerController = {
             });
         } catch (error) {
             console.error("Error in bulkUpsert:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
+    // PATCH /customers/:id/reassign — Admin chuyển sale (có audit log, lý do bắt buộc)
+    reassignCustomer: async (req, res) => {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        try {
+            const { id: customer_id } = req.params;
+            const {
+                sale_user_info_id,
+                reason,
+                include_cif_hh = false,
+                include_ekyc_hh = false,
+            } = req.body;
+            const accountId = req.account._id;
+
+            if (!sale_user_info_id || !reason?.trim()) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: "Thiếu sale_user_info_id hoặc reason" });
+            }
+
+            const customer = await CustomerModel.findOne({
+                _id: customer_id,
+                isDeleted: false,
+            }).session(session);
+            if (!customer) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            }
+
+            const newSale = await UserInfoModel.findById(sale_user_info_id).session(session);
+            if (!newSale) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+            }
+
+            const oldSaleId = customer.referred_by ?? null;
+            let oldSaleName = null;
+            if (oldSaleId) {
+                const oldSale = await UserInfoModel.findById(oldSaleId).select("full_name ma_nv").session(session);
+                oldSaleName = oldSale ? `${oldSale.full_name} (${oldSale.ma_nv})` : null;
+            }
+
+            const isEkycDone = !!customer.identity?.verified_at;
+
+            const updateData = {
+                referred_by: newSale._id,
+                // Giữ nguyên source_type — reassign là thay sale quản lý, không re-evaluate nguồn gốc KH
+                source_type: customer.source_type,
+                ref_code: `${newSale.phone_number}-${newSale.ma_nv}`,
+                // Giữ nguyên referred_at gốc nếu đã có, nếu chưa thì set mới
+                ...(customer.referred_at ? {} : { referred_at: new Date() }),
+                // Hoa hồng: reset theo lựa chọn của admin
+                cif_commission: include_cif_hh
+                    ? createCifCommission(newSale._id, accountId)
+                    : { status: "none", amount: 0, sale_id: null, granted_by: null, granted_at: null },
+                ekyc_commission: include_ekyc_hh && !isEkycDone
+                    ? createEkycCommission(newSale._id, accountId)
+                    : { status: "none", amount: 0, sale_id: null, granted_by: null, granted_at: null },
+            };
+
+            await CustomerModel.findByIdAndUpdate(
+                customer._id,
+                { $set: updateData },
+                { session }
+            );
+
+            await CustomerInteractionModel.create([{
+                app_id: customer.app_id,
+                customer_id: customer._id,
+                sale_id: newSale._id,
+                agent_id: null,
+                type: "reassigned",
+                content: `Chuyển sale từ ${oldSaleName ?? "chưa có"} → ${newSale.full_name} (${newSale.ma_nv}). Lý do: ${reason}`,
+                result: null,
+                metadata: {
+                    from_sale_id: oldSaleId,
+                    to_sale_id: newSale._id,
+                    reason,
+                    assigned_by: accountId,
+                    cif_hh_granted: include_cif_hh,
+                    ekyc_hh_granted: include_ekyc_hh && !isEkycDone,
+                },
+            }], { session });
+
+            await session.commitTransaction();
+            session.endSession();
+
+            return res.status(200).json({
+                message: "Chuyển sale thành công",
+                data: {
+                    customer_id: customer._id,
+                    from_sale: oldSaleName ?? "Chưa có sale",
+                    to_sale: {
+                        _id: newSale._id,
+                        ma_nv: newSale.ma_nv,
+                        full_name: newSale.full_name,
+                    },
+                    cif_hh_granted: include_cif_hh,
+                    ekyc_hh_granted: include_ekyc_hh && !isEkycDone,
+                },
+            });
+        } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
+            console.error("Error in reassignCustomer:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
+
+    // POST /customers/:id/assign — Admin/Manager phân khách về cho sale
+    assignCustomer: async (req, res) => {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        try {
+            const { id: customer_id } = req.params;
+            const {
+                sale_user_info_id,
+                include_cif_hh = false,
+                include_ekyc_hh = false,
+                confirm_sale_source = false, // true = KH do sale giới thiệu → source_type "sale"; false = giữ "marketing"
+            } = req.body;
+            const accountId = req.account._id;
+
+            if (!sale_user_info_id) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: "Thiếu sale_user_info_id" });
+            }
+
+            const customer = await CustomerModel.findOne({
+                _id: customer_id,
+                isDeleted: false,
+            }).session(session);
+            if (!customer) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            }
+
+            if (customer.referred_by) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(409).json({ message: "Khách hàng đã có sale phụ trách, không thể gán lại" });
+            }
+
+            const sale = await UserInfoModel.findById(sale_user_info_id).session(session);
+            if (!sale) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+            }
+
+            const updateData = {
+                referred_by: sale._id,
+                // source_type chỉ đổi sang "sale" khi admin xác nhận KH này do sale giới thiệu
+                // Ngược lại giữ nguyên "marketing" — admin chỉ gán để quản lý, không phải xác nhận nguồn
+                source_type: confirm_sale_source ? "sale" : customer.source_type,
+                ref_code: `${sale.phone_number}-${sale.ma_nv}`,
+                referred_at: new Date(),
+            };
+
+            if (include_cif_hh && customer.cif_commission?.status !== "pending") {
+                updateData.cif_commission = createCifCommission(sale._id, accountId);
+            }
+
+            if (include_ekyc_hh && customer.ekyc_commission?.status !== "pending") {
+                updateData.ekyc_commission = createEkycCommission(sale._id, accountId);
+            }
+
+            await CustomerModel.findByIdAndUpdate(
+                customer._id,
+                { $set: updateData },
+                { session }
+            );
+
+            await CustomerInteractionModel.create([{
+                app_id: customer.app_id,
+                customer_id: customer._id,
+                sale_id: sale._id,
+                agent_id: null,
+                type: "note",
+                content: confirm_sale_source
+                    ? `Xác nhận khách hàng do sale ${sale.full_name} (${sale.ma_nv}) giới thiệu — đổi nguồn sang Sale`
+                    : `Phân khách về cho sale ${sale.full_name} (${sale.ma_nv}) để quản lý — nguồn giữ nguyên Marketing`,
+                result: null,
+                metadata: {
+                    assigned_by: accountId,
+                    confirm_sale_source,
+                    include_cif_hh,
+                    include_ekyc_hh,
+                },
+            }], { session });
+
+            await session.commitTransaction();
+            session.endSession();
+
+            return res.status(200).json({
+                message: "Phân khách thành công",
+                data: {
+                    customer_id: customer._id,
+                    sale: {
+                        _id: sale._id,
+                        ma_nv: sale.ma_nv,
+                        full_name: sale.full_name,
+                    },
+                    cif_hh_granted: include_cif_hh && customer.cif_commission?.status !== "pending",
+                    ekyc_hh_granted: include_ekyc_hh && customer.ekyc_commission?.status !== "pending",
+                },
+            });
+        } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
+            console.error("Error in assignCustomer:", error);
             return res.status(500).json({ message: "Internal server error", error: error.message });
         }
     },

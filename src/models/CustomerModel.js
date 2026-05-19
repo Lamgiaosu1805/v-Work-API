@@ -65,6 +65,25 @@ const CustomerModel = new mongoose.Schema(
         // === LIÊN KẾT HỆ THỐNG ĐẦU TƯ ===
         external_id: { type: String, default: null },
 
+        // === HOA HỒNG ===
+        referred_at: { type: Date, default: null },
+        // Thời hạn để sale gửi yêu cầu nhận khách (tính từ lúc đăng ký, theo giờ làm việc)
+        claim_window_until: { type: Date, default: null },
+        cif_commission: {
+            status: { type: String, enum: ["none", "pending"], default: "none" },
+            amount: { type: Number, default: 0 },
+            sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
+            granted_by: { type: mongoose.Schema.Types.ObjectId, ref: "account", default: null },
+            granted_at: { type: Date, default: null },
+        },
+        ekyc_commission: {
+            status: { type: String, enum: ["none", "pending"], default: "none" },
+            amount: { type: Number, default: 0 },
+            sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
+            granted_by: { type: mongoose.Schema.Types.ObjectId, ref: "account", default: null },
+            granted_at: { type: Date, default: null },
+        },
+
         ...BaseSchema.obj,
     },
     {

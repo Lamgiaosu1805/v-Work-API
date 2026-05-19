@@ -1,5 +1,8 @@
 const COMMISSION_RATE = 1.8; // % cố định
 
+const CIF_COMMISSION_AMOUNT = 10000;
+const EKYC_COMMISSION_AMOUNT = 25000;
+
 function getTNCNRate(employment_type) {
     if (employment_type === "fulltime") return 5;
     return 10;
@@ -21,4 +24,31 @@ function calculateCommission({ amount, term_months, tncn_rate }) {
     };
 }
 
-module.exports = { calculateCommission, getTNCNRate };
+function createCifCommission(sale_id, granted_by = null) {
+    return {
+        status: "pending",
+        amount: CIF_COMMISSION_AMOUNT,
+        sale_id,
+        granted_by,
+        granted_at: new Date(),
+    };
+}
+
+function createEkycCommission(sale_id, granted_by = null) {
+    return {
+        status: "pending",
+        amount: EKYC_COMMISSION_AMOUNT,
+        sale_id,
+        granted_by,
+        granted_at: new Date(),
+    };
+}
+
+module.exports = {
+    calculateCommission,
+    getTNCNRate,
+    CIF_COMMISSION_AMOUNT,
+    EKYC_COMMISSION_AMOUNT,
+    createCifCommission,
+    createEkycCommission,
+};

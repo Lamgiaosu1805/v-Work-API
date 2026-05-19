@@ -2,24 +2,54 @@ const { default: mongoose } = require("mongoose");
 const AllowedWifiLocationModel = require("../models/AllowedWifiLocationModel");
 const ShiftModel = require("../models/ShiftModel");
 const UserInfoModel = require("../models/UserInfoModel");
+const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const moment = require("moment-timezone");
 
 const AttendanceController = {
+    getAllowedWifiLocations: async (req, res) => {
+        try {
+            const docs = await AllowedWifiLocationModel.find({ isDeleted: false }).sort({ createdAt: -1 });
+            res.json({ message: "Lấy danh sách điểm chấm công thành công", data: docs });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ message: "Lỗi server.", error: error.message });
+        }
+    },
+
     createAllowedWifiLocation: async (req, res) => {
         try {
-            const { ssid, latitude, longitude } = req.body;
-            if (!ssid || !latitude || !longitude) {
-                return res.status(400).json({ message: 'ssid, latitude, longitude required' });
+            const { name = "", ssid, latitude, longitude, radius } = req.body;
+            if (!ssid || latitude == null || longitude == null) {
+                return res.status(400).json({ message: 'ssid, latitude, longitude là bắt buộc' });
             }
 
-            const existing = await AllowedWifiLocationModel.findOne({ ssid });
+            const existing = await AllowedWifiLocationModel.findOne({ ssid, isDeleted: false });
             if (existing) {
-                return res.status(400).json({ message: `SSID ${ssid} đã tồn tại` });
+                return res.status(400).json({ message: `SSID "${ssid}" đã tồn tại` });
             }
 
-            const doc = await AllowedWifiLocationModel.create({ ssid, latitude, longitude });
+            const payload = { name, ssid, latitude, longitude };
+            if (radius != null) payload.radius = radius;
+
+            const doc = await AllowedWifiLocationModel.create(payload);
             res.json({ message: "Tạo điểm chấm công thành công", data: doc });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ message: "Lỗi server.", error: error.message });
+        }
+    },
+
+    deleteAllowedWifiLocation: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const doc = await AllowedWifiLocationModel.findOneAndUpdate(
+                { _id: id, isDeleted: false },
+                { isDeleted: true },
+                { new: true }
+            );
+            if (!doc) return res.status(404).json({ message: "Không tìm thấy điểm chấm công" });
+            res.json({ message: "Xóa điểm chấm công thành công" });
         } catch (error) {
             console.error(error);
             res.status(500).json({ message: "Lỗi server.", error: error.message });
@@ -260,6 +290,39 @@ const AttendanceController = {
             res.status(500).json({ message: "Lỗi server", error: err.message });
         }
     },
+    getAllWorkSheets: async (req, res) => {
+        try {
+            const targetDate = req.query.date
+                ? moment.tz(req.query.date, "Asia/Ho_Chi_Minh").startOf("day").toDate()
+                : moment.tz("Asia/Ho_Chi_Minh").startOf("day").toDate();
+            const nextDate = moment(targetDate).add(1, "day").toDate();
+
+            let userIds;
+
+            if (req.account.role === "admin" || req.account.dept_scope === "all") {
+                const users = await UserInfoModel.find({ isDeleted: false }, "_id");
+                userIds = users.map(u => u._id);
+            } else {
+                const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });
+                const myDeptIds = await UserDepartmentPositionModel.distinct("department", { user: myInfo._id });
+                userIds = await UserDepartmentPositionModel.distinct("user", { department: { $in: myDeptIds } });
+            }
+
+            const worksheets = await WorkSheetModel.find({
+                user_id: { $in: userIds },
+                date: { $gte: targetDate, $lt: nextDate },
+            })
+                .populate("user_id", "full_name ma_nv employment_type")
+                .populate("shifts", "name start_time end_time")
+                .sort({ createdAt: 1 });
+
+            res.json({ message: "OK", data: worksheets });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ message: "Lỗi server", error: err.message });
+        }
+    },
+
     getAllShifts: async (req, res) => {
         try {
             const shifts = await ShiftModel.find();

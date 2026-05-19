@@ -413,11 +413,24 @@ const UserController = {
         department_id,
         from_date,
         to_date,
+        module, // lọc theo module_access (vd: "crm")
       } = req.query;
 
       const skip = (Number(page) - 1) * Number(limit);
 
       const filter = { isDeleted: false };
+
+      // Lọc theo module_access: tìm account có module đó rồi map sang user_info
+      if (module) {
+        const accountIds = await AccountModel.find({
+          $or: [
+            { role: "admin" },
+            { module_access: module },
+          ],
+          isDeleted: false,
+        }).distinct("_id");
+        filter.id_account = { $in: accountIds };
+      }
 
       if (employment_type) filter.employment_type = employment_type;
 

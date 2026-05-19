@@ -561,40 +561,136 @@ const LeaveRequestController = {
   },
 
   cancel: async (req, res) => {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "ID không hợp lệ" });
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
-      const { id } = req.params;
-      if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).json({ message: "ID không hợp lệ" });
+      const [currentUserInfo, request] = await Promise.all([
+        UserInfoModel.findOne({ id_account: req.account._id, isDeleted: false }).session(session),
+        LeaveRequestModel.findOne({ _id: id, isDeleted: false }).session(session),
+      ]);
+
+      if (!request) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({ message: "Đơn nghỉ không tồn tại" });
       }
 
-      const userInfo = await UserInfoModel.findOne({
-        id_account: req.account._id,
-        isDeleted: false,
-      });
-      const request = await LeaveRequestModel.findOne({
-        _id: id,
-        isDeleted: false,
-      });
+      const isOwner = currentUserInfo && request.user_id.equals(currentUserInfo._id);
+      const isManagerOrAdmin = req.account.role === "admin" || req.account.role === "manager";
 
-      if (!request)
-        return res.status(404).json({ message: "Đơn nghỉ không tồn tại" });
-      if (!request.user_id.equals(userInfo._id)) {
+      if (isOwner) {
+        if (request.status !== "pending") {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(409).json({ message: "Chỉ có thể hủy đơn đang chờ duyệt" });
+        }
+      } else if (isManagerOrAdmin) {
+        if (!["pending", "approved"].includes(request.status)) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(409).json({ message: "Chỉ có thể hủy đơn đang chờ duyệt hoặc đã được duyệt" });
+        }
+
+        if (request.status === "approved") {
+          const now = moment.tz(TZ);
+          const fromDate = moment.tz(request.from_date, TZ).startOf("day");
+          if (!now.isBefore(fromDate)) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(409).json({ message: "Không thể hủy đơn khi nhân viên đã bắt đầu kỳ nghỉ" });
+          }
+        }
+
+        if (req.account.role !== "admin") {
+          const employeeInfo = await UserInfoModel.findById(request.user_id, { branch_id: 1 }).session(session);
+          if (
+            !currentUserInfo?.branch_id ||
+            !employeeInfo?.branch_id ||
+            !currentUserInfo.branch_id.equals(employeeInfo.branch_id)
+          ) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(403).json({ message: "Không có quyền hủy đơn của nhân viên khác chi nhánh" });
+          }
+
+          if (req.account.dept_scope === "own") {
+            const memberships = await UserDepartmentPositionModel.find({
+              user: currentUserInfo._id,
+              isDeleted: false,
+            }).session(session);
+            const deptIds = memberships.map((m) => m.department);
+            const deptUsers = await UserDepartmentPositionModel.find({
+              department: { $in: deptIds },
+              isDeleted: false,
+            }).distinct("user");
+            if (!deptUsers.some((uid) => uid.equals(request.user_id))) {
+              await session.abortTransaction();
+              session.endSession();
+              return res.status(403).json({ message: "Không có quyền hủy đơn này" });
+            }
+          }
+        }
+      } else {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(403).json({ message: "Không có quyền hủy đơn này" });
       }
-      if (request.status !== "pending") {
-        return res
-          .status(409)
-          .json({ message: "Chỉ có thể hủy đơn đang chờ duyệt" });
+
+      if (request.status === "approved") {
+        if (request.leave_days_used > 0) {
+          await UserInfoModel.findByIdAndUpdate(
+            request.user_id,
+            { $inc: { "leave_balance.annual": request.leave_days_used } },
+            { session },
+          );
+        }
+        const fromStart = moment.tz(request.from_date, TZ).startOf("day").toDate();
+        const toEnd = moment.tz(request.to_date, TZ).endOf("day").toDate();
+        await WorkSheetModel.updateMany(
+          {
+            user_id: request.user_id,
+            date: { $gte: fromStart, $lte: toEnd },
+            status: "leave",
+            isDeleted: false,
+          },
+          { status: "pending" },
+          { session },
+        );
       }
 
       request.status = "cancelled";
-      await request.save();
+      await request.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      if (!isOwner) {
+        UserInfoModel.findById(request.user_id)
+          .select("id_account full_name")
+          .then((employeeInfo) => {
+            if (!employeeInfo) return;
+            return notify(employeeInfo.id_account, {
+              title: "Đơn nghỉ bị hủy",
+              body: `Đơn xin nghỉ của bạn đã bị ${currentUserInfo.full_name} hủy`,
+              type: "leave_request_cancelled",
+              ref_id: request._id,
+              ref_type: "leave_request",
+              uri: `/leave-requests/${request._id}`,
+            });
+          })
+          .catch(() => {});
+      }
 
       return res.status(200).json({ message: "Hủy đơn nghỉ thành công" });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ message: "Lỗi server", error: error.message });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
   },
 };

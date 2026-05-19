@@ -8,7 +8,7 @@ const router = express.Router()
 router.get('/getWorkSheet', authenticate, AttendanceController.getWorkSheet);
 router.get('/getLichCong', authenticate, AttendanceController.getLichCong);
 router.get('/getAllShifts', authenticate, AttendanceController.getAllShifts);
-router.get('/getAllowedWifiLocations', authenticate, AttendanceController.getAllowedWifiLocations);
+router.get('/getAllowedWifiLocations', authenticate, isAdmin, AttendanceController.getAllowedWifiLocations);
 
 //POST
 router.post('/createAllowedWifiLocation', authenticate, isAdmin, AttendanceController.createAllowedWifiLocation);

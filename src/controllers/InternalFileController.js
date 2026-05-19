@@ -113,30 +113,31 @@ const InternalFileController = {
             const accountId = req.account._id;
 
             if (!(await canUploadToDept(accountId, deptId))) {
-                if (req.file) fs.unlinkSync(req.file.path);
+                if (req.files?.length) req.files.forEach((f) => fs.unlinkSync(f.path));
                 return res.status(403).json({ message: "Bạn không có quyền upload vào folder này" });
             }
 
-            if (!req.file) {
+            if (!req.files?.length) {
                 return res.status(400).json({ message: "Không có file được gửi lên" });
             }
 
-            const newFile = new InternalFileModel({
-                originalName: req.file.originalname,
-                filename: req.file.filename,
-                departmentCode: req._deptCode,
-                subfolder: req.subfolder || "",
-                category: "general",
-                mimeType: req.file.mimetype,
-                size: req.file.size,
-                uploadedBy: accountId,
-                department: deptId,
-            });
+            const savedFiles = await InternalFileModel.insertMany(
+                req.files.map((f) => ({
+                    originalName: f.originalname,
+                    filename: f.filename,
+                    departmentCode: req._deptCode,
+                    subfolder: req.subfolder || "",
+                    category: "general",
+                    mimeType: f.mimetype,
+                    size: f.size,
+                    uploadedBy: accountId,
+                    department: deptId,
+                }))
+            );
 
-            await newFile.save();
-            return res.status(201).json({ message: "Upload thành công", data: newFile });
+            return res.status(201).json({ message: "Upload thành công", data: savedFiles });
         } catch (error) {
-            if (req.file) fs.unlinkSync(req.file.path);
+            if (req.files?.length) req.files.forEach((f) => { try { fs.unlinkSync(f.path); } catch (_) {} });
             return res.status(500).json({ message: "Lỗi server", error: error.message });
         }
     },

@@ -2,6 +2,7 @@ const { default: mongoose } = require("mongoose");
 const AllowedWifiLocationModel = require("../models/AllowedWifiLocationModel");
 const ShiftModel = require("../models/ShiftModel");
 const UserInfoModel = require("../models/UserInfoModel");
+const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const moment = require("moment-timezone");
 
@@ -289,6 +290,39 @@ const AttendanceController = {
             res.status(500).json({ message: "Lỗi server", error: err.message });
         }
     },
+    getAllWorkSheets: async (req, res) => {
+        try {
+            const targetDate = req.query.date
+                ? moment.tz(req.query.date, "Asia/Ho_Chi_Minh").startOf("day").toDate()
+                : moment.tz("Asia/Ho_Chi_Minh").startOf("day").toDate();
+            const nextDate = moment(targetDate).add(1, "day").toDate();
+
+            let userIds;
+
+            if (req.account.role === "admin" || req.account.dept_scope === "all") {
+                const users = await UserInfoModel.find({ isDeleted: false }, "_id");
+                userIds = users.map(u => u._id);
+            } else {
+                const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });
+                const myDeptIds = await UserDepartmentPositionModel.distinct("department", { user: myInfo._id });
+                userIds = await UserDepartmentPositionModel.distinct("user", { department: { $in: myDeptIds } });
+            }
+
+            const worksheets = await WorkSheetModel.find({
+                user_id: { $in: userIds },
+                date: { $gte: targetDate, $lt: nextDate },
+            })
+                .populate("user_id", "full_name ma_nv employment_type")
+                .populate("shifts", "name start_time end_time")
+                .sort({ createdAt: 1 });
+
+            res.json({ message: "OK", data: worksheets });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ message: "Lỗi server", error: err.message });
+        }
+    },
+
     getAllShifts: async (req, res) => {
         try {
             const shifts = await ShiftModel.find();

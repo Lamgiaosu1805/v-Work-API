@@ -1,6 +1,6 @@
 const express = require('express');
 const AttendanceController = require('../controllers/AttendanceController');
-const { authenticate, isAdmin } = require('../middlewares/authMiddleware');
+const { authenticate, isAdmin, hasModuleAccess } = require('../middlewares/authMiddleware');
 const router = express.Router()
 
 
@@ -9,6 +9,7 @@ router.get('/getWorkSheet', authenticate, AttendanceController.getWorkSheet);
 router.get('/getLichCong', authenticate, AttendanceController.getLichCong);
 router.get('/getAllShifts', authenticate, AttendanceController.getAllShifts);
 router.get('/getAllowedWifiLocations', authenticate, isAdmin, AttendanceController.getAllowedWifiLocations);
+router.get('/getAllWorkSheets', authenticate, hasModuleAccess('hrm'), AttendanceController.getAllWorkSheets);
 
 //POST
 router.post('/createAllowedWifiLocation', authenticate, isAdmin, AttendanceController.createAllowedWifiLocation);

@@ -6,20 +6,49 @@ const WorkSheetModel = require("../models/WorkSheetModel");
 const moment = require("moment-timezone");
 
 const AttendanceController = {
+    getAllowedWifiLocations: async (req, res) => {
+        try {
+            const docs = await AllowedWifiLocationModel.find({ isDeleted: false }).sort({ createdAt: -1 });
+            res.json({ message: "Lấy danh sách điểm chấm công thành công", data: docs });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ message: "Lỗi server.", error: error.message });
+        }
+    },
+
     createAllowedWifiLocation: async (req, res) => {
         try {
-            const { ssid, latitude, longitude } = req.body;
-            if (!ssid || !latitude || !longitude) {
-                return res.status(400).json({ message: 'ssid, latitude, longitude required' });
+            const { name = "", ssid, latitude, longitude, radius } = req.body;
+            if (!ssid || latitude == null || longitude == null) {
+                return res.status(400).json({ message: 'ssid, latitude, longitude là bắt buộc' });
             }
 
-            const existing = await AllowedWifiLocationModel.findOne({ ssid });
+            const existing = await AllowedWifiLocationModel.findOne({ ssid, isDeleted: false });
             if (existing) {
-                return res.status(400).json({ message: `SSID ${ssid} đã tồn tại` });
+                return res.status(400).json({ message: `SSID "${ssid}" đã tồn tại` });
             }
 
-            const doc = await AllowedWifiLocationModel.create({ ssid, latitude, longitude });
+            const payload = { name, ssid, latitude, longitude };
+            if (radius != null) payload.radius = radius;
+
+            const doc = await AllowedWifiLocationModel.create(payload);
             res.json({ message: "Tạo điểm chấm công thành công", data: doc });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ message: "Lỗi server.", error: error.message });
+        }
+    },
+
+    deleteAllowedWifiLocation: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const doc = await AllowedWifiLocationModel.findOneAndUpdate(
+                { _id: id, isDeleted: false },
+                { isDeleted: true },
+                { new: true }
+            );
+            if (!doc) return res.status(404).json({ message: "Không tìm thấy điểm chấm công" });
+            res.json({ message: "Xóa điểm chấm công thành công" });
         } catch (error) {
             console.error(error);
             res.status(500).json({ message: "Lỗi server.", error: error.message });

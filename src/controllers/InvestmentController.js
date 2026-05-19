@@ -4,7 +4,7 @@ const CustomerModel = require("../models/CustomerModel");
 const AppModel = require("../models/AppModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AgentModel = require("../models/AgentModel");
-const { calculateCommission, getTNCNRate } = require("../helpers/commissionCalculator");
+const { calculateCommission, getTNCNRate, CIF_COMMISSION_AMOUNT, EKYC_COMMISSION_AMOUNT } = require("../helpers/commissionCalculator");
 
 const InvestmentController = {
     // POST /investments/upsert
@@ -218,6 +218,36 @@ const InvestmentController = {
                 },
             ]);
 
+            // HH CIF/eKYC trong cùng tháng/năm
+            const startOfMonth = new Date(Number(year), Number(month) - 1, 1);
+            const endOfMonth = new Date(Number(year), Number(month), 0, 23, 59, 59, 999);
+
+            const customerCommissions = await CustomerModel.find({
+                $or: [
+                    {
+                        "cif_commission.sale_id": sale._id,
+                        "cif_commission.status": "pending",
+                        "cif_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth },
+                    },
+                    {
+                        "ekyc_commission.sale_id": sale._id,
+                        "ekyc_commission.status": "pending",
+                        "ekyc_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth },
+                    },
+                ],
+            }).select("phone_number external_id identity.full_name cif_commission ekyc_commission");
+
+            const cifCount = customerCommissions.filter(
+                (c) => c.cif_commission?.sale_id?.toString() === sale._id.toString() &&
+                    c.cif_commission?.status === "pending" &&
+                    c.cif_commission?.granted_at >= startOfMonth
+            ).length;
+            const ekycCount = customerCommissions.filter(
+                (c) => c.ekyc_commission?.sale_id?.toString() === sale._id.toString() &&
+                    c.ekyc_commission?.status === "pending" &&
+                    c.ekyc_commission?.granted_at >= startOfMonth
+            ).length;
+
             return res.status(200).json({
                 message: "Lấy lịch sử hoa hồng thành công",
                 period: {
@@ -231,6 +261,14 @@ const InvestmentController = {
                     total_net: 0,
                     count: 0,
                 },
+                customer_commission_summary: {
+                    cif_count: cifCount,
+                    cif_amount: cifCount * CIF_COMMISSION_AMOUNT,
+                    ekyc_count: ekycCount,
+                    ekyc_amount: ekycCount * EKYC_COMMISSION_AMOUNT,
+                    total_amount: cifCount * CIF_COMMISSION_AMOUNT + ekycCount * EKYC_COMMISSION_AMOUNT,
+                },
+                customer_commissions: customerCommissions,
                 data: investments,
                 pagination: {
                     total,

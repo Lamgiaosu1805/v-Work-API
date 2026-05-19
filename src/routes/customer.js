@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticate, hasModuleAccess, canManage } = require('../middlewares/authMiddleware');
+const { authenticate, hasModuleAccess, canManage, isAdmin } = require('../middlewares/authMiddleware');
 const CustomerController = require('../controllers/CustomerController');
 const verifyInternalRequest = require('../middlewares/verifyInternalRequest');
 const router = express.Router();
@@ -14,5 +14,7 @@ router.get("/all", authenticate, canManage("crm"), CustomerController.getAll);
 router.post("/upsert", verifyInternalRequest, CustomerController.upsert);
 router.post("/apply-referral", verifyInternalRequest, CustomerController.applyReferral);
 router.post("/bulk-upsert", verifyInternalRequest, CustomerController.bulkUpsert);
+router.post("/:id/assign", authenticate, canManage("crm"), CustomerController.assignCustomer);
+router.patch("/:id/reassign", authenticate, isAdmin, CustomerController.reassignCustomer);
 
 module.exports = router;

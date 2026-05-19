@@ -261,7 +261,8 @@ const ClaimPeriodController = {
                 });
             }
 
-            // Gán sale cho customer
+            // Gán sale cho customer — không CIF HH vì KH đã mở TK trước khi được nhận
+            // HH eKYC sẽ tự ghi nhận nếu KH eKYC sau ngày referred_at
             await CustomerModel.findByIdAndUpdate(
                 customer_id,
                 {
@@ -269,6 +270,7 @@ const ClaimPeriodController = {
                         referred_by: sale._id,
                         source_type: "sale",
                         ref_code: `${sale.phone_number}-${sale.ma_nv}`,
+                        referred_at: new Date(),
                     },
                 }
             );

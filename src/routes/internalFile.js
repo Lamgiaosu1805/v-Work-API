@@ -6,7 +6,7 @@ const { InternalFileController } = require("../controllers/InternalFileControlle
 
 router.get("/departments", authenticate, InternalFileController.getAccessibleDepartments);
 router.get("/:deptId/files", authenticate, InternalFileController.getFilesByDept);
-router.post("/:deptId/upload", authenticate, uploadInternal.single("file"), InternalFileController.uploadFile);
+router.post("/:deptId/upload", authenticate, uploadInternal.array("files", 10), InternalFileController.uploadFile);
 router.get("/file/:fileId/view", authenticate, InternalFileController.viewFile);
 router.delete("/file/:fileId", authenticate, InternalFileController.deleteFile);
 router.get("/:deptId/permissions", authenticate, isAdmin, InternalFileController.getPermissions);

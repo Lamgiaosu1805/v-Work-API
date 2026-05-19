@@ -294,7 +294,7 @@ const InternalFileController = {
             const savedFiles = await Promise.all(
                 req.files.map((file) =>
                     InternalFileModel.create({
-                        originalName: file.originalname,
+                        originalName: Buffer.from(file.originalname, 'latin1').toString('utf8'),
                         filename: file.filename,
                         departmentCode: req._deptCode,
                         subfolder: req.subfolder || "",
@@ -334,7 +334,7 @@ const InternalFileController = {
             }
 
             res.setHeader("Content-Type", file.mimeType || "application/octet-stream");
-            res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.originalName)}"`);
+            res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(file.originalName)}`);
             return res.sendFile(filePath);
         } catch (error) {
             return res.status(500).json({ message: "Lỗi server", error: error.message });

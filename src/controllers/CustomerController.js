@@ -249,16 +249,16 @@ const CustomerController = {
                 updateData.source_type = "sale";
                 updateData.referred_at = now;
                 // HH CIF: sale được gán lần đầu
-                if (existingCustomer.cif_commission?.status !== "pending") {
+                if (!existingCustomer.cif_commission?.sale_id) {
                     updateData.cif_commission = createCifCommission(referred_by);
                 }
                 // Nếu cùng lúc eKYC → HH eKYC luôn
-                if (isFirstEkyc && existingCustomer.ekyc_commission?.status !== "pending") {
+                if (isFirstEkyc && !existingCustomer.ekyc_commission?.sale_id) {
                     updateData.ekyc_commission = createEkycCommission(referred_by);
                 }
             } else if (isFirstEkyc && existingCustomer.referred_by && existingCustomer.referred_at) {
                 // eKYC lần đầu, đã có sale từ trước → HH eKYC tự động
-                if (existingCustomer.ekyc_commission?.status !== "pending") {
+                if (!existingCustomer.ekyc_commission?.sale_id) {
                     updateData.ekyc_commission = createEkycCommission(existingCustomer.referred_by);
                 }
             }
@@ -702,7 +702,7 @@ const CustomerController = {
             // Gán referred_at và HH CIF khi sale nhập mã muộn
             if (referred_by) {
                 applyUpdate.referred_at = new Date();
-                if (customer.cif_commission?.status !== "pending") {
+                if (!customer.cif_commission?.sale_id) {
                     applyUpdate.cif_commission = createCifCommission(referred_by);
                 }
                 // Không tự grant eKYC HH — nếu khách đã eKYC trước khi nhập mã
@@ -970,9 +970,9 @@ const CustomerController = {
                 ref_code: `${newSale.phone_number}-${newSale.ma_nv}`,
                 // Giữ nguyên referred_at gốc nếu đã có, nếu chưa thì set mới
                 ...(customer.referred_at ? {} : { referred_at: new Date() }),
-                // Chuyển sale: reset HH cũ, không cấp mới — eKYC HH sẽ auto-trigger khi KH eKYC sau
-                cif_commission: { status: "none", amount: 0, sale_id: null, granted_by: null, granted_at: null },
-                ekyc_commission: { status: "none", amount: 0, sale_id: null, granted_by: null, granted_at: null },
+                // Giữ nguyên cif_commission và ekyc_commission — HH sale cũ đã nhận vẫn thuộc về họ
+                // Sale mới chỉ nhận HH cho hành động mới: eKYC HH (nếu KH chưa eKYC) sẽ auto-trigger sau,
+                // investment HH cho gói đầu tư mới sẽ tự dùng referred_by mới
             };
 
             await CustomerModel.findByIdAndUpdate(

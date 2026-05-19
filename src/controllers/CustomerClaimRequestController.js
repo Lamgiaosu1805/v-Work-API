@@ -230,8 +230,8 @@ const CustomerClaimRequestController = {
             };
 
             // Auto-grant HH theo trạng thái KH tại thời điểm duyệt
-            const cifGranted = customer.cif_commission?.status !== "pending";
-            const ekycGranted = isEkycDone && customer.ekyc_commission?.status !== "pending";
+            const cifGranted = !customer.cif_commission?.sale_id;
+            const ekycGranted = isEkycDone && !customer.ekyc_commission?.sale_id;
 
             if (cifGranted) {
                 updateData.cif_commission = createCifCommission(sale._id, accountId);

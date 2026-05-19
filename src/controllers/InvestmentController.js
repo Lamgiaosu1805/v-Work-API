@@ -226,12 +226,10 @@ const InvestmentController = {
                 $or: [
                     {
                         "cif_commission.sale_id": sale._id,
-                        "cif_commission.status": "pending",
                         "cif_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth },
                     },
                     {
                         "ekyc_commission.sale_id": sale._id,
-                        "ekyc_commission.status": "pending",
                         "ekyc_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth },
                     },
                 ],
@@ -239,12 +237,10 @@ const InvestmentController = {
 
             const cifCount = customerCommissions.filter(
                 (c) => c.cif_commission?.sale_id?.toString() === sale._id.toString() &&
-                    c.cif_commission?.status === "pending" &&
                     c.cif_commission?.granted_at >= startOfMonth
             ).length;
             const ekycCount = customerCommissions.filter(
                 (c) => c.ekyc_commission?.sale_id?.toString() === sale._id.toString() &&
-                    c.ekyc_commission?.status === "pending" &&
                     c.ekyc_commission?.granted_at >= startOfMonth
             ).length;
 

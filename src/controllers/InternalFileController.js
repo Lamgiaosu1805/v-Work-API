@@ -370,6 +370,162 @@ const InternalFileController = {
         }
     },
 
+    // GET /internal-files/:deptId/folders/all — trả toàn bộ folder (để build tree cho MoveDialog)
+    getAllFolders: async (req, res) => {
+        try {
+            const { deptId } = req.params;
+            const accountId = req.account._id;
+
+            if (!(await canViewDept(accountId, deptId))) {
+                return res.status(403).json({ message: "Bạn không có quyền xem thư mục này" });
+            }
+
+            const folders = await InternalFolderModel.find({ department: deptId, isDeleted: false })
+                .select("_id name parent_id")
+                .sort({ name: 1 });
+
+            return res.status(200).json({ message: "Thành công", data: folders });
+        } catch (error) {
+            return res.status(500).json({ message: "Lỗi server", error: error.message });
+        }
+    },
+
+    // PATCH /internal-files/file/:fileId/rename
+    renameFile: async (req, res) => {
+        try {
+            const { fileId } = req.params;
+            const { name } = req.body;
+            const accountId = req.account._id;
+            const account = await AccountModel.findById(accountId);
+
+            if (!name?.trim()) return res.status(400).json({ message: "Tên file không được để trống" });
+
+            const file = await InternalFileModel.findOne({ _id: fileId, isDeleted: false });
+            if (!file) return res.status(404).json({ message: "Không tìm thấy file" });
+
+            const isOwner = file.uploadedBy.toString() === accountId.toString();
+            if (account?.role !== "admin" && !isOwner) {
+                return res.status(403).json({ message: "Bạn không có quyền đổi tên file này" });
+            }
+
+            file.originalName = name.trim();
+            await file.save();
+
+            return res.status(200).json({ message: "Đổi tên thành công", data: file });
+        } catch (error) {
+            return res.status(500).json({ message: "Lỗi server", error: error.message });
+        }
+    },
+
+    // PATCH /internal-files/file/:fileId/move
+    moveFile: async (req, res) => {
+        try {
+            const { fileId } = req.params;
+            const { folder_id } = req.body;
+            const accountId = req.account._id;
+
+            const file = await InternalFileModel.findOne({ _id: fileId, isDeleted: false });
+            if (!file) return res.status(404).json({ message: "Không tìm thấy file" });
+
+            if (!(await canUploadToDept(accountId, file.department))) {
+                return res.status(403).json({ message: "Bạn không có quyền di chuyển file này" });
+            }
+
+            if (folder_id) {
+                const folder = await InternalFolderModel.findOne({ _id: folder_id, department: file.department, isDeleted: false });
+                if (!folder) return res.status(404).json({ message: "Thư mục đích không tồn tại" });
+            }
+
+            file.folder_id = folder_id || null;
+            await file.save();
+
+            return res.status(200).json({ message: "Di chuyển file thành công", data: file });
+        } catch (error) {
+            return res.status(500).json({ message: "Lỗi server", error: error.message });
+        }
+    },
+
+    // PATCH /internal-files/:deptId/folders/:folderId/rename
+    renameFolder: async (req, res) => {
+        try {
+            const { deptId, folderId } = req.params;
+            const { name } = req.body;
+            const accountId = req.account._id;
+            const account = await AccountModel.findById(accountId);
+
+            if (!name?.trim()) return res.status(400).json({ message: "Tên thư mục không được để trống" });
+
+            const folder = await InternalFolderModel.findOne({ _id: folderId, department: deptId, isDeleted: false });
+            if (!folder) return res.status(404).json({ message: "Không tìm thấy thư mục" });
+
+            const isCreator = folder.createdBy.toString() === accountId.toString();
+            const isAdminOrMgr = account?.role === "admin" || (account?.role === "manager" && account?.module_access?.includes("workplace"));
+            if (!isAdminOrMgr && !isCreator) {
+                return res.status(403).json({ message: "Bạn không có quyền đổi tên thư mục này" });
+            }
+
+            const duplicate = await InternalFolderModel.findOne({
+                department: deptId,
+                parent_id: folder.parent_id ?? null,
+                name: name.trim(),
+                isDeleted: false,
+                _id: { $ne: folderId },
+            });
+            if (duplicate) return res.status(409).json({ message: "Đã có thư mục cùng tên tại vị trí này" });
+
+            folder.name = name.trim();
+            await folder.save();
+
+            return res.status(200).json({ message: "Đổi tên thành công", data: folder });
+        } catch (error) {
+            return res.status(500).json({ message: "Lỗi server", error: error.message });
+        }
+    },
+
+    // PATCH /internal-files/:deptId/folders/:folderId/move
+    moveFolder: async (req, res) => {
+        try {
+            const { deptId, folderId } = req.params;
+            const { parent_id } = req.body;
+            const accountId = req.account._id;
+            const account = await AccountModel.findById(accountId);
+
+            const folder = await InternalFolderModel.findOne({ _id: folderId, department: deptId, isDeleted: false });
+            if (!folder) return res.status(404).json({ message: "Không tìm thấy thư mục" });
+
+            const isCreator = folder.createdBy.toString() === accountId.toString();
+            const isAdminOrMgr = account?.role === "admin" || (account?.role === "manager" && account?.module_access?.includes("workplace"));
+            if (!isAdminOrMgr && !isCreator) {
+                return res.status(403).json({ message: "Bạn không có quyền di chuyển thư mục này" });
+            }
+
+            if (parent_id) {
+                const allDescendants = await getAllDescendantFolderIds(folderId);
+                if (allDescendants.includes(parent_id.toString())) {
+                    return res.status(400).json({ message: "Không thể di chuyển thư mục vào chính nó hoặc thư mục con" });
+                }
+                const targetFolder = await InternalFolderModel.findOne({ _id: parent_id, department: deptId, isDeleted: false });
+                if (!targetFolder) return res.status(404).json({ message: "Thư mục đích không tồn tại" });
+            }
+
+            const duplicate = await InternalFolderModel.findOne({
+                department: deptId,
+                parent_id: parent_id || null,
+                name: folder.name,
+                isDeleted: false,
+                _id: { $ne: folderId },
+            });
+            if (duplicate) return res.status(409).json({ message: "Đã có thư mục cùng tên tại vị trí đích" });
+
+            folder.parent_id = parent_id || null;
+            await folder.save();
+
+            return res.status(200).json({ message: "Di chuyển thư mục thành công", data: folder });
+        } catch (error) {
+            return res.status(500).json({ message: "Lỗi server", error: error.message });
+        }
+    },
+
     // GET /internal-files/:deptId/permissions  (admin only)
     getPermissions: async (req, res) => {
         try {

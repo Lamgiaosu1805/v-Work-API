@@ -12,6 +12,9 @@ const InternalFileSchema = new mongoose.Schema(
         size: { type: Number, default: 0 },
         uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "account", required: true },
         department: { type: mongoose.Schema.Types.ObjectId, ref: "department", required: true },
+        folder_id: { type: mongoose.Schema.Types.ObjectId, ref: "internal_folder", default: null },
+        deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "account", default: null },
+        deletedAt: { type: Date, default: null },
         ...BaseSchema.obj,
     },
     {

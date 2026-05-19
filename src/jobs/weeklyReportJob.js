@@ -1,6 +1,7 @@
 const cron = require("node-cron");
 const moment = require("moment-timezone");
 const DepartmentModel = require("../models/DepartmentModel");
+const { LEAF_TYPES } = require("../models/DepartmentModel");
 const WeeklyReportModel = require("../models/WeeklyReportModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const UserInfoModel = require("../models/UserInfoModel");
@@ -33,7 +34,7 @@ async function notifyDept(deptId, title, body, data = {}) {
 // Thứ 6 lúc 8:00 — tạo record pending cho dept chưa có + nhắc nhở chưa nộp
 cron.schedule("0 8 * * 5", async () => {
     try {
-        const departments = await DepartmentModel.find({ isDeleted: false });
+        const departments = await DepartmentModel.find({ isDeleted: false, type: { $in: LEAF_TYPES } });
         const weekStart = getWeekStart();
         const deadline = getDeadline();
         const deadlineStr = moment(deadline).tz(TZ).format("HH:mm DD/MM/YYYY");

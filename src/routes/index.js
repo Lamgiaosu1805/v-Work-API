@@ -13,7 +13,8 @@ const claimPeriodRouter = require('./claimPeriod')
 const notificationRouter = require('./notification')
 const internalFileRouter = require('./internalFile')
 const weeklyReportRouter = require('./weeklyReport')
-const transactionRouter = require('./transaction')
+const branchRouter = require('./branch')
+const printRouter = require('./print')
 
 const route = (app) => {
     app.use(`/user`, userRouter)
@@ -29,9 +30,10 @@ const route = (app) => {
     app.use(`/investments`, investmentRouter)
     app.use(`/claim-period`, claimPeriodRouter)
     app.use(`/notification`, notificationRouter)
-    app.use(`/transactions`, transactionRouter)
     app.use(`/internal-files`, internalFileRouter)
     app.use(`/weekly-reports`, weeklyReportRouter)
+    app.use(`/branch`, branchRouter)
+    app.use(`/print`, printRouter)
 }
 
 module.exports = route;

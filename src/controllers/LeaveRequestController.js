@@ -8,6 +8,8 @@ const AccountModel = require("../models/AccountModel");
 const NotificationModel = require("../models/NotificationModel");
 const pushNotification = require("../helpers/pushNotification");
 
+const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
+
 const TZ = "Asia/Ho_Chi_Minh";
 
 function calcTotalDays(fromDate, fromPeriod, toDate, toPeriod) {
@@ -133,50 +135,42 @@ async function notify(accountId, { title, body, type, ref_id, ref_type, uri }) {
 
 const LeaveRequestController = {
   create: async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
-      const {
-        from_date,
-        from_period,
-        to_date,
-        to_period,
-        leave_days_used = 0,
-        reason,
-      } = req.body;
+      const { from_date, from_period, to_date, to_period, leave_type, reason } = req.body;
 
-      if (!from_date || !from_period || !to_date || !to_period) {
-        return res
-          .status(400)
-          .json({ message: "Thông tin đầu vào không hợp lệ" });
+      if (!from_date || !from_period || !to_date || !to_period || !leave_type) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Thông tin đầu vào không hợp lệ" });
+      }
+      if (!["paid", "unpaid"].includes(leave_type)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Thông tin đầu vào không hợp lệ" });
       }
 
       const userInfo = await UserInfoModel.findOne({
         id_account: req.account._id,
         isDeleted: false,
-      });
-      if (!userInfo)
-        return res
-          .status(404)
-          .json({ message: "Không tìm thấy thông tin nhân viên" });
+      }).session(session);
+      if (!userInfo) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+      }
 
-      const total_days = calcTotalDays(
-        from_date,
-        from_period,
-        to_date,
-        to_period,
-      );
+      const total_days = calcTotalDays(from_date, from_period, to_date, to_period);
       if (total_days === null || total_days === 0) {
-        return res
-          .status(400)
-          .json({ message: "Khoảng thời gian nghỉ không hợp lệ" });
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Khoảng thời gian nghỉ không hợp lệ" });
       }
 
-      const usedDays = Number(leave_days_used);
-      if (usedDays < 0 || usedDays > total_days || total_days === 0) {
-        return res
-          .status(400)
-          .json({ message: "Số ngày phép áp dụng không hợp lệ" });
-      }
-      if (usedDays > userInfo.leave_balance.annual) {
+      if (leave_type === "paid" && total_days > userInfo.leave_balance.annual) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json({
           message: "Số ngày phép không đủ",
           available: userInfo.leave_balance.annual,
@@ -189,23 +183,28 @@ const LeaveRequestController = {
         from_date: { $lte: new Date(to_date) },
         to_date: { $gte: new Date(from_date) },
         isDeleted: false,
-      });
+      }).session(session);
       if (overlap) {
-        return res
-          .status(409)
-          .json({ message: "Đã có đơn nghỉ trong khoảng thời gian này" });
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(409).json({ message: "Đã có đơn nghỉ trong khoảng thời gian này" });
       }
 
-      const request = await LeaveRequestModel.create({
-        user_id: userInfo._id,
-        from_date,
-        from_period,
-        to_date,
-        to_period,
-        total_days,
-        leave_days_used: usedDays,
-        reason: reason || "",
-      });
+      const [request] = await LeaveRequestModel.create(
+        [{ user_id: userInfo._id, from_date, from_period, to_date, to_period, total_days, leave_type, reason: reason || "" }],
+        { session },
+      );
+
+      if (leave_type === "paid") {
+        await UserInfoModel.findByIdAndUpdate(
+          userInfo._id,
+          { $inc: { "leave_balance.annual": -total_days } },
+          { session },
+        );
+      }
+
+      await session.commitTransaction();
+      session.endSession();
 
       findDirectManagerAccountIds(userInfo._id)
         .then((managerIds) => {
@@ -226,13 +225,11 @@ const LeaveRequestController = {
         })
         .catch(() => {});
 
-      return res
-        .status(201)
-        .json({ message: "Tạo đơn xin nghỉ thành công", data: request });
+      return res.status(201).json({ message: "Tạo đơn xin nghỉ thành công", data: request });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ message: "Lỗi server", error: error.message });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
   },
 
@@ -493,18 +490,7 @@ const LeaveRequestController = {
       await request.save({ session });
 
       if (action === "approve") {
-        if (request.leave_days_used > 0) {
-          await UserInfoModel.findByIdAndUpdate(
-            request.user_id,
-            { $inc: { "leave_balance.annual": -request.leave_days_used } },
-            { session },
-          );
-        }
-
-        const fromStart = moment
-          .tz(request.from_date, TZ)
-          .startOf("day")
-          .toDate();
+        const fromStart = moment.tz(request.from_date, TZ).startOf("day").toDate();
         const toEnd = moment.tz(request.to_date, TZ).endOf("day").toDate();
         await WorkSheetModel.updateMany(
           {
@@ -515,6 +501,14 @@ const LeaveRequestController = {
           { status: "leave" },
           { session },
         );
+      } else {
+        if (request.leave_type === "paid") {
+          await UserInfoModel.findByIdAndUpdate(
+            request.user_id,
+            { $inc: { "leave_balance.annual": request.total_days } },
+            { session },
+          );
+        }
       }
 
       await session.commitTransaction();
@@ -641,14 +635,15 @@ const LeaveRequestController = {
         return res.status(403).json({ message: "Không có quyền hủy đơn này" });
       }
 
+      if (request.leave_type === "paid") {
+        await UserInfoModel.findByIdAndUpdate(
+          request.user_id,
+          { $inc: { "leave_balance.annual": request.total_days } },
+          { session },
+        );
+      }
+
       if (request.status === "approved") {
-        if (request.leave_days_used > 0) {
-          await UserInfoModel.findByIdAndUpdate(
-            request.user_id,
-            { $inc: { "leave_balance.annual": request.leave_days_used } },
-            { session },
-          );
-        }
         const fromStart = moment.tz(request.from_date, TZ).startOf("day").toDate();
         const toEnd = moment.tz(request.to_date, TZ).endOf("day").toDate();
         await WorkSheetModel.updateMany(

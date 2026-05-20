@@ -377,6 +377,75 @@ const InvestmentController = {
             return res.status(500).json({ message: "Internal server error", error: error.message });
         }
     },
+    // GET /investments/list
+    // Sale: chỉ thấy đầu tư của khách mình — Manager/Admin: thấy tất cả
+    list: async (req, res) => {
+        try {
+            const { page = 1, limit = 20, status, date_from, date_to, q } = req.query;
+            const account = req.account;
+            const isManager = account.role === "admin" || account.role === "manager";
+
+            const filter = {};
+
+            // Sale chỉ xem investment của khách mình (qua commission.sale_id)
+            if (!isManager) {
+                const sale = await UserInfoModel.findOne({ id_account: account._id });
+                if (!sale) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+                filter["commission.sale_id"] = sale._id;
+            }
+
+            if (status) filter.status = status;
+
+            if (date_from || date_to) {
+                filter.invested_at = {};
+                if (date_from) filter.invested_at.$gte = new Date(date_from);
+                if (date_to) {
+                    const to = new Date(date_to);
+                    to.setHours(23, 59, 59, 999);
+                    filter.invested_at.$lte = to;
+                }
+            }
+
+            // Tìm kiếm theo số điện thoại hoặc tên khách
+            if (q) {
+                const matchedCustomers = await CustomerModel.find({
+                    $or: [
+                        { phone_number: { $regex: q.trim(), $options: "i" } },
+                        { "identity.full_name": { $regex: q.trim(), $options: "i" } },
+                    ],
+                }).select("_id");
+                filter.customer_id = { $in: matchedCustomers.map((c) => c._id) };
+            }
+
+            const skip = (Number(page) - 1) * Number(limit);
+
+            const [investments, total] = await Promise.all([
+                InvestmentModel.find(filter)
+                    .populate({ path: "customer_id", select: "phone_number identity.full_name" })
+                    .populate({ path: "commission.sale_id", select: "full_name ma_nv" })
+                    .select("product_name amount term_type term_value interest_rate invested_at maturity_at status commission")
+                    .sort({ invested_at: -1 })
+                    .skip(skip)
+                    .limit(Number(limit)),
+                InvestmentModel.countDocuments(filter),
+            ]);
+
+            return res.status(200).json({
+                message: "Lấy danh sách đầu tư thành công",
+                data: investments,
+                pagination: {
+                    total,
+                    page: Number(page),
+                    limit: Number(limit),
+                    total_pages: Math.ceil(total / Number(limit)),
+                },
+            });
+        } catch (error) {
+            console.error("Error in list investments:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
+
     // POST /investments/bulk-sync
     // Đồng bộ khoản đầu tư cũ — KHÔNG tính hoa hồng
     bulkSync: async (req, res) => {

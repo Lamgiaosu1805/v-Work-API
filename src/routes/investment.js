@@ -11,5 +11,6 @@ router.get("/agent-commission", verifyInternalRequest, InvestmentController.getA
 
 // Sale nội bộ đăng nhập CRM
 router.get("/my-commission", authenticate, hasModuleAccess("crm"), InvestmentController.getMyCommission);
+router.get("/list", authenticate, hasModuleAccess("crm"), InvestmentController.list);
 
 module.exports = router;

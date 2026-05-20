@@ -333,15 +333,20 @@ const InternalFileController = {
                 return res.status(404).json({ message: "File không tồn tại trên server" });
             }
 
-            // HEIC/HEIF → convert sang JPEG để mọi client (web, Android) đều hiển thị được
+            // HEIC/HEIF → convert sang JPEG bằng heic-convert (WASM, không cần libvips HEIC)
             const isHeic = ["image/heic", "image/heif"].includes(file.mimeType?.toLowerCase());
             if (isHeic) {
-                const sharp = require("sharp");
-                const buffer = await sharp(filePath).jpeg({ quality: 85 }).toBuffer();
-                const jpegName = file.originalName.replace(/\.heic$/i, ".jpg").replace(/\.heif$/i, ".jpg");
+                const heicConvert = require("heic-convert");
+                const inputBuffer = fs.readFileSync(filePath);
+                const outputBuffer = await heicConvert({
+                    buffer: inputBuffer,
+                    format: "JPEG",
+                    quality: 0.85,
+                });
+                const jpegName = file.originalName.replace(/\.(heic|heif)$/i, ".jpg");
                 res.setHeader("Content-Type", "image/jpeg");
                 res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(jpegName)}`);
-                return res.send(buffer);
+                return res.send(Buffer.from(outputBuffer));
             }
 
             res.setHeader("Content-Type", file.mimeType || "application/octet-stream");

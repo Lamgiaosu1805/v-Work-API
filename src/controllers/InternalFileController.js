@@ -333,6 +333,17 @@ const InternalFileController = {
                 return res.status(404).json({ message: "File không tồn tại trên server" });
             }
 
+            // HEIC/HEIF → convert sang JPEG để mọi client (web, Android) đều hiển thị được
+            const isHeic = ["image/heic", "image/heif"].includes(file.mimeType?.toLowerCase());
+            if (isHeic) {
+                const sharp = require("sharp");
+                const buffer = await sharp(filePath).jpeg({ quality: 85 }).toBuffer();
+                const jpegName = file.originalName.replace(/\.heic$/i, ".jpg").replace(/\.heif$/i, ".jpg");
+                res.setHeader("Content-Type", "image/jpeg");
+                res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(jpegName)}`);
+                return res.send(buffer);
+            }
+
             res.setHeader("Content-Type", file.mimeType || "application/octet-stream");
             res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(file.originalName)}`);
             return res.sendFile(filePath);

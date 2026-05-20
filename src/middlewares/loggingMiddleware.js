@@ -1,6 +1,19 @@
 // src/middlewares/loggingMiddleware.js
 const SENSITIVE_KEYS = ['password', 'accessToken', 'refreshToken', 'authorization'];
 
+// Decode JWT payload (không verify) chỉ để lấy username cho log
+const getUserFromToken = (req) => {
+    try {
+        const auth = req.headers.authorization;
+        if (!auth?.startsWith('Bearer ')) return null;
+        const payload = auth.split('.')[1];
+        const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+        return decoded.username ?? null;
+    } catch {
+        return null;
+    }
+};
+
 const safeSanitize = (value, options = {}) => {
   const {
     maxDepth = 5,
@@ -59,6 +72,7 @@ const loggingMiddleware = (req, res, next) => {
     console.log(`\n🔵 Request [${requestId}]:`, {
       method: req.method,
       url: req.originalUrl,
+      user: getUserFromToken(req),
       body: safeSanitize(req.body),
     });
   } catch (e) {
@@ -75,6 +89,7 @@ const loggingMiddleware = (req, res, next) => {
       console.log(`\n🟢 Response [${requestId}]:`, {
         url: req.originalUrl,
         statusCode: res.statusCode,
+        user: req.account?.username ?? getUserFromToken(req),
         duration: `${duration} ms`,
         data: safeSanitize(data),
       });

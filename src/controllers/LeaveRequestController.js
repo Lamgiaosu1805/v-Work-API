@@ -4,11 +4,8 @@ const LeaveRequestModel = require("../models/LeaveRequestModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
-const AccountModel = require("../models/AccountModel");
 const NotificationModel = require("../models/NotificationModel");
 const pushNotification = require("../helpers/pushNotification");
-
-const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -151,9 +148,19 @@ const LeaveRequestController = {
       if (!["paid", "unpaid"].includes(leave_type)) {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({ message: "Thông tin đầu vào không hợp lệ" });
+        return res.status(400).json({ message: "Thông tin đầu vào không hợp lệ" });
+      }
+      if (!["morning", "afternoon"].includes(from_period) || !["morning", "afternoon"].includes(to_period)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Buổi nghỉ không hợp lệ" });
+      }
+
+      const today = moment.tz(TZ).startOf("day");
+      if (moment.tz(from_date, TZ).startOf("day").isBefore(today)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Không thể tạo đơn nghỉ cho ngày trong quá khứ" });
       }
 
       const userInfo = await UserInfoModel.findOne({
@@ -163,32 +170,14 @@ const LeaveRequestController = {
       if (!userInfo) {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(404)
-          .json({ message: "Không tìm thấy thông tin nhân viên" });
+        return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
       }
 
-      const total_days = calcTotalDays(
-        from_date,
-        from_period,
-        to_date,
-        to_period,
-      );
+      const total_days = calcTotalDays(from_date, from_period, to_date, to_period);
       if (total_days === null || total_days === 0) {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({ message: "Khoảng thời gian nghỉ không hợp lệ" });
-      }
-
-      if (leave_type === "paid" && total_days > userInfo.leave_balance.annual) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          message: "Số ngày phép không đủ",
-          available: userInfo.leave_balance.annual,
-        });
+        return res.status(400).json({ message: "Khoảng thời gian nghỉ không hợp lệ" });
       }
 
       const overlap = await LeaveRequestModel.findOne({
@@ -201,33 +190,28 @@ const LeaveRequestController = {
       if (overlap) {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(409)
-          .json({ message: "Đã có đơn nghỉ trong khoảng thời gian này" });
+        return res.status(409).json({ message: "Đã có đơn nghỉ trong khoảng thời gian này" });
       }
 
       const [request] = await LeaveRequestModel.create(
-        [
-          {
-            user_id: userInfo._id,
-            from_date,
-            from_period,
-            to_date,
-            to_period,
-            total_days,
-            leave_type,
-            reason: reason || "",
-          },
-        ],
+        [{ user_id: userInfo._id, from_date, from_period, to_date, to_period, total_days, leave_type, reason: reason || "" }],
         { session },
       );
 
       if (leave_type === "paid") {
-        await UserInfoModel.findByIdAndUpdate(
-          userInfo._id,
+        const updated = await UserInfoModel.findOneAndUpdate(
+          { _id: userInfo._id, "leave_balance.annual": { $gte: total_days } },
           { $inc: { "leave_balance.annual": -total_days } },
           { session },
         );
+        if (!updated) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            message: "Số ngày phép không đủ",
+            available: userInfo.leave_balance.annual,
+          });
+        }
       }
 
       await session.commitTransaction();
@@ -363,17 +347,15 @@ const LeaveRequestController = {
           }).distinct("user");
         }
 
-        const branchFilter = {
-          branch_id: managerInfo.branch_id,
-          isDeleted: false,
-        };
-        if (deptUserIds) branchFilter._id = { $in: deptUserIds };
+        if (!managerInfo.branch_id) {
+          allowedUserIds = [];
+        } else {
+          const branchFilter = { branch_id: managerInfo.branch_id, isDeleted: false };
+          if (deptUserIds) branchFilter._id = { $in: deptUserIds };
 
-        const branchUsers =
-          await UserInfoModel.find(branchFilter).distinct("_id");
-        allowedUserIds = branchUsers.filter(
-          (id) => !id.equals(managerInfo._id),
-        );
+          const branchUsers = await UserInfoModel.find(branchFilter).distinct("_id");
+          allowedUserIds = branchUsers.filter((id) => !id.equals(managerInfo._id));
+        }
       }
 
       if (search) {
@@ -630,46 +612,54 @@ const LeaveRequestController = {
   },
 
   cancel: async (req, res) => {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "ID không hợp lệ" });
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
-      const { id } = req.params;
-      if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).json({ message: "ID không hợp lệ" });
-      }
+      const [userInfo, request] = await Promise.all([
+        UserInfoModel.findOne({ id_account: req.account._id, isDeleted: false }).session(session),
+        LeaveRequestModel.findOne({ _id: id, isDeleted: false }).session(session),
+      ]);
 
-      const userInfo = await UserInfoModel.findOne({
-        id_account: req.account._id,
-        isDeleted: false,
-      });
-      const request = await LeaveRequestModel.findOne({
-        _id: id,
-        isDeleted: false,
-      });
-
-      if (!request)
+      if (!request) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(404).json({ message: "Đơn nghỉ không tồn tại" });
+      }
       if (!userInfo || !request.user_id.equals(userInfo._id)) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(403).json({ message: "Không có quyền hủy đơn này" });
       }
       if (request.status !== "pending") {
-        return res
-          .status(409)
-          .json({ message: "Chỉ có thể hủy đơn đang chờ duyệt" });
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(409).json({ message: "Chỉ có thể hủy đơn đang chờ duyệt" });
       }
 
       if (request.leave_type === "paid") {
-        await UserInfoModel.findByIdAndUpdate(userInfo._id, {
-          $inc: { "leave_balance.annual": request.total_days },
-        });
+        await UserInfoModel.findByIdAndUpdate(
+          userInfo._id,
+          { $inc: { "leave_balance.annual": request.total_days } },
+          { session },
+        );
       }
 
       request.status = "cancelled";
-      await request.save();
+      await request.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
 
       return res.status(200).json({ message: "Hủy đơn nghỉ thành công" });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ message: "Lỗi server", error: error.message });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
   },
 };

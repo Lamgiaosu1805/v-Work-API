@@ -490,17 +490,39 @@ const LeaveRequestController = {
       await request.save({ session });
 
       if (action === "approve") {
-        const fromStart = moment.tz(request.from_date, TZ).startOf("day").toDate();
+        const fromMoment = moment.tz(request.from_date, TZ).startOf("day");
+        const toMoment = moment.tz(request.to_date, TZ).startOf("day");
+        const fromStart = fromMoment.toDate();
         const toEnd = moment.tz(request.to_date, TZ).endOf("day").toDate();
+
         await WorkSheetModel.updateMany(
-          {
-            user_id: request.user_id,
-            date: { $gte: fromStart, $lte: toEnd },
-            isDeleted: false,
-          },
+          { user_id: request.user_id, date: { $gte: fromStart, $lte: toEnd }, isDeleted: false },
           { status: "leave" },
           { session },
         );
+
+        const allWorkDates = [];
+        const cursor = fromMoment.clone();
+        while (cursor.isSameOrBefore(toMoment, "day")) {
+          if (cursor.day() !== 0) allWorkDates.push(cursor.clone().toDate()); 
+          cursor.add(1, "day");
+        }
+
+        const existing = await WorkSheetModel.find(
+          { user_id: request.user_id, date: { $gte: fromStart, $lte: toEnd }, isDeleted: false },
+          { date: 1 },
+        ).session(session);
+        const existingKeys = new Set(existing.map(w => moment.tz(w.date, TZ).format("YYYY-MM-DD")));
+
+        const missingDates = allWorkDates.filter(
+          d => !existingKeys.has(moment.tz(d, TZ).format("YYYY-MM-DD")),
+        );
+        if (missingDates.length > 0) {
+          await WorkSheetModel.insertMany(
+            missingDates.map(date => ({ user_id: request.user_id, date, shifts: [], status: "leave" })),
+            { session },
+          );
+        }
       } else {
         if (request.leave_type === "paid") {
           await UserInfoModel.findByIdAndUpdate(

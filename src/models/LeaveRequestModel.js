@@ -8,8 +8,8 @@ const LeaveRequestSchema = new mongoose.Schema(
         from_period:     { type: String, enum: ["morning", "afternoon"], required: true },
         to_date:         { type: Date, required: true },
         to_period:       { type: String, enum: ["morning", "afternoon"], required: true },
-        total_days:      { type: Number, required: true },
-        leave_days_used: { type: Number, required: true, default: 0 },
+        total_days:  { type: Number, required: true },
+        leave_type:  { type: String, enum: ["paid", "unpaid"], required: true },
         reason:          { type: String, default: "" },
         status: {
             type: String,

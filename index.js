@@ -35,6 +35,8 @@ route(app);
     require('./src/jobs/genWorkSheet');
     require('./src/jobs/cleanupDeviceTokens');
     require('./src/jobs/weeklyReportJob');
+    require('./src/jobs/accrueMonthlyLeave');
+    require('./src/jobs/autoRejectLeaveRequests');
     const { ensureAllDeptFolders } = require('./src/jobs/ensureDeptFolders');
     await ensureAllDeptFolders();
 

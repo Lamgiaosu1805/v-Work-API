@@ -6,10 +6,10 @@ const uploadDocuments = require("../middlewares/uploadDocuments");
 const UserController = require("../controllers/UserController");
 
 // GET
-router.get("/getUsers", authenticate, hasModuleAccess("hrm"), UserController.getUsers);
+router.get("/getUsers", authenticate, UserController.getUsers);
 router.get("/getUserInfo", authenticate, UserController.getUserInfo);
 router.get("/getQRSale", authenticate, UserController.generateMyQR);
-router.get("/getUserById/:id", authenticate, hasModuleAccess("hrm"), UserController.getUserById);
+router.get("/getUserById/:id", authenticate, UserController.getUserById);
 router.get("/birthday/this-month", authenticate, UserController.getBirthdayThisMonth);
 
 // PUT

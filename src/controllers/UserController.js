@@ -420,6 +420,23 @@ const UserController = {
 
       const filter = { isDeleted: false };
 
+      // Admin hoặc có module hrm → xem tất cả; còn lại chỉ xem phòng ban của mình
+      const isFullAccess =
+        req.account.role === "admin" || req.account.module_access?.includes("hrm");
+
+      if (!isFullAccess) {
+        const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });
+        if (!myInfo) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+
+        const myDeptIds = await UserDepartmentPositionModel.distinct("department", {
+          user: myInfo._id, isDeleted: false,
+        });
+        const deptUserIds = await UserDepartmentPositionModel.distinct("user", {
+          department: { $in: myDeptIds }, isDeleted: false,
+        });
+        filter._id = { $in: deptUserIds };
+      }
+
       // Lọc theo module_access: tìm account có module đó rồi map sang user_info
       if (module) {
         const accountIds = await AccountModel.find({
@@ -454,7 +471,14 @@ const UserController = {
           department: department_id,
           isDeleted: false,
         }).distinct("user");
-        filter._id = { $in: udpIds };
+
+        if (filter._id) {
+          // Giao với dept-scope đã có
+          const deptSet = new Set(udpIds.map(String));
+          filter._id.$in = filter._id.$in.filter((id) => deptSet.has(String(id)));
+        } else {
+          filter._id = { $in: udpIds };
+        }
       }
 
       const [users, total] = await Promise.all([
@@ -551,6 +575,28 @@ const UserController = {
       const user = await UserInfoModel.findOne({ _id: id, isDeleted: false });
       if (!user) {
         return res.status(404).json({ message: "Không tìm thấy user" });
+      }
+
+      // Nếu không phải admin/hrm, kiểm tra user được xem phải cùng phòng ban
+      const isFullAccess =
+        req.account.role === "admin" || req.account.module_access?.includes("hrm");
+
+      if (!isFullAccess) {
+        const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });
+        if (myInfo && myInfo._id.equals(user._id)) {
+          // Xem hồ sơ chính mình — luôn cho phép
+        } else {
+          const myDeptIds = await UserDepartmentPositionModel.distinct("department", {
+            user: myInfo?._id, isDeleted: false,
+          });
+          const targetDeptIds = await UserDepartmentPositionModel.distinct("department", {
+            user: user._id, isDeleted: false,
+          });
+          const sameDept = myDeptIds.some((d) => targetDeptIds.some((t) => t.equals(d)));
+          if (!sameDept) {
+            return res.status(403).json({ message: "Bạn không có quyền xem hồ sơ nhân viên này" });
+          }
+        }
       }
 
       const [userDepartments, userDocuments, laborContracts, workSchedules] = await Promise.all([

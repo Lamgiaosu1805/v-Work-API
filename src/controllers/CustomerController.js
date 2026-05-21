@@ -1020,6 +1020,66 @@ const CustomerController = {
         }
     },
 
+    // PATCH /customer/:id/unassign-sale — Admin xóa phân công sale (nhận nhầm)
+    unassignSale: async (req, res) => {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        try {
+            const { id: customer_id } = req.params;
+            const { reason } = req.body;
+            const accountId = req.account._id;
+
+            const customer = await CustomerModel.findOne({ _id: customer_id, isDeleted: false }).session(session);
+            if (!customer) {
+                await session.abortTransaction(); session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            }
+            if (!customer.referred_by) {
+                await session.abortTransaction(); session.endSession();
+                return res.status(400).json({ message: "Khách hàng này chưa được gán sale" });
+            }
+
+            const oldSaleId = customer.referred_by;
+            const oldSale = await UserInfoModel.findById(oldSaleId).select("full_name ma_nv").session(session);
+
+            const resetData = {
+                referred_by: null,
+                source_type: null,
+                ref_code: null,
+                referred_at: null,
+            };
+            if (customer.cif_commission?.sale_id?.toString() === oldSaleId.toString()) resetData.cif_commission = null;
+            if (customer.ekyc_commission?.sale_id?.toString() === oldSaleId.toString()) resetData.ekyc_commission = null;
+
+            await CustomerModel.findByIdAndUpdate(customer._id, { $set: resetData }, { session });
+
+            await InvestmentModel.updateMany(
+                { customer_id: customer._id, "commission.sale_id": oldSaleId, isDeleted: false },
+                { $set: { "commission.sale_id": null, "commission.receiver_type": null, "commission.status": "none", "commission.gross_amount": 0, "commission.tncn_amount": 0, "commission.net_amount": 0 } },
+                { session }
+            );
+
+            const saleName = oldSale ? `${oldSale.full_name} (${oldSale.ma_nv})` : String(oldSaleId);
+            await CustomerInteractionModel.create([{
+                app_id: customer.app_id,
+                customer_id: customer._id,
+                sale_id: oldSaleId,
+                agent_id: null,
+                type: "note",
+                content: `Admin xóa phân công sale ${saleName} — khách trở về trạng thái chưa được nhận${reason?.trim() ? ` (lý do: ${reason.trim()})` : ""}`,
+                result: null,
+                metadata: { removed_by: accountId, removed_sale_id: oldSaleId, reason: reason?.trim() || null },
+            }], { session });
+
+            await session.commitTransaction(); session.endSession();
+            return res.status(200).json({ message: "Đã xóa phân công sale. Khách hàng trở về trạng thái chưa được nhận." });
+        } catch (error) {
+            await session.abortTransaction(); session.endSession();
+            console.error("Error in unassignSale:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
+
     // POST /customers/:id/assign — Admin/Manager phân khách về cho sale
     assignCustomer: async (req, res) => {
         const session = await mongoose.startSession();

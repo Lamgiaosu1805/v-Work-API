@@ -13,5 +13,8 @@ router.get("/agent-commission", verifyInternalRequest, InvestmentController.getA
 router.get("/my-commission", authenticate, hasModuleAccess("crm"), InvestmentController.getMyCommission);
 router.get("/sales-chart", authenticate, hasModuleAccess("crm"), InvestmentController.getSalesChart);
 router.get("/list", authenticate, hasModuleAccess("crm"), InvestmentController.list);
+router.get("/expiring", authenticate, hasModuleAccess("crm"), InvestmentController.getExpiring);
+router.get("/leaderboard", authenticate, hasModuleAccess("crm"), InvestmentController.getLeaderboard);
+router.get("/conversion", authenticate, hasModuleAccess("crm"), InvestmentController.getConversion);
 
 module.exports = router;

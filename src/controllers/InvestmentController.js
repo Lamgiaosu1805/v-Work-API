@@ -754,4 +754,161 @@ const InvestmentController = {
     },
 };
 
+// ── Cảnh báo đáo hạn ─────────────────────────────────────────────────────────
+InvestmentController.getExpiring = async (req, res) => {
+    try {
+        const days = Math.min(parseInt(req.query.days) || 30, 90);
+        const now = new Date();
+        const until = new Date();
+        until.setDate(until.getDate() + days);
+
+        const match = { status: 'active', isDeleted: false, maturity_at: { $gte: now, $lte: until } };
+
+        if (req.account.role === 'user') {
+            const userInfo = await UserInfoModel.findOne({ id_account: req.account._id }).select('_id').lean();
+            if (userInfo) match['commission.sale_id'] = userInfo._id;
+        }
+
+        const investments = await InvestmentModel.find(match)
+            .populate({ path: 'customer_id', select: 'identity.full_name phone_number' })
+            .select('product_name amount maturity_at customer_id commission')
+            .sort({ maturity_at: 1 })
+            .lean();
+
+        const d7 = new Date(); d7.setDate(d7.getDate() + 7);
+        const d14 = new Date(); d14.setDate(d14.getDate() + 14);
+
+        // Với manager/admin: lấy thêm tên sale
+        const saleIds = [...new Set(investments.map(i => i.commission?.sale_id).filter(Boolean).map(String))];
+        const saleMap = {};
+        if ((req.account.role === 'admin' || req.account.role === 'manager') && saleIds.length) {
+            const sales = await UserInfoModel.find({ _id: { $in: saleIds } }).select('full_name').lean();
+            sales.forEach(s => { saleMap[String(s._id)] = s.full_name; });
+        }
+
+        res.json({
+            total: investments.length,
+            days,
+            investments: investments.map(i => {
+                const daysLeft = Math.ceil((new Date(i.maturity_at) - now) / 86400000);
+                return {
+                    _id: i._id,
+                    customer_name: i.customer_id?.identity?.full_name ?? i.customer_id?.phone_number ?? '—',
+                    customer_phone: i.customer_id?.phone_number,
+                    product_name: i.product_name,
+                    amount: i.amount,
+                    maturity_at: i.maturity_at,
+                    days_left: daysLeft,
+                    urgency: daysLeft <= 7 ? 'urgent' : daysLeft <= 14 ? 'warning' : 'normal',
+                    sale_name: saleMap[String(i.commission?.sale_id)] ?? null,
+                };
+            }),
+        });
+    } catch (err) {
+        console.log('getExpiring error:', err.message);
+        res.status(500).json({ message: 'Lỗi lấy danh sách đáo hạn', error: err.message });
+    }
+};
+
+// ── Leaderboard sale ──────────────────────────────────────────────────────────
+InvestmentController.getLeaderboard = async (req, res) => {
+    try {
+        const { period = 'month' } = req.query;
+        const now = new Date();
+
+        const from = period === 'week'
+            ? (() => { const d = new Date(now); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); d.setHours(0,0,0,0); return d; })()
+            : new Date(now.getFullYear(), now.getMonth(), 1);
+
+        const match = {
+            isDeleted: false,
+            invested_at: { $gte: from },
+            'commission.sale_id': { $exists: true, $ne: null },
+        };
+
+        // Sale thường chỉ xem xếp hạng phòng ban mình — manager/admin xem tất cả
+        if (req.account.role === 'user') {
+            const userInfo = await UserInfoModel.findOne({ id_account: req.account._id }).select('_id').lean();
+            const depts = await UserDepartmentPositionModel.find({ user: userInfo?._id }).select('department').lean();
+            const deptIds = depts.map(d => d.department);
+            const colleagues = await UserDepartmentPositionModel.find({ department: { $in: deptIds } }).select('user').lean();
+            match['commission.sale_id'] = { $in: colleagues.map(c => c.user) };
+        }
+
+        const rows = await InvestmentModel.aggregate([
+            { $match: match },
+            { $group: { _id: '$commission.sale_id', total_amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+            { $sort: { total_amount: -1 } },
+            { $limit: 20 },
+            { $lookup: { from: 'user_infos', localField: '_id', foreignField: '_id', pipeline: [{ $project: { full_name: 1 } }], as: 'info' } },
+            { $project: { total_amount: 1, count: 1, sale_name: { $ifNull: [{ $arrayElemAt: ['$info.full_name', 0] }, 'Không rõ'] } } },
+        ]);
+
+        res.json({ period, from, leaderboard: rows });
+    } catch (err) {
+        console.log('getLeaderboard error:', err.message);
+        res.status(500).json({ message: 'Lỗi lấy leaderboard', error: err.message });
+    }
+};
+
+// ── Tỷ lệ chuyển đổi ─────────────────────────────────────────────────────────
+InvestmentController.getConversion = async (req, res) => {
+    try {
+        const isManager = req.account.role === 'admin' || req.account.role === 'manager';
+
+        if (!isManager) {
+            // Phễu cá nhân
+            const userInfo = await UserInfoModel.findOne({ id_account: req.account._id }).select('_id').lean();
+            const saleId = userInfo?._id;
+            const [total, kycDone, investedIds] = await Promise.all([
+                CustomerModel.countDocuments({ referred_by: saleId, isDeleted: false }),
+                CustomerModel.countDocuments({ referred_by: saleId, status: { $in: ['kyc_verified', 'active'] }, isDeleted: false }),
+                InvestmentModel.distinct('customer_id', { 'commission.sale_id': saleId, isDeleted: false }),
+            ]);
+            return res.json({
+                mode: 'personal',
+                funnel: [
+                    { label: 'Đã đăng ký', count: total },
+                    { label: 'Đã KYC', count: kycDone },
+                    { label: 'Đã đầu tư', count: investedIds.length },
+                ],
+            });
+        }
+
+        // Manager/admin: xếp hạng chuyển đổi theo sale
+        const rows = await CustomerModel.aggregate([
+            { $match: { isDeleted: false, referred_by: { $exists: true, $ne: null } } },
+            { $group: {
+                _id: '$referred_by',
+                total: { $sum: 1 },
+                kyc_done: { $sum: { $cond: [{ $in: ['$status', ['kyc_verified', 'active']] }, 1, 0] } },
+            }},
+            { $sort: { total: -1 } },
+            { $limit: 20 },
+            { $lookup: { from: 'user_infos', localField: '_id', foreignField: '_id', pipeline: [{ $project: { full_name: 1 } }], as: 'info' } },
+            { $lookup: {
+                from: 'investments',
+                let: { sid: '$_id' },
+                pipeline: [
+                    { $match: { $expr: { $eq: ['$commission.sale_id', '$$sid'] }, isDeleted: false } },
+                    { $group: { _id: '$customer_id' } },
+                    { $count: 'n' },
+                ],
+                as: 'inv',
+            }},
+            { $project: {
+                sale_name: { $ifNull: [{ $arrayElemAt: ['$info.full_name', 0] }, 'Không rõ'] },
+                total: 1,
+                kyc_done: 1,
+                invested: { $ifNull: [{ $arrayElemAt: ['$inv.n', 0] }, 0] },
+            }},
+        ]);
+
+        res.json({ mode: 'manager', rows });
+    } catch (err) {
+        console.log('getConversion error:', err.message);
+        res.status(500).json({ message: 'Lỗi lấy tỷ lệ chuyển đổi', error: err.message });
+    }
+};
+
 module.exports = InvestmentController;

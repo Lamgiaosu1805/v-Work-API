@@ -125,7 +125,7 @@ const _computeChurnRisks = async (saleId = null) => {
     const thresholdDays = 90;
     const cutoff = dayjs().subtract(thresholdDays, 'day').toDate();
 
-    const matchStage = { status: 'active', isDeleted: false };
+    const matchStage = { status: { $in: ['kyc_verified', 'active'] }, isDeleted: false };
     if (saleId) matchStage.referred_by = saleId;
 
     const atRiskCustomers = await CustomerModel.aggregate([

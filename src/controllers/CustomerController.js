@@ -4,6 +4,7 @@ const CustomerInteractionModel = require("../models/CustomerInteractionModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AppModel = require("../models/AppModel");
 const AgentModel = require("../models/AgentModel");
+const InvestmentModel = require("../models/InvestmentModel");
 const { createCifCommission, createEkycCommission } = require("../helpers/commissionCalculator");
 const { computeClaimWindow } = require("../helpers/claimWindowHelper");
 

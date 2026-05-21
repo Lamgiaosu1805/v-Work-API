@@ -95,13 +95,24 @@ ${invSummary ? `\nChi tiết khoản đầu tư (mới nhất trước):\n${invS
 // ─── Feature B: Phát hiện khách hàng có nguy cơ rời bỏ ──────────────────────
 
 exports.getChurnRisks = async (req, res) => {
-    const cacheKey = 'ai:churn_risks';
     try {
+        const { role, _id: accountId } = req.account;
+        const isAdmin = role === 'admin';
+        const isManager = role === 'manager';
+
+        // Admin/manager thấy tất cả, sale chỉ thấy khách của mình
+        let saleId = null;
+        if (!isAdmin && !isManager) {
+            const userInfo = await UserInfoModel.findOne({ id_account: accountId }).select('_id').lean();
+            saleId = userInfo?._id ?? null;
+        }
+
+        const cacheKey = saleId ? `ai:churn_risks:sale:${saleId}` : 'ai:churn_risks:all';
         const cached = await redis.get(cacheKey);
         if (cached) return res.json(JSON.parse(cached));
 
-        const result = await _computeChurnRisks();
-        await redis.set(cacheKey, JSON.stringify(result), 'EX', 86400); // cache 24h
+        const result = await _computeChurnRisks(saleId);
+        await redis.set(cacheKey, JSON.stringify(result), 'EX', 86400);
         res.json(result);
     } catch (err) {
         console.log('AiController.getChurnRisks error:', err.message);
@@ -109,14 +120,16 @@ exports.getChurnRisks = async (req, res) => {
     }
 };
 
-// Được gọi cả từ API lẫn cron job
-const _computeChurnRisks = async () => {
+// saleId = null → lấy tất cả (admin/manager), có saleId → lọc theo sale
+const _computeChurnRisks = async (saleId = null) => {
     const thresholdDays = 90;
     const cutoff = dayjs().subtract(thresholdDays, 'day').toDate();
 
-    // Tìm khách hàng active nhưng không có đầu tư nào trong 90 ngày
+    const matchStage = { status: 'active', isDeleted: false };
+    if (saleId) matchStage.referred_by = saleId;
+
     const atRiskCustomers = await CustomerModel.aggregate([
-        { $match: { status: 'active', isDeleted: false } },
+        { $match: matchStage },
         {
             $lookup: {
                 from: 'investments',
@@ -125,7 +138,7 @@ const _computeChurnRisks = async () => {
                     { $match: { $expr: { $eq: ['$customer_id', '$$cid'] }, isDeleted: false } },
                     { $sort: { invested_at: -1 } },
                     { $limit: 1 },
-                    { $project: { invested_at: 1, status: 1, amount: 1 } },
+                    { $project: { invested_at: 1, amount: 1 } },
                 ],
                 as: 'lastInvestment',
             },
@@ -133,9 +146,19 @@ const _computeChurnRisks = async () => {
         {
             $match: {
                 $or: [
-                    { lastInvestment: { $size: 0 } }, // chưa đầu tư lần nào
-                    { 'lastInvestment.0.invested_at': { $lt: cutoff } }, // lần cuối > 90 ngày
+                    { lastInvestment: { $size: 0 } },
+                    { 'lastInvestment.0.invested_at': { $lt: cutoff } },
                 ],
+            },
+        },
+        // Lookup thông tin sale phụ trách
+        {
+            $lookup: {
+                from: 'user_infos',
+                localField: 'referred_by',
+                foreignField: '_id',
+                pipeline: [{ $project: { full_name: 1, phone_number: 1 } }],
+                as: 'saleInfo',
             },
         },
         {
@@ -143,14 +166,14 @@ const _computeChurnRisks = async () => {
                 _id: 1,
                 phone_number: 1,
                 'identity.full_name': 1,
-                status: 1,
                 createdAt: 1,
                 lastInvestedAt: { $arrayElemAt: ['$lastInvestment.invested_at', 0] },
                 lastAmount: { $arrayElemAt: ['$lastInvestment.amount', 0] },
+                sale: { $arrayElemAt: ['$saleInfo', 0] },
             },
         },
         { $sort: { lastInvestedAt: 1 } },
-        { $limit: 50 },
+        { $limit: 100 },
     ]);
 
     return {
@@ -166,6 +189,8 @@ const _computeChurnRisks = async () => {
             lastAmount: c.lastAmount ?? 0,
             neverInvested: !c.lastInvestedAt,
             joinedAt: c.createdAt,
+            saleName: c.sale?.full_name ?? null,
+            salePhone: c.sale?.phone_number ?? null,
         })),
     };
 };

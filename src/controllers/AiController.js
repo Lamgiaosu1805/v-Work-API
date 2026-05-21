@@ -172,8 +172,10 @@ const _computeChurnRisks = async (saleId = null) => {
                 sale: { $arrayElemAt: ['$saleInfo', 0] },
             },
         },
-        { $sort: { lastInvestedAt: 1 } },
-        { $limit: 100 },
+        // Nhóm 1: đã từng đầu tư nhưng lâu không quay lại (ưu tiên cao hơn)
+        // Nhóm 2: chưa từng đầu tư
+        { $addFields: { _priority: { $cond: [{ $gt: ['$lastInvestedAt', null] }, 0, 1] } } },
+        { $sort: { _priority: 1, lastInvestedAt: 1 } },
     ]);
 
     return {

@@ -828,10 +828,9 @@ InvestmentController.getLeaderboard = async (req, res) => {
             ? (() => { const d = new Date(now); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); d.setHours(0,0,0,0); return d; })()
             : new Date(now.getFullYear(), now.getMonth(), 1);
 
-        const match = {
+        const matchInvestment = {
             isDeleted: false,
             invested_at: { $gte: from },
-            'commission.sale_id': { $exists: true, $ne: null },
         };
 
         // Sale thường chỉ xem xếp hạng phòng ban mình — manager/admin xem tất cả
@@ -840,12 +839,19 @@ InvestmentController.getLeaderboard = async (req, res) => {
             const depts = await UserDepartmentPositionModel.find({ user: userInfo?._id }).select('department').lean();
             const deptIds = depts.map(d => d.department);
             const colleagues = await UserDepartmentPositionModel.find({ department: { $in: deptIds } }).select('user').lean();
-            match['commission.sale_id'] = { $in: colleagues.map(c => c.user) };
+            const colleagueIds = colleagues.map(c => c.user);
+            const scopedCustomerIds = await CustomerModel.distinct('_id', { referred_by: { $in: colleagueIds }, isDeleted: false });
+            matchInvestment.customer_id = { $in: scopedCustomerIds };
         }
 
+        // Xếp hạng theo customer.referred_by thay vì commission.sale_id
+        // để bao gồm cả week investment không sinh hoa hồng
         const rows = await InvestmentModel.aggregate([
-            { $match: match },
-            { $group: { _id: '$commission.sale_id', total_amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+            { $match: matchInvestment },
+            { $lookup: { from: 'customers', localField: 'customer_id', foreignField: '_id', pipeline: [{ $project: { referred_by: 1 } }], as: '_c' } },
+            { $addFields: { sale_ref: { $arrayElemAt: ['$_c.referred_by', 0] } } },
+            { $match: { sale_ref: { $exists: true, $ne: null } } },
+            { $group: { _id: '$sale_ref', total_amount: { $sum: '$amount' }, count: { $sum: 1 } } },
             { $sort: { total_amount: -1 } },
             { $limit: 20 },
             { $lookup: { from: 'user_infos', localField: '_id', foreignField: '_id', pipeline: [{ $project: { full_name: 1 } }], as: 'info' } },

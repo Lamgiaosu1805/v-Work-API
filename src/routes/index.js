@@ -16,6 +16,7 @@ const weeklyReportRouter = require('./weeklyReport')
 const branchRouter = require('./branch')
 const printRouter = require('./print')
 const customerClaimRequestRouter = require('./customerClaimRequest')
+const aiRouter = require('./ai')
 
 const route = (app) => {
     app.use(`/user`, userRouter)
@@ -36,6 +37,7 @@ const route = (app) => {
     app.use(`/branch`, branchRouter)
     app.use(`/print`, printRouter)
     app.use(`/customer-claim-request`, customerClaimRequestRouter)
+    app.use(`/ai`, aiRouter)
 }
 
 module.exports = route;

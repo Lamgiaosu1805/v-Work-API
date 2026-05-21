@@ -67,6 +67,7 @@ route(app);
     require('./src/jobs/genWorkSheet');
     require('./src/jobs/cleanupDeviceTokens');
     require('./src/jobs/weeklyReportJob');
+    require('./src/jobs/churnDetectionJob')();
     const { ensureAllDeptFolders } = require('./src/jobs/ensureDeptFolders');
     await ensureAllDeptFolders();
 

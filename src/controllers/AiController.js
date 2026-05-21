@@ -3,6 +3,7 @@ const redis = require('../config/redis');
 const CustomerModel = require('../models/CustomerModel');
 const InvestmentModel = require('../models/InvestmentModel');
 const UserInfoModel = require('../models/UserInfoModel');
+const UserDeptPositionModel = require('../models/UserDepartmentPositionModel');
 const dayjs = require('dayjs');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -23,6 +24,44 @@ const STATUS_VI = {
     cancelled: 'đã hủy',
     renewed: 'đã tái tục',
     early_terminated: 'tất toán sớm',
+};
+
+// ─── Scope resolution cho AI chat ───────────────────────────────────────────
+// Trả về { type: 'all'|'dept'|'sale', saleIds: null|ObjectId[] }
+// 'all'  → không filter (admin hoặc manager dept_scope:"all")
+// 'dept' → filter theo danh sách sale trong các phòng ban của manager
+// 'sale' → filter chỉ theo sale đó (user/sale thường)
+
+const resolveScope = async (account) => {
+    const { role, dept_scope, _id: accountId } = account;
+
+    if (role === 'admin' || (role === 'manager' && dept_scope === 'all')) {
+        return { type: 'all', saleIds: null };
+    }
+
+    const userInfo = await UserInfoModel.findOne({ id_account: accountId }).select('_id').lean();
+    if (!userInfo) return { type: 'sale', saleIds: [] };
+
+    if (role === 'user') {
+        return { type: 'sale', saleIds: [userInfo._id] };
+    }
+
+    // manager + dept_scope === 'own': lấy tất cả sale trong các phòng ban của manager
+    const depts = await UserDeptPositionModel.find({ user: userInfo._id, isDeleted: false })
+        .select('department').lean();
+    const deptIds = depts.map(d => d.department);
+
+    if (!deptIds.length) return { type: 'sale', saleIds: [userInfo._id] };
+
+    const members = await UserDeptPositionModel.find({
+        department: { $in: deptIds },
+        isDeleted: false,
+    }).select('user').lean();
+
+    const saleIds = [...new Set(members.map(m => String(m.user)))].map(
+        id => require('mongoose').Types.ObjectId.createFromHexString(id)
+    );
+    return { type: 'dept', saleIds };
 };
 
 // ─── Feature A: Tóm tắt hồ sơ khách hàng ────────────────────────────────────
@@ -202,10 +241,18 @@ exports._computeChurnRisks = _computeChurnRisks;
 
 // ─── Feature C: Chatbot CRM với tool use ─────────────────────────────────────
 
-const CHAT_SYSTEM_PROMPT = `Bạn là trợ lý CRM thông minh của vWork, hỗ trợ nhân viên bán hàng tra cứu thông tin khách hàng và đầu tư.
+const CHAT_SYSTEM_PROMPT_BASE = `Bạn là trợ lý CRM thông minh của vWork, hỗ trợ nhân viên bán hàng tra cứu thông tin khách hàng và đầu tư.
 Luôn trả lời bằng tiếng Việt, ngắn gọn và chuyên nghiệp.
 Khi cần tra cứu dữ liệu, hãy dùng công cụ được cung cấp. Không đoán mò số liệu.
 Nếu không tìm thấy thông tin, hãy nói rõ thay vì bịa ra.`;
+
+const buildSystemPrompt = (scopeType) => {
+    if (scopeType === 'all') return CHAT_SYSTEM_PROMPT_BASE;
+    const restriction = scopeType === 'sale'
+        ? 'Bạn chỉ được phép tra cứu và trả lời về khách hàng do nhân viên này trực tiếp phụ trách.'
+        : 'Bạn chỉ được phép tra cứu và trả lời về khách hàng thuộc phòng ban mà quản lý này phụ trách.';
+    return `${CHAT_SYSTEM_PROMPT_BASE}\nQUAN TRỌNG: ${restriction} Tuyệt đối không tiết lộ thông tin ngoài phạm vi quyền hạn.`;
+};
 
 const CHAT_TOOLS = [
     {
@@ -243,7 +290,10 @@ const CHAT_TOOLS = [
 ];
 
 // Thực thi tool call từ Claude
-const executeTool = async (toolName, toolInput, saleId) => {
+// scope = { type: 'all'|'dept'|'sale', saleIds: null|ObjectId[] }
+const executeTool = async (toolName, toolInput, scope) => {
+    const isRestricted = scope.type !== 'all';
+
     if (toolName === 'search_customer') {
         const q = toolInput.query?.trim();
         const isPhone = /^[0-9+]+$/.test(q);
@@ -255,14 +305,13 @@ const executeTool = async (toolName, toolInput, saleId) => {
             query['identity.full_name'] = { $regex: q, $options: 'i' };
         }
 
-        // Sale chỉ thấy khách của mình
-        if (saleId) query.referred_by = saleId;
+        if (isRestricted) query.referred_by = { $in: scope.saleIds };
 
         const customers = await CustomerModel.find(query)
             .select('_id phone_number identity.full_name status source_type createdAt')
             .limit(5).lean();
 
-        if (!customers.length) return 'Không tìm thấy khách hàng phù hợp.';
+        if (!customers.length) return 'Không tìm thấy khách hàng phù hợp trong phạm vi quyền hạn của bạn.';
 
         return customers.map(c =>
             `ID: ${c._id} | Tên: ${c.identity?.full_name ?? 'Chưa KYC'} | SĐT: ${c.phone_number} | Trạng thái: ${c.status}`
@@ -270,6 +319,15 @@ const executeTool = async (toolName, toolInput, saleId) => {
     }
 
     if (toolName === 'get_investments') {
+        if (isRestricted) {
+            const owned = await CustomerModel.exists({
+                _id: toolInput.customer_id,
+                referred_by: { $in: scope.saleIds },
+                isDeleted: false,
+            });
+            if (!owned) return 'Khách hàng này không thuộc phạm vi quyền hạn của bạn.';
+        }
+
         const investments = await InvestmentModel.find({
             customer_id: toolInput.customer_id,
             isDeleted: false,
@@ -294,7 +352,7 @@ const executeTool = async (toolName, toolInput, saleId) => {
         const until = dayjs().add(days, 'day').toDate();
 
         const matchStage = { status: 'active', isDeleted: false, maturity_at: { $gte: now, $lte: until } };
-        if (saleId) matchStage['commission.sale_id'] = saleId;
+        if (isRestricted) matchStage['commission.sale_id'] = { $in: scope.saleIds };
 
         const investments = await InvestmentModel.find(matchStage)
             .populate({ path: 'customer_id', select: 'identity.full_name phone_number' })
@@ -320,9 +378,8 @@ exports.chat = async (req, res) => {
     if (!messages?.length) return res.status(400).json({ message: 'messages không được rỗng' });
 
     try {
-        // Lấy UserInfo để lọc data theo sale
-        const userInfo = await UserInfoModel.findOne({ id_account: req.account._id }).select('_id').lean();
-        const saleId = (req.account.role === 'user') ? userInfo?._id : null;
+        const scope = await resolveScope(req.account);
+        const systemPrompt = buildSystemPrompt(scope.type);
 
         // Chuyển messages sang format Anthropic
         const anthropicMessages = messages.map(m => ({ role: m.role, content: m.content }));
@@ -330,7 +387,7 @@ exports.chat = async (req, res) => {
         let response = await anthropic.messages.create({
             model: 'claude-haiku-4-5',
             max_tokens: 600,
-            system: CHAT_SYSTEM_PROMPT,
+            system: systemPrompt,
             tools: CHAT_TOOLS,
             messages: anthropicMessages,
         });
@@ -342,7 +399,7 @@ exports.chat = async (req, res) => {
                 toolUses.map(async (tu) => ({
                     type: 'tool_result',
                     tool_use_id: tu.id,
-                    content: await executeTool(tu.name, tu.input, saleId),
+                    content: await executeTool(tu.name, tu.input, scope),
                 }))
             );
 
@@ -350,7 +407,7 @@ exports.chat = async (req, res) => {
             response = await anthropic.messages.create({
                 model: 'claude-haiku-4-5',
                 max_tokens: 600,
-                system: CHAT_SYSTEM_PROMPT,
+                system: systemPrompt,
                 tools: CHAT_TOOLS,
                 messages: [
                     ...anthropicMessages,

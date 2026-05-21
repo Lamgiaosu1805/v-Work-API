@@ -355,6 +355,123 @@ const InvestmentController = {
         }
     },
 
+    // GET /investments/staff-commission — Manager/Admin xem HH của từng nhân viên
+    // ?month=X&year=Y                  → tổng quan tất cả sale
+    // ?month=X&year=Y&sale_id=XXX      → chi tiết 1 sale (cùng format getMyCommission)
+    getStaffCommission: async (req, res) => {
+        try {
+            const { month, year, sale_id } = req.query;
+            const now = new Date();
+            const m = Number(month) || (now.getMonth() + 1);
+            const y = Number(year) || now.getFullYear();
+
+            const startOfMonth = new Date(y, m - 1, 1);
+            const endOfMonth = new Date(y, m, 0, 23, 59, 59, 999);
+
+            if (sale_id) {
+                // ── Chi tiết 1 sale ───────────────────────────────────────────
+                const sale = await UserInfoModel.findById(sale_id).lean();
+                if (!sale) return res.status(404).json({ message: "Không tìm thấy nhân viên" });
+
+                const invFilter = {
+                    "commission.sale_id": sale._id,
+                    "commission.period_month": m,
+                    "commission.period_year": y,
+                    isDeleted: false,
+                };
+
+                const [investments, total, summary] = await Promise.all([
+                    InvestmentModel.find(invFilter)
+                        .populate({ path: "customer_id", select: "phone_number identity.full_name" })
+                        .populate("app_id", "name code")
+                        .select("product_name amount term_type term_value interest_rate invested_at maturity_at status commission createdAt")
+                        .sort({ invested_at: -1 }),
+                    InvestmentModel.countDocuments(invFilter),
+                    InvestmentModel.aggregate([
+                        { $match: invFilter },
+                        { $group: { _id: null, total_investment_amount: { $sum: "$amount" }, total_gross: { $sum: "$commission.gross_amount" }, total_tncn: { $sum: "$commission.tncn_amount" }, total_net: { $sum: "$commission.net_amount" }, count: { $sum: 1 } } },
+                    ]),
+                ]);
+
+                const customerCommissions = await CustomerModel.find({
+                    $or: [
+                        { "cif_commission.sale_id": sale._id, "cif_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth } },
+                        { "ekyc_commission.sale_id": sale._id, "ekyc_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth } },
+                    ],
+                }).select("phone_number identity.full_name cif_commission ekyc_commission");
+
+                const cifCount = customerCommissions.filter(c => c.cif_commission?.sale_id?.toString() === String(sale._id) && c.cif_commission?.granted_at >= startOfMonth).length;
+                const ekycCount = customerCommissions.filter(c => c.ekyc_commission?.sale_id?.toString() === String(sale._id) && c.ekyc_commission?.granted_at >= startOfMonth).length;
+
+                return res.json({
+                    sale: { _id: sale._id, full_name: sale.full_name, ma_nv: sale.ma_nv, phone_number: sale.phone_number },
+                    period: { month: m, year: y },
+                    summary: summary[0] ?? { total_investment_amount: 0, total_gross: 0, total_tncn: 0, total_net: 0, count: 0 },
+                    customer_commission_summary: {
+                        cif_count: cifCount, cif_amount: cifCount * CIF_COMMISSION_AMOUNT,
+                        ekyc_count: ekycCount, ekyc_amount: ekycCount * EKYC_COMMISSION_AMOUNT,
+                        total_amount: cifCount * CIF_COMMISSION_AMOUNT + ekycCount * EKYC_COMMISSION_AMOUNT,
+                    },
+                    customer_commissions: customerCommissions,
+                    data: investments,
+                    pagination: { total, page: 1, limit: total, total_pages: 1 },
+                });
+            }
+
+            // ── Tổng quan tất cả sale ─────────────────────────────────────────
+            const [invAgg, cifAgg, ekycAgg] = await Promise.all([
+                InvestmentModel.aggregate([
+                    { $match: { "commission.sale_id": { $exists: true, $ne: null }, "commission.period_month": m, "commission.period_year": y, isDeleted: false } },
+                    { $group: { _id: "$commission.sale_id", inv_count: { $sum: 1 }, inv_net: { $sum: "$commission.net_amount" }, inv_gross: { $sum: "$commission.gross_amount" } } },
+                ]),
+                CustomerModel.aggregate([
+                    { $match: { "cif_commission.sale_id": { $exists: true, $ne: null }, "cif_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth }, isDeleted: false } },
+                    { $group: { _id: "$cif_commission.sale_id", cif_count: { $sum: 1 } } },
+                ]),
+                CustomerModel.aggregate([
+                    { $match: { "ekyc_commission.sale_id": { $exists: true, $ne: null }, "ekyc_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth }, isDeleted: false } },
+                    { $group: { _id: "$ekyc_commission.sale_id", ekyc_count: { $sum: 1 } } },
+                ]),
+            ]);
+
+            const allSaleIds = [...new Set([
+                ...invAgg.map(i => String(i._id)),
+                ...cifAgg.map(i => String(i._id)),
+                ...ekycAgg.map(i => String(i._id)),
+            ])];
+
+            const saleInfos = await UserInfoModel.find({ _id: { $in: allSaleIds } }).select("full_name ma_nv phone_number").lean();
+            const saleMap = {};
+            saleInfos.forEach(s => { saleMap[String(s._id)] = s; });
+
+            const invMap = {}, cifMap = {}, ekycMap = {};
+            invAgg.forEach(i => { invMap[String(i._id)] = i; });
+            cifAgg.forEach(i => { cifMap[String(i._id)] = i; });
+            ekycAgg.forEach(i => { ekycMap[String(i._id)] = i; });
+
+            const rows = allSaleIds.map(sid => {
+                const inv = invMap[sid] || { inv_count: 0, inv_net: 0, inv_gross: 0 };
+                const cifCount = cifMap[sid]?.cif_count ?? 0;
+                const ekycCount = ekycMap[sid]?.ekyc_count ?? 0;
+                const cif_amount = cifCount * CIF_COMMISSION_AMOUNT;
+                const ekyc_amount = ekycCount * EKYC_COMMISSION_AMOUNT;
+                return {
+                    sale_id: sid,
+                    sale: saleMap[sid] ?? null,
+                    cif_count: cifCount, cif_amount,
+                    ekyc_count: ekycCount, ekyc_amount,
+                    inv_count: inv.inv_count, inv_net: inv.inv_net,
+                    total_net: inv.inv_net + cif_amount + ekyc_amount,
+                };
+            }).sort((a, b) => b.total_net - a.total_net);
+
+            return res.json({ period: { month: m, year: y }, data: rows });
+        } catch (err) {
+            console.error("getStaffCommission error:", err);
+            return res.status(500).json({ message: "Internal server error", error: err.message });
+        }
+    },
+
     // GET /investments/agent-commission?agent_code=AGT001&app_code=tikluy
     // Hệ thống đầu tư gọi để đại lý xem HH dự kiến
     getAgentCommission: async (req, res) => {

@@ -312,6 +312,109 @@ const CustomerClaimRequestController = {
         }
     },
 
+    // PATCH /customer-claim-request/:id/revoke — Admin hủy phân công (nhận nhầm)
+    revoke: async (req, res) => {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        try {
+            const { id } = req.params;
+            const { revoke_reason } = req.body;
+            const accountId = req.account._id;
+
+            const claimReq = await CustomerClaimRequestModel.findOne({
+                _id: id,
+                status: "approved",
+                isDeleted: false,
+            }).session(session);
+            if (!claimReq) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy yêu cầu đã duyệt" });
+            }
+
+            const customer = await CustomerModel.findOne({
+                _id: claimReq.customer_id,
+                isDeleted: false,
+            }).session(session);
+            if (!customer) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            }
+
+            const saleId = claimReq.sale_id;
+
+            // Reset thông tin phân công trên customer
+            const resetData = {
+                referred_by: null,
+                source_type: null,
+                ref_code: null,
+                referred_at: null,
+            };
+
+            // Xóa HH CIF/eKYC nếu được gán trong lần duyệt này
+            if (customer.cif_commission?.sale_id?.toString() === saleId.toString()) {
+                resetData.cif_commission = null;
+            }
+            if (customer.ekyc_commission?.sale_id?.toString() === saleId.toString()) {
+                resetData.ekyc_commission = null;
+            }
+
+            await CustomerModel.findByIdAndUpdate(
+                customer._id,
+                { $set: resetData },
+                { session }
+            );
+
+            // Reset commission.sale_id trên tất cả investment của khách thuộc sale này
+            await InvestmentModel.updateMany(
+                { customer_id: customer._id, "commission.sale_id": saleId, isDeleted: false },
+                {
+                    $set: {
+                        "commission.sale_id": null,
+                        "commission.receiver_type": null,
+                        "commission.status": "none",
+                        "commission.gross_amount": 0,
+                        "commission.tncn_amount": 0,
+                        "commission.net_amount": 0,
+                    },
+                },
+                { session }
+            );
+
+            // Đánh dấu claim request này thành revoked
+            await CustomerClaimRequestModel.findByIdAndUpdate(id, {
+                status: "revoked",
+                resolved_by: accountId,
+                resolved_at: new Date(),
+                revoke_reason: revoke_reason?.trim() || null,
+            }, { session });
+
+            await CustomerInteractionModel.create([{
+                app_id: customer.app_id,
+                customer_id: customer._id,
+                sale_id: saleId,
+                agent_id: null,
+                type: "note",
+                content: `Admin hủy phân công sale — khách trở về trạng thái chưa được nhận${revoke_reason ? ` (lý do: ${revoke_reason.trim()})` : ""}`,
+                result: null,
+                metadata: { revoked_by: accountId, claim_request_id: claimReq._id },
+            }], { session });
+
+            await session.commitTransaction();
+            session.endSession();
+
+            return res.status(200).json({
+                message: "Đã hủy phân công thành công. Khách hàng trở về trạng thái chưa được nhận.",
+            });
+        } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
+            console.error("Error in revoke claim request:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
+
     // PATCH /customer-claim-request/:id/reject — Admin từ chối
     reject: async (req, res) => {
         try {

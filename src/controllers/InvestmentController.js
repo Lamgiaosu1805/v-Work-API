@@ -4,7 +4,83 @@ const CustomerModel = require("../models/CustomerModel");
 const AppModel = require("../models/AppModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AgentModel = require("../models/AgentModel");
+const BranchModel = require("../models/BranchModel");
+const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const { calculateCommission, getTNCNRate, CIF_COMMISSION_AMOUNT, EKYC_COMMISSION_AMOUNT } = require("../helpers/commissionCalculator");
+
+// ── Helpers cho getSalesChart ──────────────────────────────────────────────────
+function getISOWeek(date) {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+    const week1 = new Date(d.getFullYear(), 0, 4);
+    return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+}
+
+function buildPeriodRange(period) {
+    const now = new Date();
+
+    if (period === 'day') {
+        const from = new Date(now);
+        from.setDate(from.getDate() - 29);
+        from.setHours(0, 0, 0, 0);
+        const buckets = [];
+        for (let i = 29; i >= 0; i--) {
+            const d = new Date(now);
+            d.setDate(d.getDate() - i);
+            const key = d.toISOString().slice(0, 10);
+            const label = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+            buckets.push({ key, label });
+        }
+        return {
+            from,
+            buckets,
+            groupId: { $dateToString: { format: '%Y-%m-%d', date: '$invested_at', timezone: 'Asia/Ho_Chi_Minh' } },
+            formatKey: (id) => id,
+        };
+    }
+
+    if (period === 'week') {
+        const from = new Date(now);
+        from.setDate(from.getDate() - 7 * 11);
+        const dayOfWeek = from.getDay();
+        from.setDate(from.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+        from.setHours(0, 0, 0, 0);
+        const buckets = [];
+        const cur = new Date(from);
+        for (let i = 0; i < 12; i++) {
+            const weekEnd = new Date(cur);
+            weekEnd.setDate(weekEnd.getDate() + 6);
+            const iso = getISOWeek(cur);
+            const key = `${cur.getFullYear()}-W${String(iso).padStart(2, '0')}`;
+            const label = `${String(cur.getDate()).padStart(2, '0')}/${String(cur.getMonth() + 1).padStart(2, '0')}-${String(weekEnd.getDate()).padStart(2, '0')}/${String(weekEnd.getMonth() + 1).padStart(2, '0')}`;
+            buckets.push({ key, label });
+            cur.setDate(cur.getDate() + 7);
+        }
+        return {
+            from,
+            buckets,
+            groupId: { year: { $isoWeekYear: '$invested_at' }, week: { $isoWeek: '$invested_at' } },
+            formatKey: (id) => `${id.year}-W${String(id.week).padStart(2, '0')}`,
+        };
+    }
+
+    // month (default)
+    const from = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+    const buckets = [];
+    for (let i = 11; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const label = `Th ${d.getMonth() + 1}/${d.getFullYear()}`;
+        buckets.push({ key, label });
+    }
+    return {
+        from,
+        buckets,
+        groupId: { year: { $year: '$invested_at' }, month: { $month: '$invested_at' } },
+        formatKey: (id) => `${id.year}-${String(id.month).padStart(2, '0')}`,
+    };
+}
 
 const InvestmentController = {
     // POST /investments/upsert
@@ -568,6 +644,112 @@ const InvestmentController = {
         } catch (error) {
             console.error("Error in bulkSync:", error);
             return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
+
+    // GET /investments/sales-chart?period=day|week|month&branch_id=X
+    getSalesChart: async (req, res) => {
+        try {
+            const { period = 'month', branch_id } = req.query;
+            const { _id: accountId, role } = req.account;
+            const isAdmin = role === 'admin';
+            const isMgr = role === 'manager' && req.account.module_access.includes('crm');
+
+            const { from, buckets, groupId, formatKey } = buildPeriodRange(period);
+
+            // Xác định phạm vi dữ liệu theo role
+            let saleIds = null; // null = không lọc (admin all)
+            let mode;
+
+            if (isAdmin) {
+                mode = branch_id ? 'branch' : 'all';
+                if (branch_id) {
+                    const users = await UserInfoModel.find({ branch_id, isDeleted: false }).select('_id').lean();
+                    saleIds = users.map(u => u._id);
+                }
+            } else if (isMgr) {
+                mode = 'department';
+                const myInfo = await UserInfoModel.findOne({ id_account: accountId }).lean();
+                if (!myInfo) return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
+                const myDeptIds = await UserDepartmentPositionModel.distinct('department', { user: myInfo._id, isDeleted: false });
+                saleIds = await UserDepartmentPositionModel.distinct('user', { department: { $in: myDeptIds }, isDeleted: false });
+            } else {
+                mode = 'personal';
+                const myInfo = await UserInfoModel.findOne({ id_account: accountId }).lean();
+                if (!myInfo) return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
+                saleIds = [myInfo._id];
+            }
+
+            const matchFilter = { invested_at: { $gte: from }, isDeleted: false };
+            if (saleIds !== null) matchFilter['commission.sale_id'] = { $in: saleIds };
+
+            // Chạy song song: time-series + tổng
+            const [timeRaw, summaryRaw] = await Promise.all([
+                InvestmentModel.aggregate([
+                    { $match: matchFilter },
+                    { $group: { _id: groupId, amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+                ]),
+                InvestmentModel.aggregate([
+                    { $match: matchFilter },
+                    { $group: { _id: null, amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+                ]),
+            ]);
+
+            // Fill buckets với 0 cho kỳ không có giao dịch
+            const seriesMap = {};
+            for (const r of timeRaw) seriesMap[formatKey(r._id)] = { amount: r.amount, count: r.count };
+            const series = buckets.map(b => ({
+                label: b.label,
+                key: b.key,
+                amount: seriesMap[b.key]?.amount ?? 0,
+                count: seriesMap[b.key]?.count ?? 0,
+            }));
+
+            // Breakdown: per-branch (admin all) hoặc per-member (manager/branch)
+            let breakdown = [];
+
+            if (mode === 'all') {
+                const branchBreakRaw = await InvestmentModel.aggregate([
+                    { $match: { invested_at: { $gte: from }, isDeleted: false } },
+                    { $lookup: { from: 'user_infos', localField: 'commission.sale_id', foreignField: '_id', as: '_s', pipeline: [{ $project: { branch_id: 1 } }] } },
+                    { $addFields: { branch_id: { $ifNull: [{ $arrayElemAt: ['$_s.branch_id', 0] }, null] } } },
+                    { $group: { _id: '$branch_id', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+                    { $sort: { amount: -1 } },
+                ]);
+                const branchDocs = await BranchModel.find({ isDeleted: false }).lean();
+                const branchMap = Object.fromEntries(branchDocs.map(b => [String(b._id), b.branch_name]));
+                breakdown = branchBreakRaw.map(r => ({
+                    id: r._id,
+                    name: r._id ? (branchMap[String(r._id)] ?? 'Chi nhánh khác') : 'Chưa phân chi nhánh',
+                    amount: r.amount,
+                    count: r.count,
+                }));
+            } else if (mode === 'department' || mode === 'branch') {
+                const memberRaw = await InvestmentModel.aggregate([
+                    { $match: matchFilter },
+                    { $group: { _id: '$commission.sale_id', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+                    { $sort: { amount: -1 } },
+                    { $limit: 20 },
+                ]);
+                const infoIds = memberRaw.map(r => r._id).filter(Boolean);
+                const infoDocs = await UserInfoModel.find({ _id: { $in: infoIds } }).select('_id full_name ma_nv').lean();
+                const infoMap = Object.fromEntries(infoDocs.map(u => [String(u._id), u]));
+                breakdown = memberRaw.map(r => {
+                    const u = infoMap[String(r._id)];
+                    return { id: r._id, name: u?.full_name ?? u?.ma_nv ?? 'Không xác định', amount: r.amount, count: r.count };
+                });
+            }
+
+            return res.status(200).json({
+                mode,
+                period,
+                series,
+                breakdown,
+                summary: { total_amount: summaryRaw[0]?.amount ?? 0, total_count: summaryRaw[0]?.count ?? 0 },
+            });
+        } catch (error) {
+            console.error('Error in getSalesChart:', error);
+            return res.status(500).json({ message: 'Internal server error', error: error.message });
         }
     },
 };

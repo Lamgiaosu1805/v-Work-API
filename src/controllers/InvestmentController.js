@@ -648,6 +648,8 @@ const InvestmentController = {
     },
 
     // GET /investments/sales-chart?period=day|week|month&branch_id=X
+    // Attribution đi theo chain: investment.customer_id → customer.referred_by → sale
+    // Không phụ thuộc commission.sale_id để bao gồm cả week investment
     getSalesChart: async (req, res) => {
         try {
             const { period = 'month', branch_id } = req.query;
@@ -657,31 +659,32 @@ const InvestmentController = {
 
             const { from, buckets, groupId, formatKey } = buildPeriodRange(period);
 
-            // Xác định phạm vi dữ liệu theo role
-            let saleIds = null; // null = không lọc (admin all)
             let mode;
+            const matchFilter = { invested_at: { $gte: from }, isDeleted: false };
 
             if (isAdmin) {
                 mode = branch_id ? 'branch' : 'all';
                 if (branch_id) {
-                    const users = await UserInfoModel.find({ branch_id, isDeleted: false }).select('_id').lean();
-                    saleIds = users.map(u => u._id);
+                    const branchSaleIds = await UserInfoModel.distinct('_id', { branch_id: new mongoose.Types.ObjectId(branch_id), isDeleted: false });
+                    const branchCustomerIds = await CustomerModel.distinct('_id', { referred_by: { $in: branchSaleIds }, isDeleted: false });
+                    matchFilter.customer_id = { $in: branchCustomerIds };
                 }
+                // mode 'all': không lọc customer — tính toàn bộ hệ thống
             } else if (isMgr) {
                 mode = 'department';
                 const myInfo = await UserInfoModel.findOne({ id_account: accountId }).lean();
                 if (!myInfo) return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
                 const myDeptIds = await UserDepartmentPositionModel.distinct('department', { user: myInfo._id, isDeleted: false });
-                saleIds = await UserDepartmentPositionModel.distinct('user', { department: { $in: myDeptIds }, isDeleted: false });
+                const deptSaleIds = await UserDepartmentPositionModel.distinct('user', { department: { $in: myDeptIds }, isDeleted: false });
+                const deptCustomerIds = await CustomerModel.distinct('_id', { referred_by: { $in: deptSaleIds }, isDeleted: false });
+                matchFilter.customer_id = { $in: deptCustomerIds };
             } else {
                 mode = 'personal';
                 const myInfo = await UserInfoModel.findOne({ id_account: accountId }).lean();
                 if (!myInfo) return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
-                saleIds = [myInfo._id];
+                const myCustomerIds = await CustomerModel.distinct('_id', { referred_by: myInfo._id, isDeleted: false });
+                matchFilter.customer_id = { $in: myCustomerIds };
             }
-
-            const matchFilter = { invested_at: { $gte: from }, isDeleted: false };
-            if (saleIds !== null) matchFilter['commission.sale_id'] = { $in: saleIds };
 
             // Chạy song song: time-series + tổng
             const [timeRaw, summaryRaw] = await Promise.all([
@@ -706,12 +709,15 @@ const InvestmentController = {
             }));
 
             // Breakdown: per-branch (admin all) hoặc per-member (manager/branch)
+            // Dùng customer.referred_by để resolve sale thay vì commission.sale_id
             let breakdown = [];
 
             if (mode === 'all') {
                 const branchBreakRaw = await InvestmentModel.aggregate([
                     { $match: { invested_at: { $gte: from }, isDeleted: false } },
-                    { $lookup: { from: 'user_infos', localField: 'commission.sale_id', foreignField: '_id', as: '_s', pipeline: [{ $project: { branch_id: 1 } }] } },
+                    { $lookup: { from: 'customers', localField: 'customer_id', foreignField: '_id', as: '_c', pipeline: [{ $project: { referred_by: 1 } }] } },
+                    { $addFields: { sale_ref: { $arrayElemAt: ['$_c.referred_by', 0] } } },
+                    { $lookup: { from: 'user_infos', localField: 'sale_ref', foreignField: '_id', as: '_s', pipeline: [{ $project: { branch_id: 1 } }] } },
                     { $addFields: { branch_id: { $ifNull: [{ $arrayElemAt: ['$_s.branch_id', 0] }, null] } } },
                     { $group: { _id: '$branch_id', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
                     { $sort: { amount: -1 } },
@@ -727,7 +733,9 @@ const InvestmentController = {
             } else if (mode === 'department' || mode === 'branch') {
                 const memberRaw = await InvestmentModel.aggregate([
                     { $match: matchFilter },
-                    { $group: { _id: '$commission.sale_id', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+                    { $lookup: { from: 'customers', localField: 'customer_id', foreignField: '_id', as: '_c', pipeline: [{ $project: { referred_by: 1 } }] } },
+                    { $addFields: { sale_ref: { $arrayElemAt: ['$_c.referred_by', 0] } } },
+                    { $group: { _id: '$sale_ref', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
                     { $sort: { amount: -1 } },
                     { $limit: 20 },
                 ]);
@@ -857,18 +865,19 @@ InvestmentController.getConversion = async (req, res) => {
         const isManager = req.account.role === 'admin' || req.account.role === 'manager';
 
         if (!isManager) {
-            // Phễu cá nhân
+            // Phễu cá nhân — đếm theo quan hệ khách hàng (referred_by) thay vì commission.sale_id
+            // để bao gồm cả week investment không sinh hoa hồng
             const userInfo = await UserInfoModel.findOne({ id_account: req.account._id }).select('_id').lean();
             const saleId = userInfo?._id;
-            const [total, kycDone, investedIds] = await Promise.all([
-                CustomerModel.countDocuments({ referred_by: saleId, isDeleted: false }),
-                CustomerModel.countDocuments({ referred_by: saleId, status: { $in: ['kyc_verified', 'active'] }, isDeleted: false }),
-                InvestmentModel.distinct('customer_id', { 'commission.sale_id': saleId, isDeleted: false }),
+            const myCustomerIds = await CustomerModel.distinct('_id', { referred_by: saleId, isDeleted: false });
+            const [kycDone, investedIds] = await Promise.all([
+                CustomerModel.countDocuments({ _id: { $in: myCustomerIds }, status: { $in: ['kyc_verified', 'active'] }, isDeleted: false }),
+                InvestmentModel.distinct('customer_id', { customer_id: { $in: myCustomerIds }, isDeleted: false }),
             ]);
             return res.json({
                 mode: 'personal',
                 funnel: [
-                    { label: 'Đã đăng ký', count: total },
+                    { label: 'Đã đăng ký', count: myCustomerIds.length },
                     { label: 'Đã KYC', count: kycDone },
                     { label: 'Đã đầu tư', count: investedIds.length },
                 ],
@@ -876,21 +885,23 @@ InvestmentController.getConversion = async (req, res) => {
         }
 
         // Manager/admin: xếp hạng chuyển đổi theo sale
+        // Đếm đầu tư qua customer_id (bao gồm cả week investment)
         const rows = await CustomerModel.aggregate([
             { $match: { isDeleted: false, referred_by: { $exists: true, $ne: null } } },
             { $group: {
                 _id: '$referred_by',
                 total: { $sum: 1 },
                 kyc_done: { $sum: { $cond: [{ $in: ['$status', ['kyc_verified', 'active']] }, 1, 0] } },
+                customerIds: { $push: '$_id' },
             }},
             { $sort: { total: -1 } },
             { $limit: 20 },
             { $lookup: { from: 'user_infos', localField: '_id', foreignField: '_id', pipeline: [{ $project: { full_name: 1 } }], as: 'info' } },
             { $lookup: {
                 from: 'investments',
-                let: { sid: '$_id' },
+                let: { cids: '$customerIds' },
                 pipeline: [
-                    { $match: { $expr: { $eq: ['$commission.sale_id', '$$sid'] }, isDeleted: false } },
+                    { $match: { $expr: { $in: ['$customer_id', '$$cids'] }, isDeleted: false } },
                     { $group: { _id: '$customer_id' } },
                     { $count: 'n' },
                 ],

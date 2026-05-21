@@ -1045,7 +1045,7 @@ const CustomerController = {
 
             const resetData = {
                 referred_by: null,
-                source_type: null,
+                source_type: "marketing",
                 ref_code: null,
                 referred_at: null,
             };

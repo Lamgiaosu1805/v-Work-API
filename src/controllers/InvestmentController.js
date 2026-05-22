@@ -143,6 +143,15 @@ const InvestmentController = {
             if (existing) {
                 existing.status = status;
                 existing.maturity_at = maturity_at ?? existing.maturity_at;
+
+                // Tất toán trước hạn hoặc hủy → xóa hoa hồng đã ghi nhận
+                if (["early_terminated", "cancelled"].includes(status) && existing.commission?.status === "pending") {
+                    existing.commission.gross_amount = 0;
+                    existing.commission.tncn_amount = 0;
+                    existing.commission.net_amount = 0;
+                    existing.commission.status = "none";
+                }
+
                 await existing.save({ session });
                 await session.commitTransaction();
                 session.endSession();

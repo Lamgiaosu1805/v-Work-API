@@ -102,33 +102,43 @@ const PostController = {
     }
   },
 
-  // POST /posts/:id/like
-  likePost: async (req, res) => {
+  // POST /posts/:id/react
+  reactPost: async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = req.account._id;
+      const { type = "like" } = req.body;
+      const accountId = req.account._id.toString();
+
+      const validTypes = ["like", "love", "haha", "wow", "sad", "angry"];
+      if (!validTypes.includes(type)) {
+        return res.status(400).json({ message: "Loại cảm xúc không hợp lệ" });
+      }
 
       const post = await PostModel.findOne({ _id: id, isDeleted: false });
       if (!post) return res.status(404).json({ message: "Không tìm thấy bài viết" });
 
-      const alreadyLiked = post.likes.some((uid) => uid.toString() === accountId);
-      if (alreadyLiked) {
-        post.likes = post.likes.filter((uid) => uid.toString() !== accountId);
+      const existingIdx = post.reactions.findIndex((r) => r.user_id.toString() === accountId);
+      if (existingIdx !== -1) {
+        if (post.reactions[existingIdx].type === type) {
+          post.reactions.splice(existingIdx, 1);
+        } else {
+          post.reactions[existingIdx].type = type;
+        }
       } else {
-        post.likes.push(accountId);
+        post.reactions.push({ user_id: accountId, type });
       }
       await post.save();
 
       const io = req.app.get("io");
       if (io) {
-        const payload = { post_id: id, likes: post.likes };
-        io.to("feed").emit("like_updated", payload);
-        io.to(`post:${id}`).emit("like_updated", payload);
+        const payload = { post_id: id, reactions: post.reactions };
+        io.to("feed").emit("reaction_updated", payload);
+        io.to(`post:${id}`).emit("reaction_updated", payload);
       }
 
       return res.status(200).json({
-        message: alreadyLiked ? "Đã bỏ thích" : "Đã thích bài viết",
-        data: { likes_count: post.likes.length, liked: !alreadyLiked },
+        message: "Thành công",
+        data: { reactions: post.reactions },
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });

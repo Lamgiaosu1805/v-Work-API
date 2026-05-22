@@ -12,7 +12,10 @@ const PostSchema = new mongoose.Schema({
   visibility: { type: String, enum: ["all", "department"], default: "all" },
   dept_id: { type: mongoose.Schema.Types.ObjectId, ref: "department", default: null },
   pinned: { type: Boolean, default: false },
-  likes: [{ type: mongoose.Schema.Types.ObjectId, ref: "account" }],
+  reactions: [{
+    user_id: { type: mongoose.Schema.Types.ObjectId, ref: "account" },
+    type: { type: String, enum: ["like", "love", "haha", "wow", "sad", "angry"], default: "like" },
+  }],
   comments_count: { type: Number, default: 0 },
   ...BaseSchema.obj,
 }, {

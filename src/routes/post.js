@@ -5,7 +5,7 @@ const PostController = require("../controllers/PostController");
 
 router.get("/", authenticate, PostController.getPosts);
 router.post("/", authenticate, upload.array("images", 4), PostController.createPost);
-router.post("/:id/like", authenticate, PostController.likePost);
+router.post("/:id/react", authenticate, PostController.reactPost);
 router.delete("/:id", authenticate, PostController.deletePost);
 router.patch("/:id/pin", authenticate, canManage("workplace"), PostController.pinPost);
 router.get("/:id/comments", authenticate, PostController.getComments);

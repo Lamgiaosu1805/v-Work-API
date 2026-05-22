@@ -1,8 +1,14 @@
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const heicConvert = require("heic-convert");
 
-const ALLOWED_MIMETYPES = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
+const ALLOWED_MIMETYPES = [
+  "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp",
+  "image/heic", "image/heif",
+];
+
+const HEIC_TYPES = new Set(["image/heic", "image/heif"]);
 
 const getFeedDir = () => {
   const baseDir =
@@ -20,7 +26,9 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+    // Save HEIC directly as .jpg — we'll overwrite with converted bytes after upload
+    const ext = HEIC_TYPES.has(file.mimetype) ? ".jpg" : path.extname(file.originalname);
+    cb(null, uniqueSuffix + ext);
   },
 });
 
@@ -28,17 +36,37 @@ const fileFilter = (req, file, cb) => {
   if (ALLOWED_MIMETYPES.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error("Chỉ chấp nhận file ảnh (jpg, jpeg, png, gif, webp)"), false);
+    cb(new Error("Chỉ chấp nhận file ảnh (jpg, jpeg, png, gif, webp, heic)"), false);
   }
 };
+
+// Runs after multer — converts any HEIC files to JPEG in-place
+async function convertHeic(req, _res, next) {
+  if (!req.files?.length) return next();
+
+  try {
+    await Promise.all(
+      req.files.map(async (file) => {
+        if (!HEIC_TYPES.has(file.mimetype)) return;
+        const inputBuffer = fs.readFileSync(file.path);
+        const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 0.85 });
+        fs.writeFileSync(file.path, Buffer.from(outputBuffer));
+        file.mimetype = "image/jpeg";
+      })
+    );
+    next();
+  } catch (err) {
+    next(new Error("Không thể xử lý file HEIC: " + err.message));
+  }
+}
 
 const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB mỗi file
+    fileSize: 30 * 1024 * 1024,
     files: 4,
   },
 });
 
-module.exports = upload;
+module.exports = { upload, convertHeic };

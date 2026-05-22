@@ -8,6 +8,11 @@ const CommentSchema = new mongoose.Schema({
   author_avatar: { type: String, default: null },
   content: { type: String, required: true, maxlength: 500 },
   ...BaseSchema.obj,
-}, { ...BaseSchema.options, collection: "comments" });
+}, {
+  timestamps: BaseSchema.options.timestamps,
+  toJSON: BaseSchema.options.toJSON,
+  toObject: BaseSchema.options.toObject,
+  collection: "comments",
+});
 
 module.exports = mongoose.model("comment", CommentSchema);

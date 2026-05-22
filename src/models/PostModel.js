@@ -15,6 +15,11 @@ const PostSchema = new mongoose.Schema({
   likes: [{ type: mongoose.Schema.Types.ObjectId, ref: "account" }],
   comments_count: { type: Number, default: 0 },
   ...BaseSchema.obj,
-}, { ...BaseSchema.options, collection: "posts" });
+}, {
+  timestamps: BaseSchema.options.timestamps,
+  toJSON: BaseSchema.options.toJSON,
+  toObject: BaseSchema.options.toObject,
+  collection: "posts",
+});
 
 module.exports = mongoose.model("post", PostSchema);

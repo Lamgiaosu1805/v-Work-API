@@ -121,10 +121,9 @@ const PostController = {
 
       const io = req.app.get("io");
       if (io) {
-        io.to(`post:${id}`).emit("like_updated", {
-          post_id: id,
-          likes_count: post.likes.length,
-        });
+        const payload = { post_id: id, likes: post.likes };
+        io.to("feed").emit("like_updated", payload);
+        io.to(`post:${id}`).emit("like_updated", payload);
       }
 
       return res.status(200).json({
@@ -152,6 +151,9 @@ const PostController = {
 
       post.isDeleted = true;
       await post.save();
+
+      const io = req.app.get("io");
+      if (io) io.to("feed").emit("post_deleted", { post_id: id });
 
       return res.status(200).json({ message: "Đã xóa bài viết" });
     } catch (error) {
@@ -239,7 +241,10 @@ const PostController = {
       await post.save();
 
       const io = req.app.get("io");
-      if (io) io.to(`post:${postId}`).emit("new_comment", { comment });
+      if (io) {
+        io.to(`post:${postId}`).emit("new_comment", { comment });
+        io.to("feed").emit("comment_count_updated", { post_id: postId, comments_count: post.comments_count });
+      }
 
       const isNotSameUser = post.author_id.toString() !== req.account._id;
       if (isNotSameUser) {
@@ -277,6 +282,9 @@ const PostController = {
       await comment.save();
 
       await PostModel.findByIdAndUpdate(postId, { $inc: { comments_count: -1 } });
+
+      const io = req.app.get("io");
+      if (io) io.to(`post:${postId}`).emit("comment_deleted", { comment_id: commentId });
 
       return res.status(200).json({ message: "Đã xóa bình luận" });
     } catch (error) {

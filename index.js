@@ -1,6 +1,8 @@
 process.env.TZ = 'Asia/Ho_Chi_Minh';
 require('dotenv').config();
 const express = require('express');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
 const morgan = require('morgan');
 const cors = require('cors');
 const compression = require('compression');
@@ -10,6 +12,25 @@ const db = require('./src/config/connectDB');
 const route = require('./src/routes');
 
 const app = express();
+const httpServer = createServer(app);
+
+const ALLOWED_ORIGINS = process.env.BASE_URL
+  ? [process.env.BASE_URL]
+  : ['*'];
+
+const io = new Server(httpServer, {
+  cors: { origin: ALLOWED_ORIGINS, credentials: true },
+  transports: ['websocket', 'polling'],
+});
+
+io.on('connection', (socket) => {
+  socket.on('join_feed', () => socket.join('feed'));
+  socket.on('leave_feed', () => socket.leave('feed'));
+  socket.on('join_post', (postId) => socket.join(`post:${postId}`));
+  socket.on('leave_post', (postId) => socket.leave(`post:${postId}`));
+});
+
+app.set('io', io);
 
 // Nén response — tiết kiệm băng thông đáng kể với JSON payload lớn
 app.use(compression());
@@ -72,14 +93,14 @@ route(app);
     await ensureAllDeptFolders();
 
     const port = process.env.PORT || 3000;
-    const server = app.listen(port, () => {
+    httpServer.listen(port, () => {
       console.log(`App listening on port ${port}`);
     });
 
     // Graceful shutdown — cho phép request đang xử lý hoàn thành trước khi tắt
     const shutdown = (signal) => {
       console.log(`${signal} received — shutting down gracefully`);
-      server.close(async () => {
+      httpServer.close(async () => {
         try {
           await require('mongoose').disconnect();
           console.log('MongoDB disconnected');

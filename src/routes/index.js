@@ -1,3 +1,4 @@
+const postRouter = require('./post')
 const userRouter = require('./user')
 const documentRouter = require('./document')
 const authRouter = require('./auth')
@@ -19,6 +20,7 @@ const customerClaimRequestRouter = require('./customerClaimRequest')
 const aiRouter = require('./ai')
 
 const route = (app) => {
+    app.use(`/posts`, postRouter)
     app.use(`/user`, userRouter)
     app.use(`/document`, documentRouter)
     app.use(`/auth`, authRouter)

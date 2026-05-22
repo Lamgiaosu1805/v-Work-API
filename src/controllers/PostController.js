@@ -202,10 +202,11 @@ const PostController = {
       const page = Math.max(1, parseInt(req.query.page) || 1);
       const limit = Math.min(100, parseInt(req.query.limit) || 20);
 
+      const sortDir = req.query.sort === "desc" ? -1 : 1;
       const filter = { post_id: id, isDeleted: false };
       const total = await CommentModel.countDocuments(filter);
       const comments = await CommentModel.find(filter)
-        .sort({ createdAt: 1 })
+        .sort({ createdAt: sortDir })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean();

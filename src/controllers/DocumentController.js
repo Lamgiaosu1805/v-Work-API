@@ -60,7 +60,7 @@ const DocumentController = {
                 else if (ext === ".png") contentType = "image/png";
 
                 res.setHeader("Content-Type", contentType);
-                res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+                res.setHeader("Content-Disposition", `inline; filename="${path.basename(filename)}"`);
 
                 return res.sendFile(filePath);
             } else {

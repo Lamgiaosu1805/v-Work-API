@@ -1,7 +1,7 @@
 const cron = require("node-cron");
 const mongoose = require("mongoose");
 const moment = require("moment-timezone");
-const LeaveRequestModel = require("../models/LeaveRequestModel");
+const { RequestModel } = require("../models/RequestModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const NotificationModel = require("../models/NotificationModel");
 const pushNotification = require("../helpers/pushNotification");
@@ -15,10 +15,11 @@ async function autoRejectLeaveRequests() {
 
         const threshold = moment.tz(TZ).startOf("day").subtract(AUTO_REJECT_AFTER_DAYS, "days").toDate();
 
-        const expiredRequests = await LeaveRequestModel.find({
-            status: "pending",
-            from_date: { $lte: threshold },
-            isDeleted: false,
+        const expiredRequests = await RequestModel.find({
+            request_type: "leave",
+            status:       "pending",
+            from_date:    { $lte: threshold },
+            isDeleted:    false,
         });
 
         if (!expiredRequests.length) {
@@ -32,15 +33,15 @@ async function autoRejectLeaveRequests() {
             const session = await mongoose.startSession();
             session.startTransaction();
             try {
-                request.status = "rejected";
-                request.reviewed_at = new Date();
+                request.status        = "rejected";
+                request.reviewed_at   = new Date();
                 request.reviewer_note = `Tự động từ chối do quá ${AUTO_REJECT_AFTER_DAYS} ngày không được duyệt`;
                 await request.save({ session });
 
-                if (request.leave_type === "paid") {
+                if (request.paid_days > 0) {
                     await UserInfoModel.findByIdAndUpdate(
                         request.user_id,
-                        { $inc: { "leave_balance.annual": request.total_days } },
+                        { $inc: { "leave_balance.annual": request.paid_days } },
                         { session },
                     );
                 }
@@ -56,20 +57,20 @@ async function autoRejectLeaveRequests() {
                         const body = `Đơn xin nghỉ từ ${fromStr} đã bị tự động từ chối do quá ${AUTO_REJECT_AFTER_DAYS} ngày không được duyệt`;
                         return Promise.all([
                             NotificationModel.create({
-                                target: "individual",
+                                target:     "individual",
                                 account_id: userInfo.id_account,
-                                title: "Đơn nghỉ bị từ chối",
+                                title:      "Đơn nghỉ bị từ chối",
                                 body,
-                                type: "leave_request_rejected",
-                                ref_id: request._id,
-                                ref_type: "leave_request",
-                                uri: `/leave-requests/${request._id}`,
+                                type:       "leave_rejected",
+                                ref_id:     request._id,
+                                ref_type:   "request",
+                                uri:        `/requests/${request._id}`,
                             }),
                             pushNotification.sendToAccount({
                                 account_id: userInfo.id_account,
-                                title: "Đơn nghỉ bị từ chối",
+                                title:      "Đơn nghỉ bị từ chối",
                                 body,
-                                data: { type: "leave_request_rejected", uri: `/leave-requests/${request._id}` },
+                                data:       { type: "leave_rejected", uri: `/requests/${request._id}` },
                             }),
                         ]);
                     })

@@ -6,7 +6,7 @@ const WorkSheetModel = new mongoose.Schema(
         user_id: { type: mongoose.ObjectId, ref: "user_info" },
         date: Date,
         shifts: [{ type: mongoose.ObjectId, ref: "shift" }],  // ca hôm đó
-        status: { type: String, enum: ["pending", "present", "absent", "leave"], default: "pending" },
+        status: { type: String, enum: ["pending", "present", "absent", "leave_paid", "leave_unpaid", "remote"], default: "pending" },
         check_in: Date,
         check_out: Date,
         minutes_late: { type: Number, default: 0 },

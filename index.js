@@ -32,6 +32,9 @@ io.on('connection', (socket) => {
 
 app.set('io', io);
 
+// Tin tưởng 1 lớp proxy (Traefik) để rate-limit đọc đúng IP thật từ X-Forwarded-For
+app.set('trust proxy', 1);
+
 // Nén response — tiết kiệm băng thông đáng kể với JSON payload lớn
 app.use(compression());
 

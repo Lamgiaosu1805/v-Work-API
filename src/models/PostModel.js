@@ -15,6 +15,7 @@ const PostSchema = new mongoose.Schema({
   reactions: [{
     user_id: { type: mongoose.Schema.Types.ObjectId, ref: "account" },
     type: { type: String, enum: ["like", "love", "haha", "wow", "sad", "angry"], default: "like" },
+    author_name: { type: String, default: null },
   }],
   comments_count: { type: Number, default: 0 },
   ...BaseSchema.obj,

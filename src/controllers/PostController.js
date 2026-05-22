@@ -117,7 +117,7 @@ const PostController = {
       const post = await PostModel.findOne({ _id: id, isDeleted: false });
       if (!post) return res.status(404).json({ message: "Không tìm thấy bài viết" });
 
-      const { author_name } = await getAuthorInfo(accountId);
+      const { author_name, author_avatar } = await getAuthorInfo(accountId);
       const existingIdx = post.reactions.findIndex((r) => r.user_id.toString() === accountId);
       if (existingIdx !== -1) {
         if (post.reactions[existingIdx].type === type) {
@@ -126,7 +126,7 @@ const PostController = {
           post.reactions[existingIdx].type = type;
         }
       } else {
-        post.reactions.push({ user_id: accountId, type, author_name });
+        post.reactions.push({ user_id: accountId, type, author_name, author_avatar });
       }
       await post.save();
 

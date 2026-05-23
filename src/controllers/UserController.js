@@ -15,6 +15,7 @@ const WorkScheduleModel = require("../models/WorkScheduleModel");
 const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
+const sharp = require("sharp");
 
 const uploadDir =
   process.env.NODE_ENV === "production"
@@ -854,7 +855,15 @@ const UserController = {
         if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
       }
 
-      const fileName = req.file.filename ?? req.file.originalname;
+      let fileName = req.file.filename ?? req.file.originalname;
+      if (/\.(heic|heif)$/i.test(fileName)) {
+        const srcPath = path.join(uploadDir, fileName);
+        const jpegName = fileName.replace(/\.(heic|heif)$/i, ".jpg");
+        const jpegPath = path.join(uploadDir, jpegName);
+        await sharp(srcPath).jpeg({ quality: 90 }).toFile(jpegPath);
+        fs.unlinkSync(srcPath);
+        fileName = jpegName;
+      }
       await UserInfoModel.findByIdAndUpdate(userInfo._id, { avatar: fileName });
 
       return res.status(200).json({ message: "Upload avatar thành công", avatar: fileName });
@@ -877,7 +886,15 @@ const UserController = {
         if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
       }
 
-      const fileName = req.file.filename ?? req.file.originalname;
+      let fileName = req.file.filename ?? req.file.originalname;
+      if (/\.(heic|heif)$/i.test(fileName)) {
+        const srcPath = path.join(uploadDir, fileName);
+        const jpegName = fileName.replace(/\.(heic|heif)$/i, ".jpg");
+        const jpegPath = path.join(uploadDir, jpegName);
+        await sharp(srcPath).jpeg({ quality: 90 }).toFile(jpegPath);
+        fs.unlinkSync(srcPath);
+        fileName = jpegName;
+      }
       await UserInfoModel.findByIdAndUpdate(userInfo._id, { cover_photo: fileName });
 
       return res.status(200).json({ message: "Upload ảnh bìa thành công", cover_photo: fileName });

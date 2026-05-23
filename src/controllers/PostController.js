@@ -42,11 +42,12 @@ const PostController = {
     try {
       const page = Math.max(1, parseInt(req.query.page) || 1);
       const limit = Math.min(50, parseInt(req.query.limit) || 15);
-      const { dept_id, type } = req.query;
+      const { dept_id, type, author_id } = req.query;
 
       const filter = { isDeleted: false };
       if (dept_id) filter.dept_id = dept_id;
       if (type) filter.type = type;
+      if (author_id) filter.author_id = author_id;
 
       const total = await PostModel.countDocuments(filter);
       const posts = await PostModel.find(filter)

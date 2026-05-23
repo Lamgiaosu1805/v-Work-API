@@ -849,24 +849,85 @@ const UserController = {
         return res.status(400).json({ message: "Không có file được upload" });
       }
 
-      // Xóa avatar cũ nếu có
       if (userInfo.avatar) {
         const oldPath = path.join(uploadDir, userInfo.avatar);
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
-        }
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
       }
 
-      // Lưu tên file mới vào DB
       const fileName = req.file.filename ?? req.file.originalname;
       await UserInfoModel.findByIdAndUpdate(userInfo._id, { avatar: fileName });
 
-      return res.status(200).json({
-        message: "Upload avatar thành công",
-        avatar: fileName,
-      });
+      return res.status(200).json({ message: "Upload avatar thành công", avatar: fileName });
     } catch (error) {
       console.error("Error in uploadAvatar:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
+  uploadCoverPhoto: async (req, res) => {
+    try {
+      const accountId = req.account._id;
+
+      const userInfo = await UserInfoModel.findOne({ id_account: accountId });
+      if (!userInfo) return res.status(404).json({ message: "User not found" });
+      if (!req.file) return res.status(400).json({ message: "Không có file được upload" });
+
+      if (userInfo.cover_photo) {
+        const oldPath = path.join(uploadDir, userInfo.cover_photo);
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      }
+
+      const fileName = req.file.filename ?? req.file.originalname;
+      await UserInfoModel.findByIdAndUpdate(userInfo._id, { cover_photo: fileName });
+
+      return res.status(200).json({ message: "Upload ảnh bìa thành công", cover_photo: fileName });
+    } catch (error) {
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
+  // GET /user/profile/:accountId  — trang cá nhân (không cần quyền HRM)
+  getProfile: async (req, res) => {
+    try {
+      const { accountId } = req.params;
+      const targetId = accountId === "me" ? req.account._id : accountId;
+
+      if (!mongoose.Types.ObjectId.isValid(targetId)) {
+        return res.status(400).json({ message: "ID không hợp lệ" });
+      }
+
+      const userInfo = await UserInfoModel.findOne({ id_account: targetId, isDeleted: false });
+      if (!userInfo) return res.status(404).json({ message: "Không tìm thấy người dùng" });
+
+      const departments = await UserDepartmentPositionModel.find({ user: userInfo._id, isDeleted: false })
+        .populate("department", "department_name department_code")
+        .populate("position", "position_name")
+        .lean();
+
+      const isSelf = String(req.account._id) === String(targetId);
+
+      return res.status(200).json({
+        account_id: targetId,
+        full_name: userInfo.full_name,
+        ma_nv: userInfo.ma_nv,
+        avatar: userInfo.avatar ?? null,
+        cover_photo: userInfo.cover_photo ?? null,
+        employment_type: userInfo.employment_type,
+        sex: userInfo.sex,
+        // Thông tin nhạy cảm chỉ trả cho chính mình
+        ...(isSelf && {
+          phone_number: userInfo.phone_number,
+          date_of_birth: userInfo.date_of_birth,
+          address: userInfo.address,
+        }),
+        departments: departments.map((d) => ({
+          department_name: d.department?.department_name ?? null,
+          department_code: d.department?.department_code ?? null,
+          position_name: d.position?.position_name ?? null,
+        })),
+        createdAt: userInfo.createdAt,
+      });
+    } catch (error) {
       return res.status(500).json({ message: "Internal server error", error: error.message });
     }
   },

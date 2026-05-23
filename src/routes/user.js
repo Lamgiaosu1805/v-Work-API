@@ -11,6 +11,7 @@ router.get("/getUserInfo", authenticate, UserController.getUserInfo);
 router.get("/getQRSale", authenticate, UserController.generateMyQR);
 router.get("/getUserById/:id", authenticate, UserController.getUserById);
 router.get("/birthday/this-month", authenticate, UserController.getBirthdayThisMonth);
+router.get("/profile/:accountId", authenticate, UserController.getProfile);
 
 // PUT
 router.put("/updateUser/:id", authenticate, canManage("hrm"), uploadDocuments, UserController.updateUser);
@@ -18,5 +19,6 @@ router.put("/updateUser/:id", authenticate, canManage("hrm"), uploadDocuments, U
 // POST
 router.post("/createUser", authenticate, canManage("hrm"), uploadDocuments, UserController.createUser);
 router.post("/uploadAvatar", authenticate, upload.single("avatar"), UserController.uploadAvatar);
+router.post("/uploadCoverPhoto", authenticate, upload.single("cover_photo"), UserController.uploadCoverPhoto);
 
 module.exports = router;

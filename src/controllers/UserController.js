@@ -15,7 +15,7 @@ const WorkScheduleModel = require("../models/WorkScheduleModel");
 const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
-const sharp = require("sharp");
+const heicConvert = require("heic-convert");
 
 const uploadDir =
   process.env.NODE_ENV === "production"
@@ -858,9 +858,10 @@ const UserController = {
       let fileName = req.file.filename ?? req.file.originalname;
       if (/\.(heic|heif)$/i.test(fileName)) {
         const srcPath = path.join(uploadDir, fileName);
+        const inputBuffer = fs.readFileSync(srcPath);
+        const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 0.9 });
         const jpegName = fileName.replace(/\.(heic|heif)$/i, ".jpg");
-        const jpegPath = path.join(uploadDir, jpegName);
-        await sharp(srcPath).jpeg({ quality: 90 }).toFile(jpegPath);
+        fs.writeFileSync(path.join(uploadDir, jpegName), Buffer.from(outputBuffer));
         fs.unlinkSync(srcPath);
         fileName = jpegName;
       }
@@ -889,9 +890,10 @@ const UserController = {
       let fileName = req.file.filename ?? req.file.originalname;
       if (/\.(heic|heif)$/i.test(fileName)) {
         const srcPath = path.join(uploadDir, fileName);
+        const inputBuffer = fs.readFileSync(srcPath);
+        const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 0.9 });
         const jpegName = fileName.replace(/\.(heic|heif)$/i, ".jpg");
-        const jpegPath = path.join(uploadDir, jpegName);
-        await sharp(srcPath).jpeg({ quality: 90 }).toFile(jpegPath);
+        fs.writeFileSync(path.join(uploadDir, jpegName), Buffer.from(outputBuffer));
         fs.unlinkSync(srcPath);
         fileName = jpegName;
       }

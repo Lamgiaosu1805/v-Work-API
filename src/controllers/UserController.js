@@ -899,7 +899,7 @@ const UserController = {
       const userInfo = await UserInfoModel.findOne({ id_account: targetId, isDeleted: false });
       if (!userInfo) return res.status(404).json({ message: "Không tìm thấy người dùng" });
 
-      const departments = await UserDepartmentPositionModel.find({ user: userInfo._id, isDeleted: false })
+      const departments = await UserDepartmentPositionModel.find({ user: userInfo._id })
         .populate("department", "department_name department_code")
         .populate("position", "position_name")
         .lean();
@@ -914,10 +914,10 @@ const UserController = {
         cover_photo: userInfo.cover_photo ?? null,
         employment_type: userInfo.employment_type,
         sex: userInfo.sex,
+        date_of_birth: userInfo.date_of_birth ?? null,
         // Thông tin nhạy cảm chỉ trả cho chính mình
         ...(isSelf && {
           phone_number: userInfo.phone_number,
-          date_of_birth: userInfo.date_of_birth,
           address: userInfo.address,
         }),
         departments: departments.map((d) => ({

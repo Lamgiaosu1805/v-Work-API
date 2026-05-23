@@ -25,6 +25,17 @@ async function getAuthorInfo(accountId) {
   };
 }
 
+// Nhận mảng docs có author_id, trả về map { accountId → avatar }
+async function buildAvatarMap(docs) {
+  const ids = [...new Set(docs.map((d) => String(d.author_id)).filter(Boolean))];
+  if (!ids.length) return {};
+  const infos = await UserInfoModel.find(
+    { id_account: { $in: ids } },
+    { id_account: 1, avatar: 1 }
+  ).lean();
+  return Object.fromEntries(infos.map((u) => [String(u.id_account), u.avatar ?? null]));
+}
+
 const PostController = {
   // GET /posts
   getPosts: async (req, res) => {
@@ -43,6 +54,9 @@ const PostController = {
         .skip((page - 1) * limit)
         .limit(limit)
         .lean();
+
+      const avatarMap = await buildAvatarMap(posts);
+      posts.forEach((p) => { p.author_avatar = avatarMap[String(p.author_id)] ?? p.author_avatar; });
 
       return res.status(200).json({
         message: "Thành công",
@@ -210,6 +224,9 @@ const PostController = {
         .skip((page - 1) * limit)
         .limit(limit)
         .lean();
+
+      const avatarMap = await buildAvatarMap(comments);
+      comments.forEach((c) => { c.author_avatar = avatarMap[String(c.author_id)] ?? c.author_avatar; });
 
       return res.status(200).json({
         message: "Thành công",

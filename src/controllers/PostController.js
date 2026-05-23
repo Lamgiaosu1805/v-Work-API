@@ -56,8 +56,26 @@ const PostController = {
         .limit(limit)
         .lean();
 
-      const avatarMap = await buildAvatarMap(posts);
-      posts.forEach((p) => { p.author_avatar = avatarMap[String(p.author_id)] ?? p.author_avatar; });
+      // Thu thập tất cả user_id: tác giả bài + người dùng đã react
+      const allIds = [...new Set([
+        ...posts.map((p) => String(p.author_id)),
+        ...posts.flatMap((p) => (p.reactions ?? []).map((r) => String(r.user_id))),
+      ].filter(Boolean))];
+      let avatarMap = {};
+      if (allIds.length) {
+        const infos = await UserInfoModel.find(
+          { id_account: { $in: allIds } },
+          { id_account: 1, avatar: 1 }
+        ).lean();
+        avatarMap = Object.fromEntries(infos.map((u) => [String(u.id_account), u.avatar ?? null]));
+      }
+      posts.forEach((p) => {
+        p.author_avatar = avatarMap[String(p.author_id)] ?? p.author_avatar;
+        (p.reactions ?? []).forEach((r) => {
+          const uid = String(r.user_id);
+          if (avatarMap[uid] !== undefined) r.author_avatar = avatarMap[uid];
+        });
+      });
 
       return res.status(200).json({
         message: "Thành công",

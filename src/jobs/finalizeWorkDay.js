@@ -34,6 +34,7 @@ async function finalizeWorkDay() {
       );
     }
 
+
     await WorkDayStatusModel.updateMany(
       { date: { $gte: today, $lt: tomorrow }, status: "pending", isDeleted: false },
       { status: "absent" },

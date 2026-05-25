@@ -83,7 +83,6 @@ const ForgotCheckinRequest = RequestModel.discriminator(
   "forgot_checkin",
   new mongoose.Schema({
     date: { type: Date, required: true },
-    shift_id: { type: ObjId, ref: "shift", required: true },
     type: {
       type: String,
       enum: ["check_in", "check_out", "both"],

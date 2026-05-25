@@ -8,6 +8,8 @@ const router = express.Router()
 router.get('/getWorkSheet', authenticate, AttendanceController.getWorkSheet);
 router.get('/getLichCong', authenticate, AttendanceController.getLichCong);
 router.get('/getAllShifts', authenticate, AttendanceController.getAllShifts);
+router.get('/stats', authenticate, AttendanceController.getStats);
+router.get('/calendar', authenticate, AttendanceController.getCalendar);
 router.get('/getAllowedWifiLocations', authenticate, isAdmin, AttendanceController.getAllowedWifiLocations);
 router.get('/getAllWorkSheets', authenticate, hasModuleAccess('hrm'), AttendanceController.getAllWorkSheets);
 

@@ -33,6 +33,7 @@ route(app);
     await db.connect();
 
     require('./src/jobs/genWorkSheet');
+    require('./src/jobs/finalizeWorkDay');
     require('./src/jobs/cleanupDeviceTokens');
     require('./src/jobs/weeklyReportJob');
     require('./src/jobs/accrueMonthlyLeave');

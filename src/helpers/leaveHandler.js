@@ -2,6 +2,7 @@ const moment = require("moment-timezone");
 const { RequestModel } = require("../models/RequestModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
+const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const HolidayModel = require("../models/HolidayModel");
 const { calcTotalDays, buildWorkDatesWithStatus } = require("./requestUtils");
 
@@ -151,61 +152,37 @@ async function onApprove(request, session) {
   const fromStart = fromMoment.toDate();
   const toEnd = moment.tz(request.to_date, TZ).endOf("day").toDate();
 
-  const datesWithStatus = buildWorkDatesWithStatus(
-    request,
-    fromMoment,
-    toMoment,
-  );
-  const paidDates = datesWithStatus
-    .filter((d) => d.status === "leave_paid")
-    .map((d) => d.date);
-  const unpaidDates = datesWithStatus
-    .filter((d) => d.status === "leave_unpaid")
-    .map((d) => d.date);
-
-  if (paidDates.length) {
-    await WorkSheetModel.updateMany(
-      { user_id: request.user_id, date: { $in: paidDates }, isDeleted: false },
-      { status: "leave_paid" },
-      { session },
-    );
-  }
-  if (unpaidDates.length) {
-    await WorkSheetModel.updateMany(
-      {
-        user_id: request.user_id,
-        date: { $in: unpaidDates },
-        isDeleted: false,
-      },
-      { status: "leave_unpaid" },
-      { session },
-    );
-  }
+  const datesWithStatus = buildWorkDatesWithStatus(request, fromMoment, toMoment);
 
   const existing = await WorkSheetModel.find(
-    {
-      user_id: request.user_id,
-      date: { $gte: fromStart, $lte: toEnd },
-      isDeleted: false,
-    },
+    { user_id: request.user_id, date: { $gte: fromStart, $lte: toEnd }, isDeleted: false },
     { date: 1 },
   ).session(session);
-  const existingKeys = new Set(
-    existing.map((w) => moment.tz(w.date, TZ).format("YYYY-MM-DD")),
+  const sheetMap = new Map(
+    existing.map((w) => [moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id]),
   );
 
   const missing = datesWithStatus.filter(
-    (d) => !existingKeys.has(moment.tz(d.date, TZ).format("YYYY-MM-DD")),
+    (d) => !sheetMap.has(moment.tz(d.date, TZ).format("YYYY-MM-DD")),
   );
   if (missing.length) {
-    await WorkSheetModel.insertMany(
-      missing.map(({ date, status }) => ({
-        user_id: request.user_id,
-        date,
-        shifts: [],
-        status,
-      })),
+    const created = await WorkSheetModel.insertMany(
+      missing.map(({ date }) => ({ user_id: request.user_id, date, shifts: [] })),
       { session },
+    );
+    created.forEach((w) => sheetMap.set(moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id));
+  }
+
+  for (const { date, status, period } of datesWithStatus) {
+    const worksheet_id = sheetMap.get(moment.tz(date, TZ).format("YYYY-MM-DD"));
+    await WorkDayStatusModel.findOneAndUpdate(
+      { user_id: request.user_id, date, period },
+      {
+        worksheet_id,
+        status,
+        $addToSet: { sources: { ref_id: request._id, ref_type: "request" } },
+      },
+      { upsert: true, session, new: true },
     );
   }
 }

@@ -51,28 +51,40 @@ function buildWorkDatesWithStatus(request, fromMoment, toMoment) {
       const isFirst = cursor.isSame(fromMoment, "day");
       const isLast = cursor.isSame(toMoment, "day");
       const isSat = dow === 6;
-      let weight;
+      let weight, period;
       if (isSat) {
         weight = isFirst && request.from_period === "afternoon" ? 0 : 0.5;
+        period = "full";
       } else if (isFirst && isLast) {
         weight =
           request.from_period === "morning" && request.to_period === "afternoon"
             ? 1
             : 0.5;
+        if (
+          request.from_period === "morning" &&
+          request.to_period === "afternoon"
+        )
+          period = "full";
+        else if (request.from_period === "morning") period = "morning";
+        else period = "afternoon";
       } else if (isFirst) {
         weight = request.from_period === "morning" ? 1 : 0.5;
+        period = request.from_period === "morning" ? "full" : "afternoon";
       } else if (isLast) {
         weight = request.to_period === "afternoon" ? 1 : 0.5;
+        period = request.to_period === "afternoon" ? "full" : "morning";
       } else {
         weight = 1;
+        period = "full";
       }
-      if (weight > 0) workDates.push({ date: cursor.clone().toDate(), weight });
+      if (weight > 0)
+        workDates.push({ date: cursor.clone().toDate(), weight, period });
     }
     cursor.add(1, "day");
   }
 
   let paidRemaining = request.paid_days;
-  return workDates.map(({ date, weight }) => {
+  return workDates.map(({ date, weight, period }) => {
     let status;
     if (paidRemaining >= weight - 0.001) {
       status = "leave_paid";
@@ -83,7 +95,7 @@ function buildWorkDatesWithStatus(request, fromMoment, toMoment) {
     } else {
       status = "leave_unpaid";
     }
-    return { date, status };
+    return { date, status, period };
   });
 }
 
@@ -147,9 +159,22 @@ async function notify(accountId, { title, body, type, ref_id, ref_type, uri }) {
     .catch(() => {});
 }
 
+function calcWorkUnit(shifts, minutesLate, minuteEarly) {
+  const totalMinutes = shifts.reduce((sum, shift) => {
+    const [sh, sm] = shift.start_time.split(":").map(Number);
+    const [eh, em] = shift.end_time.split(":").map(Number);
+    return sum + (eh * 60 + em) - (sh * 60 + sm);
+  }, 0);
+  const base = totalMinutes >= 540 ? 1 : 0.5;
+  const lateDeduction = minutesLate >= 60 ? 0.5 : 0;
+  const earlyDeduction = minuteEarly >= 60 ? 0.5 : 0;
+  return Math.max(0, base - lateDeduction - earlyDeduction);
+}
+
 module.exports = {
   calcTotalDays,
   buildWorkDatesWithStatus,
   getEligibleReviewers,
   notify,
+  calcWorkUnit,
 };

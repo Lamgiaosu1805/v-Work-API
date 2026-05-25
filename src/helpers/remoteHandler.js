@@ -1,6 +1,7 @@
 const moment = require("moment-timezone");
 const { RequestModel } = require("../models/RequestModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
+const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const { calcTotalDays } = require("./requestUtils");
 
 const TZ = "Asia/Ho_Chi_Minh";
@@ -45,23 +46,33 @@ async function onApprove(request, session) {
     cursor.add(1, "day");
   }
 
-  await WorkSheetModel.updateMany(
-    { user_id: request.user_id, date: { $in: workDates }, isDeleted: false },
-    { status: "remote" },
-    { session },
-  );
-
   const existing = await WorkSheetModel.find(
     { user_id: request.user_id, date: { $gte: fromStart, $lte: toEnd }, isDeleted: false },
     { date: 1 },
   ).session(session);
-  const existingKeys = new Set(existing.map((w) => moment.tz(w.date, TZ).format("YYYY-MM-DD")));
+  const sheetMap = new Map(
+    existing.map((w) => [moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id]),
+  );
 
-  const missing = workDates.filter((d) => !existingKeys.has(moment.tz(d, TZ).format("YYYY-MM-DD")));
+  const missing = workDates.filter((d) => !sheetMap.has(moment.tz(d, TZ).format("YYYY-MM-DD")));
   if (missing.length) {
-    await WorkSheetModel.insertMany(
-      missing.map((date) => ({ user_id: request.user_id, date, shifts: [], status: "remote" })),
+    const created = await WorkSheetModel.insertMany(
+      missing.map((date) => ({ user_id: request.user_id, date, shifts: [] })),
       { session },
+    );
+    created.forEach((w) => sheetMap.set(moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id));
+  }
+
+  for (const date of workDates) {
+    const worksheet_id = sheetMap.get(moment.tz(date, TZ).format("YYYY-MM-DD"));
+    await WorkDayStatusModel.findOneAndUpdate(
+      { user_id: request.user_id, date, period: "full" },
+      {
+        worksheet_id,
+        status: "remote",
+        $addToSet: { sources: { ref_id: request._id, ref_type: "request" } },
+      },
+      { upsert: true, session, new: true },
     );
   }
 }

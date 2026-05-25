@@ -40,8 +40,7 @@ async function validateAsync(payload, userInfo, session) {
 async function onApprove(request, session) {
   const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
   const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
-  const update =
-    request.type === "late" ? { minutes_late: 0 } : { minute_early: 0 };
+  const field = request.type === "late" ? "minutes_late" : "minute_early";
 
   await WorkSheetModel.updateOne(
     {
@@ -49,7 +48,13 @@ async function onApprove(request, session) {
       date: { $gte: dateStart, $lte: dateEnd },
       isDeleted: false,
     },
-    update,
+    [
+      {
+        $set: {
+          [field]: { $max: [0, { $subtract: [`$${field}`, request.minutes] }] },
+        },
+      },
+    ],
     { session },
   );
 }

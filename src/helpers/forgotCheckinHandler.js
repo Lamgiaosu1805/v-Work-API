@@ -2,6 +2,7 @@ const moment = require("moment-timezone");
 const mongoose = require("mongoose");
 const { RequestModel } = require("../models/RequestModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
+const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -50,43 +51,88 @@ async function validateAsync(payload, userInfo, session) {
     shift_id: payload.shift_id,
     isDeleted: false,
   }).session(session);
-  return dup
-    ? { status: 409, message: "Đã có đơn quên chấm công cho ca này" }
-    : null;
+  if (dup)
+    return { status: 409, message: "Đã có đơn quên chấm công cho ca này" };
+
+  const dateStart = moment.tz(payload.date, TZ).startOf("day").toDate();
+  const dateEnd = moment.tz(payload.date, TZ).endOf("day").toDate();
+  const worksheet = await WorkSheetModel.findOne({
+    user_id: userInfo._id,
+    date: { $gte: dateStart, $lte: dateEnd },
+    isDeleted: false,
+  }).session(session);
+
+  if (worksheet) {
+    if (
+      (payload.type === "check_in" || payload.type === "both") &&
+      worksheet.check_in
+    )
+      return {
+        status: 400,
+        message: "Bạn đã có dữ liệu check-in, không thể tạo đơn quên chấm vào",
+      };
+    if (
+      (payload.type === "check_out" || payload.type === "both") &&
+      worksheet.check_out
+    )
+      return {
+        status: 400,
+        message: "Bạn đã có dữ liệu check-out, không thể tạo đơn quên chấm ra",
+      };
+  }
+
+  return null;
 }
 
 async function onApprove(request, session) {
   const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
   const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
 
-  const update = {};
-  if (request.expected_check_in) update.check_in = request.expected_check_in;
-  if (request.expected_check_out) update.check_out = request.expected_check_out;
+  const clockUpdate = {};
+  if (request.expected_check_in)
+    clockUpdate.check_in = new Date(request.expected_check_in);
+  if (request.expected_check_out)
+    clockUpdate.check_out = new Date(request.expected_check_out);
 
-  const existing = await WorkSheetModel.findOneAndUpdate(
+  let worksheet = await WorkSheetModel.findOneAndUpdate(
     {
       user_id: request.user_id,
       date: { $gte: dateStart, $lte: dateEnd },
       isDeleted: false,
     },
-    update,
+    clockUpdate,
     { session, new: true },
   );
 
-  if (!existing) {
-    await WorkSheetModel.create(
+  if (!worksheet) {
+    const [created] = await WorkSheetModel.create(
       [
         {
           user_id: request.user_id,
-          date: request.date,
+          date: dateStart,
           shifts: [request.shift_id],
-          status: "pending",
-          ...update,
+          ...clockUpdate,
         },
       ],
       { session },
     );
+    worksheet = created;
   }
+
+  await WorkDayStatusModel.findOneAndUpdate(
+    {
+      user_id: request.user_id,
+      date: dateStart,
+      period: "full",
+      isDeleted: false,
+    },
+    {
+      worksheet_id: worksheet._id,
+      status: "missed_clock",
+      $addToSet: { sources: { ref_id: request._id, ref_type: "request" } },
+    },
+    { upsert: true, session, new: true },
+  );
 }
 
 module.exports = { validate, validateAsync, onApprove };

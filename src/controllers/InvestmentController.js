@@ -7,6 +7,7 @@ const AgentModel = require("../models/AgentModel");
 const BranchModel = require("../models/BranchModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const { calculateCommission, getTNCNRate, CIF_COMMISSION_AMOUNT, EKYC_COMMISSION_AMOUNT } = require("../helpers/commissionCalculator");
+const pushNotification = require("../helpers/pushNotification");
 
 // ── Helpers cho getSalesChart ──────────────────────────────────────────────────
 function getISOWeek(date) {
@@ -182,6 +183,8 @@ const InvestmentController = {
             };
 
             // Chỉ tính HH khi term_type = "month"
+            let saleAccountId = null;
+            let saleName = null;
             if (term_type === "month") {
                 if (customer.referred_by) {
                     const sale = await UserInfoModel.findById(customer.referred_by).session(session);
@@ -197,6 +200,8 @@ const InvestmentController = {
                             ...calc,
                             status: "pending",
                         };
+                        saleAccountId = sale.id_account;
+                        saleName = sale.full_name;
                     }
                 } else if (customer.agent_id) {
                     const calc = calculateCommission({ amount, term_months: term_value, tncn_rate: 10 });
@@ -229,6 +234,17 @@ const InvestmentController = {
 
             await session.commitTransaction();
             session.endSession();
+
+            if (saleAccountId) {
+                const customerName = customer.identity?.full_name || customer.phone_number;
+                const formattedAmount = Number(amount).toLocaleString("vi-VN");
+                pushNotification.sendToAccount({
+                    account_id: saleAccountId,
+                    title: "Khách hàng vừa đầu tư",
+                    body: `${customerName} vừa đầu tư ${formattedAmount}đ vào ${product_name}`,
+                    data: { type: "new_investment", investment_id: String(investment._id) },
+                }).catch((err) => console.error("Push notification error (new investment):", err));
+            }
 
             return res.status(201).json({
                 message: "Tạo khoản đầu tư và ghi nhận hoa hồng thành công",

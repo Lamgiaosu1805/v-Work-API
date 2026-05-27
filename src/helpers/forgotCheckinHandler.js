@@ -6,25 +6,23 @@ const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const TZ = "Asia/Ho_Chi_Minh";
 
 function validate(body) {
-  const { date, type, expected_check_in, expected_check_out } = body;
+  const { date, type } = body;
 
   if (!date || !type)
     return { error: { status: 400, message: "Thông tin đầu vào không hợp lệ" } };
   if (!["check_in", "check_out", "both"].includes(type))
     return { error: { status: 400, message: "Loại không hợp lệ" } };
-  if (moment.tz(date, TZ).isAfter(moment.tz(TZ).endOf("day")))
-    return { error: { status: 400, message: "Ngày không hợp lệ" } };
-  if ((type === "check_in" || type === "both") && !expected_check_in)
-    return { error: { status: 400, message: "Vui lòng cung cấp giờ check-in dự kiến" } };
-  if ((type === "check_out" || type === "both") && !expected_check_out)
-    return { error: { status: 400, message: "Vui lòng cung cấp giờ check-out dự kiến" } };
+  const today = moment.tz(TZ);
+  if (
+    moment.tz(date, TZ).isBefore(today.startOf("day")) ||
+    moment.tz(date, TZ).isAfter(today.endOf("day"))
+  )
+    return { error: { status: 400, message: "Chỉ được tạo đơn quên chấm công cho hôm nay" } };
 
   return {
     payload: {
       date,
       type,
-      expected_check_in: expected_check_in || null,
-      expected_check_out: expected_check_out || null,
     },
   };
 }

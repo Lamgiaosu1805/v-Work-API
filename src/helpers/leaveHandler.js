@@ -5,6 +5,7 @@ const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const HolidayModel = require("../models/HolidayModel");
 const { calcTotalDays, buildWorkDatesWithStatus } = require("./requestUtils");
+const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 
 const TZ = "Asia/Ho_Chi_Minh";
 const RETROACTIVE_LIMIT_DAYS = 3;
@@ -78,12 +79,15 @@ function validate(body, userInfo) {
     };
 
   const balance = userInfo.leave_balance?.annual ?? 0;
-  if (leave_type === "paid" && balance <= 0)
+  const monthDiff = fromMoment.diff(moment.tz(TZ).startOf("month"), "months");
+  const projectedBalance = balance + monthDiff * MONTHLY_ACCRUAL;
+
+  if (leave_type === "paid" && projectedBalance <= 0)
     return {
       error: { status: 400, message: "Bạn không còn ngày nghỉ phép có lương" },
     };
 
-  const paid_days = leave_type === "paid" ? Math.min(total_days, balance) : 0;
+  const paid_days = leave_type === "paid" ? Math.min(total_days, Math.max(0, projectedBalance)) : 0;
   const unpaid_days = total_days - paid_days;
 
   return {
@@ -101,27 +105,35 @@ function validate(body, userInfo) {
   };
 }
 
+function toSlot(date, period) {
+  return `${moment.tz(date, TZ).format("YYYY-MM-DD")}_${period === "morning" ? "0" : "1"}`;
+}
+
 async function validateAsync(payload, userInfo, session) {
   const fromDate = new Date(payload.from_date);
   const toDate = new Date(payload.to_date);
 
-  const [overlap, holidays] = await Promise.all([
-    RequestModel.findOne({
-      user_id: userInfo._id,
-      request_type: "leave",
-      status: { $in: ["pending", "approved"] },
-      from_date: { $lte: toDate },
-      to_date: { $gte: fromDate },
-      isDeleted: false,
-    }).session(session),
-    HolidayModel.find({
-      date: { $gte: fromDate, $lte: toDate },
-      isDeleted: false,
-    }).session(session),
-  ]);
+  const candidates = await RequestModel.find({
+    user_id: userInfo._id,
+    request_type: "leave",
+    status: { $in: ["pending", "approved"] },
+    from_date: { $lte: toDate },
+    to_date: { $gte: fromDate },
+    isDeleted: false,
+  }).session(session);
 
+  const newFrom = toSlot(payload.from_date, payload.from_period);
+  const newTo = toSlot(payload.to_date, payload.to_period);
+  const overlap = candidates.find((r) => {
+    return newFrom <= toSlot(r.to_date, r.to_period) && toSlot(r.from_date, r.from_period) <= newTo;
+  });
   if (overlap)
     return { status: 409, message: "Đã có đơn nghỉ trong khoảng thời gian này" };
+
+  const holidays = await HolidayModel.find({
+    date: { $gte: fromDate, $lte: toDate },
+    isDeleted: false,
+  }).session(session);
 
   const workingHolidays = holidays.filter((h) => moment.tz(h.date, TZ).day() !== 0);
   if (workingHolidays.length) {

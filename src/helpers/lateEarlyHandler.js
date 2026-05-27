@@ -48,13 +48,7 @@ async function onApprove(request, session) {
       date: { $gte: dateStart, $lte: dateEnd },
       isDeleted: false,
     },
-    [
-      {
-        $set: {
-          [field]: { $max: [0, { $subtract: [`$${field}`, request.minutes] }] },
-        },
-      },
-    ],
+    { $set: { [field]: 0 } },
     { session },
   );
 }

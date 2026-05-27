@@ -411,13 +411,11 @@ const RequestController = {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-      const [userInfo, request] = await Promise.all([
-        UserInfoModel.findOne({
-          id_account: req.account._id,
-          isDeleted: false,
-        }).session(session),
-        RequestModel.findOne({ _id: id, isDeleted: false }).session(session),
-      ]);
+      const userInfo = await UserInfoModel.findOne({
+        id_account: req.account._id,
+        isDeleted: false,
+      }).session(session);
+      const request = await RequestModel.findOne({ _id: id, isDeleted: false }).session(session);
 
       if (!request) {
         await session.abortTransaction();

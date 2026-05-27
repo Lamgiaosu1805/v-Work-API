@@ -6,7 +6,9 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const HolidayModel = require("../models/HolidayModel");
+const { RequestModel } = require("../models/RequestModel");
 const { calcWorkUnit } = require("../helpers/requestUtils");
+const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 const moment = require("moment-timezone");
 
 const AttendanceController = {
@@ -271,11 +273,9 @@ const AttendanceController = {
       }).populate("shifts");
 
       if (!worksheet)
-        return res
-          .status(400)
-          .json({
-            message: "Bạn chưa có ca làm việc hôm nay, không thể check-out.",
-          });
+        return res.status(400).json({
+          message: "Bạn chưa có ca làm việc hôm nay, không thể check-out.",
+        });
       if (worksheet.check_out)
         return res
           .status(400)
@@ -550,18 +550,25 @@ const AttendanceController = {
           .status(404)
           .json({ message: "Không tìm thấy thông tin nhân viên" });
 
-      const today = moment.tz("Asia/Ho_Chi_Minh");
+      const now = moment.tz("Asia/Ho_Chi_Minh");
+      const month = parseInt(req.query.month);
+      const year = parseInt(req.query.year);
+      const selected =
+        month && year
+          ? moment.tz({ year, month: month - 1, day: 1 }, "Asia/Ho_Chi_Minh")
+          : now.clone();
+
       let periodStart, periodEnd;
-      if (today.date() >= 26) {
-        periodStart = today.clone().date(26).startOf("day");
-        periodEnd = today.clone().add(1, "month").date(25).endOf("day");
+      if (selected.date() >= 26 || (month && year)) {
+        periodStart = selected.clone().date(26).startOf("day");
+        periodEnd = selected.clone().add(1, "month").date(25).endOf("day");
       } else {
-        periodStart = today
+        periodStart = selected
           .clone()
           .subtract(1, "month")
           .date(26)
           .startOf("day");
-        periodEnd = today.clone().date(25).endOf("day");
+        periodEnd = selected.clone().date(25).endOf("day");
       }
 
       const [missedCount, absentCount] = await Promise.all([
@@ -579,6 +586,16 @@ const AttendanceController = {
         }),
       ]);
 
+      const currentBalance = user.leave_balance?.annual ?? 0;
+      const monthDiff = selected
+        .clone()
+        .startOf("month")
+        .diff(now.clone().startOf("month"), "months");
+      const projectedBalance = Math.max(
+        0,
+        currentBalance + monthDiff * MONTHLY_ACCRUAL,
+      );
+
       return res.status(200).json({
         message: "OK",
         data: {
@@ -588,12 +605,274 @@ const AttendanceController = {
           },
           missed_clock_days: missedCount,
           absent_days: absentCount,
-          leave_balance: user.leave_balance?.annual ?? 0,
+          leave_balance: projectedBalance,
         },
       });
     } catch (err) {
       console.error(err);
-      return res.status(500).json({ message: "Lỗi server", error: err.message });
+      return res
+        .status(500)
+        .json({ message: "Lỗi server", error: err.message });
+    }
+  },
+
+  getPayrollStats: async (req, res) => {
+    const TZ = "Asia/Ho_Chi_Minh";
+    try {
+      const { userId } = req.params;
+      const month = parseInt(req.query.month);
+      const year = parseInt(req.query.year);
+
+      if (!mongoose.Types.ObjectId.isValid(userId))
+        return res.status(400).json({ message: "userId không hợp lệ" });
+      if (!month || !year || month < 1 || month > 12)
+        return res
+          .status(400)
+          .json({ message: "month và year là bắt buộc (month: 1-12)" });
+
+      const refDate = moment.tz({ year, month: month - 1, day: 1 }, TZ);
+      const periodStart = refDate
+        .clone()
+        .subtract(1, "month")
+        .date(26)
+        .startOf("day");
+      const periodEnd = refDate.clone().date(25).endOf("day");
+
+      const userInfo = await UserInfoModel.findOne({
+        _id: userId,
+        isDeleted: false,
+      });
+      if (!userInfo)
+        return res.status(404).json({ message: "Không tìm thấy nhân viên" });
+
+      if (req.account.role !== "admin" && req.account.dept_scope !== "all") {
+        const myInfo = await UserInfoModel.findOne({
+          id_account: req.account._id,
+          isDeleted: false,
+        });
+        if (!myInfo)
+          return res
+            .status(404)
+            .json({ message: "Không tìm thấy thông tin quản lý" });
+
+        const [myDeptIds, targetDeptIds] = await Promise.all([
+          UserDepartmentPositionModel.distinct("department", {
+            user: myInfo._id,
+          }),
+          UserDepartmentPositionModel.distinct("department", {
+            user: userInfo._id,
+          }),
+        ]);
+        const mySet = new Set(myDeptIds.map((id) => id.toString()));
+        const hasOverlap = targetDeptIds.some((id) => mySet.has(id.toString()));
+        if (!hasOverlap)
+          return res
+            .status(403)
+            .json({ message: "Bạn không có quyền xem nhân viên này" });
+      }
+
+      const [worksheets, dayStatuses, requests] = await Promise.all([
+        WorkSheetModel.find({
+          user_id: userInfo._id,
+          date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+          isDeleted: false,
+        }),
+        WorkDayStatusModel.find({
+          user_id: userInfo._id,
+          date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+          isDeleted: false,
+        }),
+        RequestModel.find({
+          user_id: userInfo._id,
+          isDeleted: false,
+          status: "approved",
+          $or: [
+            {
+              from_date: { $lte: periodEnd.toDate() },
+              to_date: { $gte: periodStart.toDate() },
+            },
+            {
+              date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+            },
+          ],
+        }),
+      ]);
+
+      const wsMap = new Map();
+      for (const ws of worksheets) {
+        wsMap.set(moment.tz(ws.date, TZ).format("YYYY-MM-DD"), ws);
+      }
+
+      const dsMap = new Map();
+      for (const ds of dayStatuses) {
+        const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
+        if (!dsMap.has(key)) dsMap.set(key, []);
+        dsMap.get(key).push(ds);
+      }
+
+      const reqMap = new Map();
+      const addReqToDay = (dateStr, req) => {
+        if (!reqMap.has(dateStr)) reqMap.set(dateStr, []);
+        reqMap.get(dateStr).push(req);
+      };
+      for (const req of requests) {
+        if (req.request_type === "leave" || req.request_type === "remote") {
+          const cursor = moment.tz(req.from_date, TZ).startOf("day");
+          const end = moment.tz(req.to_date, TZ).startOf("day");
+          while (cursor.isSameOrBefore(end, "day")) {
+            if (cursor.isBetween(periodStart, periodEnd, "day", "[]"))
+              addReqToDay(cursor.format("YYYY-MM-DD"), req);
+            cursor.add(1, "day");
+          }
+        } else if (req.date) {
+          addReqToDay(moment.tz(req.date, TZ).format("YYYY-MM-DD"), req);
+        }
+      }
+
+      const allDates = new Set([
+        ...wsMap.keys(),
+        ...dsMap.keys(),
+        ...reqMap.keys(),
+      ]);
+
+      let work_unit_total = 0;
+      let present_days = 0,
+        missed_clock_days = 0,
+        absent_days = 0;
+      let leave_paid_days = 0,
+        leave_unpaid_days = 0,
+        remote_days = 0;
+      let late_days = 0,
+        total_minutes_late = 0,
+        early_days = 0,
+        total_minutes_early = 0;
+
+      const daily = [...allDates].sort().map((dateStr) => {
+        const ws = wsMap.get(dateStr);
+        const statuses = dsMap.get(dateStr) || [];
+        const reqs = reqMap.get(dateStr) || [];
+
+        if (ws) {
+          work_unit_total += ws.work_unit ?? 0;
+          if ((ws.minutes_late ?? 0) > 0) {
+            late_days++;
+            total_minutes_late += ws.minutes_late;
+          }
+          if ((ws.minute_early ?? 0) > 0) {
+            early_days++;
+            total_minutes_early += ws.minute_early;
+          }
+        }
+        for (const s of statuses) {
+          const w = s.period === "full" ? 1 : 0.5;
+          if (s.status === "present") present_days += w;
+          else if (s.status === "missed_clock") missed_clock_days += w;
+          else if (s.status === "absent") absent_days += w;
+          else if (s.status === "leave_paid") leave_paid_days += w;
+          else if (s.status === "leave_unpaid") leave_unpaid_days += w;
+          else if (s.status === "remote") remote_days += w;
+        }
+
+        return {
+          date: dateStr,
+          check_in: ws?.check_in
+            ? moment.tz(ws.check_in, TZ).format("HH:mm")
+            : null,
+          check_out: ws?.check_out
+            ? moment.tz(ws.check_out, TZ).format("HH:mm")
+            : null,
+          work_unit: ws?.work_unit ?? null,
+          minutes_late: ws?.minutes_late ?? 0,
+          minute_early: ws?.minute_early ?? 0,
+          day_statuses: statuses.map((s) => ({
+            period: s.period,
+            status: s.status,
+          })),
+          requests: reqs.map((r) => {
+            const base = {
+              _id: r._id,
+              request_type: r.request_type,
+              reason: r.reason || "",
+            };
+            switch (r.request_type) {
+              case "leave":
+                return {
+                  ...base,
+                  from_date: moment.tz(r.from_date, TZ).format("DD/MM/YYYY"),
+                  to_date: moment.tz(r.to_date, TZ).format("DD/MM/YYYY"),
+                  leave_type: r.leave_type,
+                  paid_days: r.paid_days,
+                  unpaid_days: r.unpaid_days,
+                };
+              case "forgot_checkin":
+                return {
+                  ...base,
+                  forgot_type: r.type,
+                  expected_check_in: r.expected_check_in
+                    ? moment.tz(r.expected_check_in, TZ).format("HH:mm")
+                    : null,
+                  expected_check_out: r.expected_check_out
+                    ? moment.tz(r.expected_check_out, TZ).format("HH:mm")
+                    : null,
+                };
+              case "late_early":
+                return {
+                  ...base,
+                  late_type: r.type,
+                  minutes: r.minutes,
+                };
+              case "remote":
+                return {
+                  ...base,
+                  from_date: moment.tz(r.from_date, TZ).format("DD/MM/YYYY"),
+                  to_date: moment.tz(r.to_date, TZ).format("DD/MM/YYYY"),
+                  total_days: r.total_days,
+                };
+              case "explanation":
+                return { ...base, content: r.content };
+              default:
+                return base;
+            }
+          }),
+        };
+      });
+
+      return res.status(200).json({
+        message: "OK",
+        period: {
+          from: periodStart.format("DD/MM/YYYY"),
+          to: periodEnd.format("DD/MM/YYYY"),
+        },
+        user: {
+          user_id: userInfo._id,
+          ma_nv: userInfo.ma_nv,
+          full_name: userInfo.full_name,
+          employment_type: userInfo.employment_type,
+          leave_balance:
+            userInfo.leave_balance?.annual >= 0
+              ? userInfo.leave_balance?.annual
+              : 0,
+        },
+        summary: {
+          work_unit_total,
+          present_days,
+          missed_clock_days,
+          absent_days,
+          leave_paid_days,
+          leave_unpaid_days,
+          remote_days,
+          late_days,
+          total_minutes_late,
+          early_days,
+          total_minutes_early,
+        },
+        daily,
+      });
+    } catch (err) {
+      console.error(err);
+      return res
+        .status(500)
+        .json({ message: "Lỗi server", error: err.message });
     }
   },
 
@@ -602,25 +881,38 @@ const AttendanceController = {
       const month = parseInt(req.query.month);
       const year = parseInt(req.query.year);
       if (!month || !year || month < 1 || month > 12)
-        return res.status(400).json({ message: "month và year là bắt buộc (month: 1-12)" });
+        return res
+          .status(400)
+          .json({ message: "month và year là bắt buộc (month: 1-12)" });
 
       const user = await UserInfoModel.findOne({ id_account: req.account._id });
-      if (!user) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+      if (!user)
+        return res
+          .status(404)
+          .json({ message: "Không tìm thấy thông tin nhân viên" });
 
-      const startOfMonth = moment.tz({ year, month: month - 1, day: 1 }, "Asia/Ho_Chi_Minh").startOf("day");
+      const startOfMonth = moment
+        .tz({ year, month: month - 1, day: 1 }, "Asia/Ho_Chi_Minh")
+        .startOf("day");
       const endOfMonth = startOfMonth.clone().endOf("month");
 
       const [holidays, dayStatuses] = await Promise.all([
-        HolidayModel.find({
-          date: { $gte: startOfMonth.toDate(), $lte: endOfMonth.toDate() },
-          isDeleted: false,
-        }, "date name"),
-        WorkDayStatusModel.find({
-          user_id: user._id,
-          date: { $gte: startOfMonth.toDate(), $lte: endOfMonth.toDate() },
-          status: { $in: ["leave_paid", "leave_unpaid", "absent"] },
-          isDeleted: false,
-        }, "date period status"),
+        HolidayModel.find(
+          {
+            date: { $gte: startOfMonth.toDate(), $lte: endOfMonth.toDate() },
+            isDeleted: false,
+          },
+          "date name",
+        ),
+        WorkDayStatusModel.find(
+          {
+            user_id: user._id,
+            date: { $gte: startOfMonth.toDate(), $lte: endOfMonth.toDate() },
+            status: { $in: ["leave_paid", "leave_unpaid", "absent"] },
+            isDeleted: false,
+          },
+          "date period status",
+        ),
       ]);
 
       return res.status(200).json({
@@ -641,7 +933,9 @@ const AttendanceController = {
       });
     } catch (err) {
       console.error(err);
-      return res.status(500).json({ message: "Lỗi server", error: err.message });
+      return res
+        .status(500)
+        .json({ message: "Lỗi server", error: err.message });
     }
   },
 };

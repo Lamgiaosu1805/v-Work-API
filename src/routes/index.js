@@ -18,6 +18,7 @@ const branchRouter = require('./branch')
 const printRouter = require('./print')
 const customerClaimRequestRouter = require('./customerClaimRequest')
 const aiRouter = require('./ai')
+const chatRouter = require("./chat");
 
 const route = (app) => {
     app.use(`/posts`, postRouter)
@@ -40,6 +41,7 @@ const route = (app) => {
     app.use(`/print`, printRouter)
     app.use(`/customer-claim-request`, customerClaimRequestRouter)
     app.use(`/ai`, aiRouter)
+    app.use(`/chat`, chatRouter)
 }
 
 module.exports = route;

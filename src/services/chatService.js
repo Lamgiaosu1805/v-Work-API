@@ -1,0 +1,438 @@
+const ConversationModel = require("../models/ConversationModel");
+const MessageModel = require("../models/MessageModel");
+const UserInfoModel = require("../models/UserInfoModel");
+
+class ChatError extends Error {
+  constructor(message, statusCode = 400) {
+    super(message);
+    this.name = "ChatError";
+    this.statusCode = statusCode;
+  }
+}
+
+function normalizeObjectIds(values) {
+  if (!Array.isArray(values)) return [];
+
+  return [
+    ...new Set(
+      values.map((value) => String(value || "").trim()).filter(Boolean),
+    ),
+  ];
+}
+
+function toPlainObject(doc) {
+  if (!doc) return doc;
+  if (typeof doc.toObject === "function") return doc.toObject();
+  return doc;
+}
+
+function formatConversation(conversation, currentUserInfoId) {
+  const plainConversation = toPlainObject(conversation);
+  const members = plainConversation.members || [];
+  const myId = String(currentUserInfoId);
+
+  // Group chat thì hiển thị tên/ảnh của chính group.
+  if (plainConversation.type === "group") {
+    return {
+      ...plainConversation,
+      display_name: plainConversation.name || "Nhóm chat",
+      avatar: plainConversation.avatar || null,
+    };
+  }
+
+  // Private chat thì hiển thị tên/ảnh của người còn lại trong conversation.
+  const otherMember =
+    members.find((member) => String(member?._id || member) !== myId) || null;
+
+  return {
+    ...plainConversation,
+    display_name:
+      otherMember?.full_name || plainConversation.name || "Tin nhắn",
+    avatar: otherMember?.avatar ?? plainConversation.avatar ?? null,
+  };
+}
+
+async function getCurrentUserInfo(accountId) {
+  // Socket/controller thường đi từ account._id -> user_info để làm việc với chat.
+  const userInfo = await UserInfoModel.findOne({
+    id_account: accountId,
+    isDeleted: false,
+  })
+    .select("full_name avatar ma_nv id_account")
+    .lean();
+
+  if (!userInfo) {
+    throw new ChatError("Không tìm thấy thông tin nhân viên", 404);
+  }
+
+  return userInfo;
+}
+
+async function loadConversationById(
+  conversationId,
+  currentUserInfoId,
+  session,
+) {
+  // Chỉ load conversation nếu user hiện tại là thành viên của conversation đó.
+  const query = ConversationModel.findOne({
+    _id: conversationId,
+    members: currentUserInfoId,
+    isDeleted: false,
+  });
+
+  if (session) {
+    query.session(session);
+  }
+
+  const conversation = await query
+    .populate("members", "full_name avatar ma_nv id_account")
+    .populate("admins", "full_name avatar ma_nv id_account")
+    .populate("createdBy", "full_name avatar ma_nv id_account")
+    .populate({
+      path: "lastMessage",
+      populate: {
+        path: "senderId",
+        select: "full_name avatar ma_nv id_account",
+      },
+    })
+    .lean();
+
+  if (!conversation) {
+    throw new ChatError(
+      "Conversation không tồn tại hoặc bạn không có quyền truy cập",
+      404,
+    );
+  }
+
+  return formatConversation(conversation, currentUserInfoId);
+}
+
+async function ensureConversationAccess(conversationId, userInfoId) {
+  const conversation = await ConversationModel.findOne({
+    _id: conversationId,
+    members: userInfoId,
+    isDeleted: false,
+  }).lean();
+
+  if (!conversation) {
+    throw new ChatError(
+      "Conversation không tồn tại hoặc bạn không có quyền truy cập",
+      404,
+    );
+  }
+
+  return conversation;
+}
+
+async function createPrivateConversation({
+  currentUserInfoId,
+  receiverUserInfoId,
+}) {
+  const receiverId = String(receiverUserInfoId || "").trim();
+  if (!receiverId) {
+    throw new ChatError("Thiếu receiver_id", 400);
+  }
+
+  const senderId = String(currentUserInfoId);
+  if (senderId === receiverId) {
+    throw new ChatError("Không thể chat với chính mình", 400);
+  }
+
+  // Receiver có thể được truyền vào bằng user_info._id hoặc account id.
+  // Service thử tìm theo user_info trước, sau đó mới fallback sang account id.
+  let receiver = await UserInfoModel.findOne({
+    _id: receiverId,
+    isDeleted: false,
+  })
+    .select("full_name avatar ma_nv id_account")
+    .lean();
+
+  if (!receiver) {
+    receiver = await UserInfoModel.findOne({
+      id_account: receiverId,
+      isDeleted: false,
+    })
+      .select("full_name avatar ma_nv id_account")
+      .lean();
+  }
+
+  if (!receiver) {
+    throw new ChatError("Người dùng không tồn tại", 404);
+  }
+
+  const existingConversation = await ConversationModel.findOne({
+    type: "private",
+    isDeleted: false,
+    members: {
+      $all: [currentUserInfoId, receiver._id],
+      $size: 2,
+    },
+  })
+    .populate("members", "full_name avatar ma_nv id_account")
+    .populate({
+      path: "lastMessage",
+      populate: {
+        path: "senderId",
+        select: "full_name avatar ma_nv id_account",
+      },
+    })
+    .lean();
+
+  if (existingConversation) {
+    // Nếu đã có private chat giữa 2 người thì trả về conversation cũ thay vì tạo mới.
+    return formatConversation(existingConversation, currentUserInfoId);
+  }
+
+  // Chưa có conversation thì tạo mới với đúng 2 member.
+  const conversation = await ConversationModel.create({
+    type: "private",
+    members: [currentUserInfoId, receiver._id],
+    createdBy: currentUserInfoId,
+  });
+
+  return loadConversationById(conversation._id, currentUserInfoId);
+}
+
+async function createMessageDocument({
+  conversationId,
+  senderUserInfoId,
+  content,
+  type = "text",
+  seenBy = [],
+  session,
+}) {
+  // Tách riêng việc tạo message để dùng lại cho cả private/group/system message.
+  const payload = {
+    conversationId,
+    senderId: senderUserInfoId,
+    type,
+    content: content || "",
+    seenBy,
+  };
+
+  const createdMessages = session
+    ? await MessageModel.create([payload], { session })
+    : await MessageModel.create([payload]);
+
+  return Array.isArray(createdMessages) ? createdMessages[0] : createdMessages;
+}
+
+async function createGroupConversation({
+  name,
+  memberIds,
+  creatorUserInfoId,
+  session,
+}) {
+  const groupName = String(name || "").trim();
+  if (!groupName) {
+    throw new ChatError("Thiếu name", 400);
+  }
+
+  // memberIds có thể là user_info._id hoặc account id, nên normalize trước rồi resolve.
+  const candidateIds = normalizeObjectIds(memberIds || []);
+  // Luôn thêm creator vào group để đảm bảo người tạo là thành viên.
+  const withCreator = normalizeObjectIds([...candidateIds, creatorUserInfoId]);
+  if (withCreator.length < 2) {
+    throw new ChatError("Group phải có ít nhất 2 thành viên", 400);
+  }
+
+  // Tìm toàn bộ user tương ứng để xác thực member tồn tại và lấy user_info._id chuẩn.
+  const users = await UserInfoModel.find({
+    isDeleted: false,
+    $or: [{ _id: { $in: withCreator } }, { id_account: { $in: withCreator } }],
+  })
+    .select("full_name avatar ma_nv id_account")
+    .lean();
+
+  if (users.length !== withCreator.length) {
+    throw new ChatError("Có user không tồn tại", 404);
+  }
+
+  const resolvedMemberIds = users.map((u) => String(u._id));
+
+  const createdConversation = await ConversationModel.create(
+    [
+      {
+        type: "group",
+        name: groupName,
+        members: resolvedMemberIds,
+        admins: [creatorUserInfoId],
+        createdBy: creatorUserInfoId,
+      },
+    ],
+    { session },
+  );
+
+  const conversation = Array.isArray(createdConversation)
+    ? createdConversation[0]
+    : createdConversation;
+
+  const systemMessage = await createMessageDocument({
+    conversationId: conversation._id,
+    senderUserInfoId: creatorUserInfoId,
+    content: "Nhóm đã được tạo",
+    type: "system",
+    seenBy: [creatorUserInfoId],
+    session,
+  });
+
+  await ConversationModel.updateOne(
+    { _id: conversation._id },
+    {
+      $set: {
+        lastMessage: systemMessage._id,
+        updatedAt: new Date(),
+      },
+    },
+    { session },
+  );
+  return loadConversationById(conversation._id, creatorUserInfoId, session);
+}
+async function listConversations(userInfoId) {
+  // Lấy toàn bộ conversation mà user là member, sau đó format lại cho UI.
+  const conversations = await ConversationModel.find({
+    members: userInfoId,
+    isDeleted: false,
+  })
+    .populate("members", "full_name avatar ma_nv id_account")
+    .populate("admins", "full_name avatar ma_nv id_account")
+    .populate("createdBy", "full_name avatar ma_nv id_account")
+    .populate({
+      path: "lastMessage",
+      populate: {
+        path: "senderId",
+        select: "full_name avatar ma_nv id_account",
+      },
+    })
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  return conversations.map((conversation) =>
+    formatConversation(conversation, userInfoId),
+  );
+}
+
+async function getConversationDetail({ conversationId, userInfoId }) {
+  return loadConversationById(conversationId, userInfoId);
+}
+
+async function getConversationMessages({
+  conversationId,
+  userInfoId,
+  page = 1,
+  limit = 30,
+}) {
+  // Chỉ thành viên trong conversation mới được đọc message.
+  await ensureConversationAccess(conversationId, userInfoId);
+
+  const filter = {
+    conversationId,
+    isDeleted: false,
+  };
+
+  const total = await MessageModel.countDocuments(filter);
+  const messages = await MessageModel.find(filter)
+    .populate("senderId", "full_name avatar ma_nv id_account")
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(limit)
+    .lean();
+
+  messages.reverse();
+
+  return {
+    data: messages,
+    pagination: {
+      total,
+      page,
+      limit,
+      total_pages: Math.ceil(total / limit),
+    },
+  };
+}
+
+async function sendMessage({
+  conversationId,
+  senderUserInfoId,
+  content,
+  type = "text",
+  session,
+}) {
+  // Validate membership trước, sau đó mới ghi message và update lastMessage của conversation.
+  await ensureConversationAccess(conversationId, senderUserInfoId);
+
+  const allowedTypes = ["text", "image", "audio"];
+  if (!allowedTypes.includes(type)) {
+    throw new ChatError("Loại tin nhắn không hợp lệ", 400);
+  }
+
+  const normalizedContent = String(content || "").trim();
+  if (!normalizedContent) {
+    throw new ChatError("Nội dung tin nhắn không được để trống", 400);
+  }
+
+  const message = await createMessageDocument({
+    conversationId,
+    senderUserInfoId,
+    content: normalizedContent,
+    type,
+    seenBy: [senderUserInfoId],
+    session,
+  });
+
+  await ConversationModel.updateOne(
+    { _id: conversationId },
+    {
+      $set: {
+        lastMessage: message._id,
+        updatedAt: new Date(),
+      },
+    },
+    { session },
+  );
+
+  const populatedMessage = await MessageModel.findById(message._id)
+    .populate("senderId", "full_name avatar ma_nv id_account")
+    .lean();
+
+  return populatedMessage;
+}
+
+async function markConversationSeen({ conversationId, userInfoId }) {
+  // Đánh dấu seen cho tất cả message trong conversation mà user này chưa đọc.
+  await ensureConversationAccess(conversationId, userInfoId);
+
+  const result = await MessageModel.updateMany(
+    {
+      conversationId,
+      senderId: { $ne: userInfoId },
+      seenBy: { $ne: userInfoId },
+      isDeleted: false,
+    },
+    {
+      $addToSet: {
+        seenBy: userInfoId,
+      },
+    },
+  );
+
+  return {
+    matchedCount: result.matchedCount ?? 0,
+    modifiedCount: result.modifiedCount ?? 0,
+  };
+}
+
+module.exports = {
+  ChatError,
+  getCurrentUserInfo,
+  createPrivateConversation,
+  createGroupConversation,
+  listConversations,
+  getConversationDetail,
+  getConversationMessages,
+  sendMessage,
+  markConversationSeen,
+  ensureConversationAccess,
+  createMessageDocument,
+  formatConversation,
+};

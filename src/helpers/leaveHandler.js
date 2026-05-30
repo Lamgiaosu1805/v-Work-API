@@ -59,17 +59,28 @@ function validate(body, userInfo) {
           message: "Không thể tạo đơn nghỉ cho ngày trong quá khứ",
         },
       };
-    if (
-      fromMoment.isSame(today, "day") &&
-      from_period === "morning" &&
-      now.isSameOrAfter(today.clone().hour(12))
-    )
-      return {
-        error: {
-          status: 400,
-          message: "Không thể tạo đơn nghỉ cho buổi đã qua",
-        },
-      };
+    if (fromMoment.isSame(today, "day")) {
+      if (
+        from_period === "morning" &&
+        now.isSameOrAfter(today.clone().hour(12))
+      )
+        return {
+          error: {
+            status: 400,
+            message: "Không thể tạo đơn nghỉ cho buổi đã qua",
+          },
+        };
+      if (
+        from_period === "afternoon" &&
+        now.isSameOrAfter(today.clone().hour(13))
+      )
+        return {
+          error: {
+            status: 400,
+            message: "Không thể tạo đơn nghỉ cho buổi đã qua",
+          },
+        };
+    }
   }
 
   const total_days = calcTotalDays(from_date, from_period, to_date, to_period);
@@ -110,8 +121,8 @@ function toSlot(date, period) {
 }
 
 async function validateAsync(payload, userInfo, session) {
-  const fromDate = new Date(payload.from_date);
-  const toDate = new Date(payload.to_date);
+  const fromDate = moment.tz(payload.from_date, TZ).startOf("day").toDate();
+  const toDate = moment.tz(payload.to_date, TZ).startOf("day").toDate();
 
   const candidates = await RequestModel.find({
     user_id: userInfo._id,
@@ -209,4 +220,74 @@ async function onReject(request, session) {
   }
 }
 
-module.exports = { validate, validateAsync, onCreate, onApprove, onReject };
+async function resolveLeaveConflictOnAttendance({
+  userId,
+  worksheetId,
+  date,
+  checkInTime,
+  checkOutTime,
+  lastShiftEnd,
+  session,
+}) {
+  const dateStart = moment.tz(date, TZ).startOf("day").toDate();
+  const dateEnd = moment.tz(date, TZ).endOf("day").toDate();
+
+  const leaveStatuses = await WorkDayStatusModel.find({
+    user_id: userId,
+    date: { $gte: dateStart, $lte: dateEnd },
+    status: { $in: ["leave_paid", "leave_unpaid"] },
+    isDeleted: false,
+  }).session(session);
+
+  if (!leaveStatuses.length) return;
+
+  const noon = moment.tz(date, TZ).hour(12).minute(0).second(0);
+  const checkIn = checkInTime ? moment.tz(checkInTime, TZ) : null;
+  const checkOut = checkOutTime ? moment.tz(checkOutTime, TZ) : null;
+
+  const coversMorning = !!checkIn && checkIn.isBefore(noon);
+
+  let coversAfternoon = false;
+  if (checkOut && lastShiftEnd) {
+    const [endH, endM] = lastShiftEnd.split(":").map(Number);
+    const shiftEndMoment = moment.tz(date, TZ).hour(endH).minute(endM).second(0);
+    const threshold = shiftEndMoment.clone().subtract(60, "minutes");
+    coversAfternoon = checkOut.isSameOrAfter(threshold);
+  }
+
+  let totalRefund = 0;
+
+  for (const ls of leaveStatuses) {
+    const shouldOverride =
+      (ls.period === "morning" && coversMorning) ||
+      (ls.period === "afternoon" && coversAfternoon) ||
+      (ls.period === "full" && coversMorning && coversAfternoon);
+
+    if (!shouldOverride) continue;
+
+    await WorkDayStatusModel.findByIdAndUpdate(
+      ls._id,
+      {
+        status: "present",
+        worksheet_id: worksheetId,
+        $addToSet: { sources: { ref_id: worksheetId, ref_type: "attendance" } },
+      },
+      { session },
+    );
+
+    if (ls.status === "leave_paid") {
+      const isSaturday = moment.tz(ls.date, TZ).day() === 6;
+      totalRefund += ls.period === "full" && !isSaturday ? 1 : 0.5;
+    }
+  }
+
+  if (totalRefund > 0) {
+    await UserInfoModel.findByIdAndUpdate(
+      userId,
+      { $inc: { "leave_balance.annual": totalRefund } },
+      { session },
+    );
+  }
+}
+
+module.exports = { validate, validateAsync, onCreate, onApprove, onReject, resolveLeaveConflictOnAttendance };

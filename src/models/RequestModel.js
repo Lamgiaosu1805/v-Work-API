@@ -39,7 +39,7 @@ const LeaveRequest = RequestModel.discriminator(
     from_period: {
       type: String,
       enum: ["morning", "afternoon"],
-      required: true,
+      required: true, 
     },
     to_date: { type: Date, required: true },
     to_period: { type: String, enum: ["morning", "afternoon"], required: true },

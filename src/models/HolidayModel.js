@@ -8,7 +8,12 @@ const HolidaySchema = new mongoose.Schema(
     year: { type: Number, required: true },
     ...BaseSchema.obj,
   },
-  { ...BaseSchema.options, collection: "holidays" },
+  {
+    timestamps: BaseSchema.options.timestamps,
+    toJSON: BaseSchema.options.toJSON,
+    toObject: BaseSchema.options.toObject,
+    collection: "holidays",
+  },
 );
 
 HolidaySchema.index({ date: 1 });

@@ -2,27 +2,59 @@ const moment = require("moment-timezone");
 const { RequestModel } = require("../models/RequestModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
+const ShiftModel = require("../models/ShiftModel");
+const { resolveLeaveConflictOnAttendance } = require("./leaveHandler");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
 function validate(body) {
-  const { date, type } = body;
+  const { date, type, expected_check_in, expected_check_out } = body;
 
   if (!date || !type)
     return { error: { status: 400, message: "Thông tin đầu vào không hợp lệ" } };
   if (!["check_in", "check_out", "both"].includes(type))
     return { error: { status: 400, message: "Loại không hợp lệ" } };
+
   const today = moment.tz(TZ);
+  const dateMoment = moment.tz(date, TZ);
   if (
-    moment.tz(date, TZ).isBefore(today.startOf("day")) ||
-    moment.tz(date, TZ).isAfter(today.endOf("day"))
+    dateMoment.isBefore(today.startOf("day")) ||
+    dateMoment.isAfter(today.endOf("day"))
   )
     return { error: { status: 400, message: "Chỉ được tạo đơn quên chấm công cho hôm nay" } };
+
+  const needsCheckIn = type === "check_in" || type === "both";
+  const needsCheckOut = type === "check_out" || type === "both";
+
+  if (needsCheckIn && !expected_check_in)
+    return { error: { status: 400, message: "Vui lòng nhập giờ check-in dự kiến" } };
+  if (needsCheckOut && !expected_check_out)
+    return { error: { status: 400, message: "Vui lòng nhập giờ check-out dự kiến" } };
+
+  const dayStart = dateMoment.clone().startOf("day");
+  const dayEnd = dateMoment.clone().endOf("day");
+
+  if (needsCheckIn) {
+    const cin = moment.tz(expected_check_in, TZ);
+    if (!cin.isBetween(dayStart, dayEnd, null, "[]"))
+      return { error: { status: 400, message: "Giờ check-in dự kiến không hợp lệ" } };
+  }
+  if (needsCheckOut) {
+    const cout = moment.tz(expected_check_out, TZ);
+    if (!cout.isBetween(dayStart, dayEnd, null, "[]"))
+      return { error: { status: 400, message: "Giờ check-out dự kiến không hợp lệ" } };
+  }
+  if (needsCheckIn && needsCheckOut) {
+    if (moment.tz(expected_check_in, TZ).isSameOrAfter(moment.tz(expected_check_out, TZ)))
+      return { error: { status: 400, message: "Giờ check-in phải trước giờ check-out" } };
+  }
 
   return {
     payload: {
       date,
       type,
+      expected_check_in: needsCheckIn ? new Date(expected_check_in) : null,
+      expected_check_out: needsCheckOut ? new Date(expected_check_out) : null,
     },
   };
 }
@@ -97,20 +129,22 @@ async function onApprove(request, session) {
     worksheet = created;
   }
 
-  await WorkDayStatusModel.findOneAndUpdate(
-    {
-      user_id: request.user_id,
-      date: dateStart,
-      period: "full",
-      isDeleted: false,
-    },
-    {
-      worksheet_id: worksheet._id,
-      status: "missed_clock",
-      $addToSet: { sources: { ref_id: request._id, ref_type: "request" } },
-    },
-    { upsert: true, session, new: true },
-  );
+  let lastShiftEnd = null;
+  if (worksheet.shifts?.length > 0) {
+    const lastShiftId = worksheet.shifts[worksheet.shifts.length - 1];
+    const lastShift = await ShiftModel.findById(lastShiftId).session(session);
+    lastShiftEnd = lastShift?.end_time ?? null;
+  }
+
+  await resolveLeaveConflictOnAttendance({
+    userId: request.user_id,
+    worksheetId: worksheet._id,
+    date: request.date,
+    checkInTime: worksheet.check_in,
+    checkOutTime: worksheet.check_out,
+    lastShiftEnd,
+    session,
+  });
 }
 
 module.exports = { validate, validateAsync, onApprove };

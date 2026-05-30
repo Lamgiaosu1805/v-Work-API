@@ -9,6 +9,7 @@ const HolidayModel = require("../models/HolidayModel");
 const { RequestModel } = require("../models/RequestModel");
 const { calcWorkUnit } = require("../helpers/requestUtils");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
+const { resolveLeaveConflictOnAttendance } = require("../helpers/leaveHandler");
 const moment = require("moment-timezone");
 
 const AttendanceController = {
@@ -228,6 +229,7 @@ const AttendanceController = {
   },
 
   checkOut: async (req, res) => {
+    let session = null;
     try {
       const { ssid, latitude, longitude } = req.body;
       if (!ssid || latitude == null || longitude == null)
@@ -326,7 +328,20 @@ const AttendanceController = {
         );
       }
 
-      await worksheet.save();
+      session = await mongoose.startSession();
+      session.startTransaction();
+
+      await worksheet.save({ session });
+
+      await resolveLeaveConflictOnAttendance({
+        userId: userInfo._id,
+        worksheetId: worksheet._id,
+        date: today,
+        checkInTime: worksheet.check_in,
+        checkOutTime: now.toDate(),
+        lastShiftEnd: lastShift.end_time,
+        session,
+      });
 
       // Cập nhật WorkDayStatus: pending → present
       await WorkDayStatusModel.updateMany(
@@ -337,7 +352,10 @@ const AttendanceController = {
             sources: { ref_id: worksheet._id, ref_type: "attendance" },
           },
         },
+        { session },
       );
+
+      await session.commitTransaction();
 
       return res.json({
         message: "Check-out thành công",
@@ -346,10 +364,13 @@ const AttendanceController = {
         work_unit: worksheet.work_unit,
       });
     } catch (err) {
+      if (session) await session.abortTransaction().catch(() => {});
       console.error(err);
       return res
         .status(500)
         .json({ message: "Lỗi server", error: err.message });
+    } finally {
+      if (session) session.endSession();
     }
   },
 

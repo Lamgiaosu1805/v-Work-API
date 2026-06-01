@@ -4,6 +4,7 @@ const ChatController = require("../controllers/ChatController");
 
 const router = express.Router();
 
+router.get("/users/search", authenticate, ChatController.searchUsers);
 router.post("/private", authenticate, ChatController.createPrivateChat);
 router.post("/group", authenticate, ChatController.createGroupChat);
 router.get("/conversations", authenticate, ChatController.getMyConversations);

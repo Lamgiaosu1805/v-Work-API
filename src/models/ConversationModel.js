@@ -36,6 +36,12 @@ const ConversationModel = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "user_info",
     },
+    deletedFor: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user_info",
+      },
+    ],
 
     ...BaseSchema.obj,
   },

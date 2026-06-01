@@ -41,7 +41,12 @@ router.delete(
 router.delete(
   "/conversations/:conversationId/messages/:messageId",
   authenticate,
-  ChatController.deleteMessage,
+  ChatController.recallMessage,
+);
+router.delete(
+  "/conversations/:conversationId/messages/:messageId/self",
+  authenticate,
+  ChatController.deleteMessageForSelf,
 );
 
 module.exports = router;

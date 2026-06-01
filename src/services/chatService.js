@@ -345,6 +345,7 @@ async function listConversations(userInfoId, search = "") {
   const conversations = await ConversationModel.find({
     members: userInfoId,
     isDeleted: false,
+    deletedFor: { $ne: userInfoId },
   })
     .populate("members", "full_name avatar ma_nv id_account")
     .populate("admins", "full_name avatar ma_nv id_account")
@@ -407,6 +408,8 @@ async function getConversationMessages({
 
   const filter = {
     conversationId,
+    isDeleted: false,
+    deletedFor: { $ne: userInfoId },
   };
 
   const total = await MessageModel.countDocuments(filter);
@@ -465,6 +468,7 @@ async function sendMessage({
       $set: {
         lastMessage: message._id,
         updatedAt: new Date(),
+        deletedFor: [],
       },
     },
     { session },
@@ -502,133 +506,77 @@ async function markConversationSeen({ conversationId, userInfoId }) {
 }
 
 async function deleteConversation({ conversationId, userInfoId }) {
-  const session = await mongoose.startSession();
+  const conversation = await ConversationModel.findOne({
+    _id: conversationId,
+    members: userInfoId,
+    isDeleted: false,
+  });
 
-  try {
-    session.startTransaction();
-
-    const conversation = await ConversationModel.findOne({
-      _id: conversationId,
-      members: userInfoId,
-      isDeleted: false,
-    }).session(session);
-
-    if (!conversation) {
-      throw new ChatError(
-        "Conversation không tồn tại hoặc bạn không có quyền truy cập",
-        404,
-      );
-    }
-
-    await ConversationModel.updateOne(
-      { _id: conversationId, isDeleted: false },
-      {
-        $set: {
-          isDeleted: true,
-          updatedAt: new Date(),
-        },
-      },
-      { session },
+  if (!conversation) {
+    throw new ChatError(
+      "Conversation không tồn tại hoặc bạn không có quyền truy cập",
+      404,
     );
-
-    await MessageModel.updateMany(
-      {
-        conversationId,
-        isDeleted: false,
-      },
-      {
-        $set: {
-          isDeleted: true,
-          updatedAt: new Date(),
-        },
-      },
-      { session },
-    );
-
-    await session.commitTransaction();
-
-    return {
-      conversationId: String(conversationId),
-    };
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
-  } finally {
-    session.endSession();
   }
+
+  await ConversationModel.updateOne(
+    { _id: conversationId },
+    { $addToSet: { deletedFor: userInfoId } },
+  );
+
+  return { conversationId: String(conversationId) };
 }
 
-async function deleteMessage({ conversationId, messageId, userInfoId }) {
-  const session = await mongoose.startSession();
+async function recallMessage({ conversationId, messageId, userInfoId }) {
+  await ensureConversationAccess(conversationId, userInfoId);
 
-  try {
-    session.startTransaction();
+  const message = await MessageModel.findOne({
+    _id: messageId,
+    conversationId,
+    isDeleted: false,
+    "recalled.at": null,
+  });
 
-    const conversation = await ConversationModel.findOne({
-      _id: conversationId,
-      members: userInfoId,
-      isDeleted: false,
-    }).session(session);
-
-    if (!conversation) {
-      throw new ChatError(
-        "Conversation không tồn tại hoặc bạn không có quyền truy cập",
-        404,
-      );
-    }
-
-    const message = await MessageModel.findOne({
-      _id: messageId,
-      conversationId,
-      isDeleted: false,
-    }).session(session);
-
-    if (!message) {
-      throw new ChatError("Tin nhắn không tồn tại", 404);
-    }
-
-    if (String(message.senderId) !== String(userInfoId)) {
-      throw new ChatError("Bạn không có quyền thu hồi tin nhắn này", 403);
-    }
-
-    const millisecondsSinceSent =
-      Date.now() - new Date(message.createdAt).getTime();
-    if (millisecondsSinceSent > 60 * 60 * 1000) {
-      throw new ChatError(
-        "Chỉ được thu hồi tin nhắn trong vòng 1 giờ kể từ khi gửi",
-        400,
-      );
-    }
-
-    message.isDeleted = true;
-    await message.save({ session });
-
-    if (String(conversation.lastMessage || "") === String(message._id)) {
-      const latestVisibleMessage = await MessageModel.findOne({
-        conversationId,
-        isDeleted: false,
-      })
-        .sort({ createdAt: -1 })
-        .session(session);
-
-      conversation.lastMessage = latestVisibleMessage?._id || null;
-    }
-
-    conversation.updatedAt = new Date();
-    await conversation.save({ session });
-
-    await session.commitTransaction();
-
-    return {
-      conversationId: String(conversationId),
-      messageId: String(messageId),
-    };
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
-  } finally {
-    session.endSession();
+  if (!message) {
+    throw new ChatError("Tin nhắn không tồn tại hoặc đã bị thu hồi", 404);
   }
+
+  if (String(message.senderId) !== String(userInfoId)) {
+    throw new ChatError("Bạn không có quyền thu hồi tin nhắn này", 403);
+  }
+
+  const recalled = await MessageModel.findByIdAndUpdate(
+    messageId,
+    { $set: { recalled: { at: new Date(), by: userInfoId }, content: "" } },
+    { new: true },
+  ).populate("senderId", "full_name avatar ma_nv id_account");
+
+  return recalled;
+}
+
+async function deleteMessageForSelf({ conversationId, messageId, userInfoId }) {
+  await ensureConversationAccess(conversationId, userInfoId);
+
+  const message = await MessageModel.findOne({
+    _id: messageId,
+    conversationId,
+    isDeleted: false,
+    deletedFor: { $ne: userInfoId },
+  });
+
+  if (!message) {
+    throw new ChatError("Tin nhắn không tồn tại", 404);
+  }
+
+  await MessageModel.updateOne(
+    { _id: messageId },
+    { $addToSet: { deletedFor: userInfoId } },
+  );
+
+  return {
+    conversationId: String(conversationId),
+    messageId: String(messageId),
+  };
 }
 
 module.exports = {
@@ -642,7 +590,8 @@ module.exports = {
   sendMessage,
   markConversationSeen,
   deleteConversation,
-  deleteMessage,
+  recallMessage,
+  deleteMessageForSelf,
   updateGroupConversationName,
   ensureConversationAccess,
   createMessageDocument,

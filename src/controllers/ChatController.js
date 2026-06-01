@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 const { sendChatMessageNotification } = require("../helpers/chatNotification");
+const UserInfoModel = require("../models/UserInfoModel");
+
 const {
   ChatError,
   getCurrentUserInfo,
@@ -328,6 +330,33 @@ const ChatController = {
         message: "Xoá conversation thành công",
         data: result,
       });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  searchUsers: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const search = (req.query.search ?? "").trim();
+      const limit = Math.min(20, Math.max(1, parseInt(req.query.limit, 10) || 10));
+
+      const filter = {
+        _id: { $ne: currentUserInfo._id },
+        ...(search && {
+          $or: [
+            { full_name: { $regex: search, $options: "i" } },
+            { ma_nv: { $regex: search, $options: "i" } },
+          ],
+        }),
+      };
+
+      const users = await UserInfoModel.find(filter)
+        .select("_id full_name ma_nv avatar")
+        .limit(limit)
+        .lean();
+
+      return res.status(200).json({ message: "Tìm kiếm thành công", data: users });
     } catch (error) {
       return handleChatError(res, error);
     }

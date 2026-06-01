@@ -14,7 +14,8 @@ const {
   markConversationSeen,
   getConversationDetail,
   deleteConversation,
-  deleteMessage,
+  recallMessage,
+  deleteMessageForSelf,
 } = require("../services/chatService");
 
 function handleChatError(res, error) {
@@ -300,11 +301,6 @@ const ChatController = {
   deleteConversation: async (req, res) => {
     try {
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
-      const conversation = await getConversationDetail({
-        conversationId: req.params.conversationId,
-        userInfoId: currentUserInfo._id,
-      });
-
       const result = await deleteConversation({
         conversationId: req.params.conversationId,
         userInfoId: currentUserInfo._id,
@@ -312,16 +308,8 @@ const ChatController = {
 
       const io = req.app.get("io");
       if (io) {
-        // Báo cho client đang mở phòng chat.
-        io.to(`conversation:${String(req.params.conversationId)}`).emit(
-          "conversation:deleted",
-          {
-            conversationId: String(req.params.conversationId),
-          },
-        );
-
-        // Báo theo user room để mọi thiết bị đều cập nhật danh sách conversation.
-        emitConversationEvent(io, "conversation:deleted", conversation, {
+        // Chỉ emit cho chính user này — người khác vẫn giữ nguyên conversation.
+        io.to(`user:${String(currentUserInfo._id)}`).emit("conversation:deleted", {
           conversationId: String(req.params.conversationId),
         });
       }
@@ -362,10 +350,10 @@ const ChatController = {
     }
   },
 
-  deleteMessage: async (req, res) => {
+  recallMessage: async (req, res) => {
     try {
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
-      const result = await deleteMessage({
+      const message = await recallMessage({
         conversationId: req.params.conversationId,
         messageId: req.params.messageId,
         userInfoId: currentUserInfo._id,
@@ -373,22 +361,49 @@ const ChatController = {
 
       const io = req.app.get("io");
       if (io) {
-        // Báo cho room conversation để UI ẩn/đánh dấu message vừa bị xoá mềm.
+        // Broadcast cho toàn room để mọi người thấy placeholder "Tin nhắn đã bị thu hồi".
         io.to(`conversation:${String(req.params.conversationId)}`).emit(
-          "message:deleted",
+          "message:recalled",
           {
             conversationId: String(req.params.conversationId),
-            messageId: String(req.params.messageId),
+            message,
           },
         );
 
-        // Đồng bộ sidebar/inbox khi lastMessage thay đổi sau khi xoá.
+        // Đồng bộ sidebar để lastMessage hiển thị placeholder.
         const conversation = await getConversationDetail({
           conversationId: req.params.conversationId,
           userInfoId: currentUserInfo._id,
         });
         emitConversationEvent(io, "conversation:upserted", conversation, {
           conversation,
+        });
+      }
+
+      return res.status(200).json({
+        message: "Thu hồi tin nhắn thành công",
+        data: message,
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  deleteMessageForSelf: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const result = await deleteMessageForSelf({
+        conversationId: req.params.conversationId,
+        messageId: req.params.messageId,
+        userInfoId: currentUserInfo._id,
+      });
+
+      const io = req.app.get("io");
+      if (io) {
+        // Chỉ emit cho các thiết bị của chính user này để đồng bộ đa thiết bị.
+        io.to(`user:${String(currentUserInfo._id)}`).emit("message:deleted_for_self", {
+          conversationId: String(req.params.conversationId),
+          messageId: String(req.params.messageId),
         });
       }
 

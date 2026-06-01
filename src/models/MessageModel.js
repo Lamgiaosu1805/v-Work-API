@@ -28,6 +28,16 @@ const MessageModel = new mongoose.Schema(
         ref: "user_info",
       },
     ],
+    recalled: {
+      at: { type: Date, default: null },
+      by: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
+    },
+    deletedFor: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user_info",
+      },
+    ],
     ...BaseSchema.obj,
   },
   {
@@ -36,5 +46,8 @@ const MessageModel = new mongoose.Schema(
     toObject: BaseSchema.options.toObject,
   },
 );
+
+MessageModel.index({ conversationId: 1, createdAt: -1 });
+MessageModel.index({ conversationId: 1, deletedFor: 1 });
 
 module.exports = mongoose.model("message", MessageModel);

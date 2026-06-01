@@ -5,11 +5,14 @@ const {
   getCurrentUserInfo,
   createPrivateConversation,
   createGroupConversation,
+  updateGroupConversationName,
   listConversations,
   getConversationMessages,
   sendMessage,
   markConversationSeen,
   getConversationDetail,
+  deleteConversation,
+  deleteMessage,
 } = require("../services/chatService");
 
 function handleChatError(res, error) {
@@ -119,11 +122,39 @@ const ChatController = {
     }
   },
 
+  updateGroupConversationName: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const conversation = await updateGroupConversationName({
+        conversationId: req.params.conversationId,
+        userInfoId: currentUserInfo._id,
+        name: req.body.name,
+      });
+
+      const io = req.app.get("io");
+      if (io) {
+        emitConversationEvent(io, "conversation:upserted", conversation, {
+          conversation,
+        });
+      }
+
+      return res.status(200).json({
+        message: "Cập nhật tên nhóm thành công",
+        data: conversation,
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
   getMyConversations: async (req, res) => {
     try {
       // Trả về danh sách conversation của riêng user hiện tại.
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
-      const conversations = await listConversations(currentUserInfo._id);
+      const conversations = await listConversations(
+        currentUserInfo._id,
+        req.query.search,
+      );
 
       return res.status(200).json({
         message: "Lấy danh sách conversation thành công",
@@ -217,6 +248,7 @@ const ChatController = {
       }
 
       await sendChatMessageNotification({
+        io,
         conversationId: message.conversationId,
         senderUserInfoId: currentUserInfo._id,
         senderName: currentUserInfo.full_name,
@@ -256,6 +288,83 @@ const ChatController = {
 
       return res.status(200).json({
         message: "Đánh dấu đã đọc thành công",
+        data: result,
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  deleteConversation: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const conversation = await getConversationDetail({
+        conversationId: req.params.conversationId,
+        userInfoId: currentUserInfo._id,
+      });
+
+      const result = await deleteConversation({
+        conversationId: req.params.conversationId,
+        userInfoId: currentUserInfo._id,
+      });
+
+      const io = req.app.get("io");
+      if (io) {
+        // Báo cho client đang mở phòng chat.
+        io.to(`conversation:${String(req.params.conversationId)}`).emit(
+          "conversation:deleted",
+          {
+            conversationId: String(req.params.conversationId),
+          },
+        );
+
+        // Báo theo user room để mọi thiết bị đều cập nhật danh sách conversation.
+        emitConversationEvent(io, "conversation:deleted", conversation, {
+          conversationId: String(req.params.conversationId),
+        });
+      }
+
+      return res.status(200).json({
+        message: "Xoá conversation thành công",
+        data: result,
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  deleteMessage: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const result = await deleteMessage({
+        conversationId: req.params.conversationId,
+        messageId: req.params.messageId,
+        userInfoId: currentUserInfo._id,
+      });
+
+      const io = req.app.get("io");
+      if (io) {
+        // Báo cho room conversation để UI ẩn/đánh dấu message vừa bị xoá mềm.
+        io.to(`conversation:${String(req.params.conversationId)}`).emit(
+          "message:deleted",
+          {
+            conversationId: String(req.params.conversationId),
+            messageId: String(req.params.messageId),
+          },
+        );
+
+        // Đồng bộ sidebar/inbox khi lastMessage thay đổi sau khi xoá.
+        const conversation = await getConversationDetail({
+          conversationId: req.params.conversationId,
+          userInfoId: currentUserInfo._id,
+        });
+        emitConversationEvent(io, "conversation:upserted", conversation, {
+          conversation,
+        });
+      }
+
+      return res.status(200).json({
+        message: "Xoá tin nhắn thành công",
         data: result,
       });
     } catch (error) {

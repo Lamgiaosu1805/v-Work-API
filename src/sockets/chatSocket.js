@@ -8,6 +8,8 @@ const {
   getConversationDetail,
   sendMessage,
   markConversationSeen,
+  deleteConversation,
+  deleteMessage,
 } = require("../services/chatService");
 
 async function resolveSocketUser(socket) {
@@ -147,6 +149,7 @@ module.exports = function setupChatSocket(io) {
 
         // Push notification là lớp bổ sung cho user offline hoặc đang ở tab khác.
         await sendChatMessageNotification({
+          io,
           conversationId: payload.conversationId,
           senderUserInfoId: socket.data.userInfoId,
           senderName: socket.data.userInfo?.full_name,
@@ -187,6 +190,96 @@ module.exports = function setupChatSocket(io) {
           {
             conversationId: String(payload.conversationId),
             userInfoId: String(socket.data.userInfoId),
+          },
+        );
+
+        ack(callback, { ok: true, data: result });
+      } catch (error) {
+        ack(callback, { ok: false, message: error.message });
+      }
+    });
+
+    socket.on("chat:deleteConversation", async (payload = {}, callback) => {
+      try {
+        if (!socket.data.userInfoId) {
+          throw new ChatError("Bạn chưa xác thực socket", 401);
+        }
+
+        const conversationId = payload?.conversationId;
+        if (!conversationId) {
+          throw new ChatError("Thiếu conversationId", 400);
+        }
+
+        const conversation = await getConversationDetail({
+          conversationId,
+          userInfoId: socket.data.userInfoId,
+        });
+
+        const result = await deleteConversation({
+          conversationId,
+          userInfoId: socket.data.userInfoId,
+        });
+
+        io.to(`conversation:${String(conversationId)}`).emit(
+          "conversation:deleted",
+          {
+            conversationId: String(conversationId),
+          },
+        );
+
+        await emitConversationEventToMembers(
+          io,
+          conversationId,
+          "conversation:deleted",
+          {
+            conversationId: String(conversationId),
+          },
+        );
+
+        ack(callback, { ok: true, data: result, conversation });
+      } catch (error) {
+        ack(callback, { ok: false, message: error.message });
+      }
+    });
+
+    socket.on("chat:deleteMessage", async (payload = {}, callback) => {
+      try {
+        if (!socket.data.userInfoId) {
+          throw new ChatError("Bạn chưa xác thực socket", 401);
+        }
+
+        const conversationId = payload?.conversationId;
+        const messageId = payload?.messageId;
+
+        if (!conversationId || !messageId) {
+          throw new ChatError("Thiếu conversationId hoặc messageId", 400);
+        }
+
+        const result = await deleteMessage({
+          conversationId,
+          messageId,
+          userInfoId: socket.data.userInfoId,
+        });
+
+        io.to(`conversation:${String(conversationId)}`).emit(
+          "message:deleted",
+          {
+            conversationId: String(conversationId),
+            messageId: String(messageId),
+          },
+        );
+
+        const conversation = await getConversationDetail({
+          conversationId,
+          userInfoId: socket.data.userInfoId,
+        });
+
+        await emitConversationEventToMembers(
+          io,
+          conversationId,
+          "conversation:upserted",
+          {
+            conversation,
           },
         );
 

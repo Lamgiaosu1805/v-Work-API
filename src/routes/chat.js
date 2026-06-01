@@ -27,5 +27,20 @@ router.patch(
   authenticate,
   ChatController.markConversationSeen,
 );
+router.patch(
+  "/conversations/:conversationId/group-name",
+  authenticate,
+  ChatController.updateGroupConversationName,
+);
+router.delete(
+  "/conversations/:conversationId",
+  authenticate,
+  ChatController.deleteConversation,
+);
+router.delete(
+  "/conversations/:conversationId/messages/:messageId",
+  authenticate,
+  ChatController.deleteMessage,
+);
 
 module.exports = router;

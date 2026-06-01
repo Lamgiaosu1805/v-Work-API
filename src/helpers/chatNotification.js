@@ -21,6 +21,23 @@ function getConversationMembers(conversation) {
   return Array.isArray(conversation?.members) ? conversation.members : [];
 }
 
+function isUserInConversationRoom(io, conversationId, userInfoId) {
+  if (!io || !conversationId || !userInfoId) return false;
+
+  const roomName = `conversation:${String(conversationId)}`;
+  const room = io.sockets.adapter.rooms.get(roomName);
+  if (!room || room.size === 0) return false;
+
+  for (const socketId of room) {
+    const socket = io.sockets.sockets.get(socketId);
+    if (String(socket?.data?.userInfoId ?? "") === String(userInfoId)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function buildNotificationContent({ conversation, senderName, message }) {
   const isGroupChat = conversation?.type === "group";
   const conversationName = conversation?.display_name || conversation?.name;
@@ -35,6 +52,7 @@ function buildNotificationContent({ conversation, senderName, message }) {
 }
 
 async function sendChatMessageNotification({
+  io,
   conversationId,
   senderUserInfoId,
   senderName,
@@ -54,14 +72,21 @@ async function sendChatMessageNotification({
       }));
 
     const members = getConversationMembers(conversation);
-    const recipientAccounts = members
+    const recipientTargets = members
       .filter(
         (member) => resolveMemberId(member) !== normalizeId(senderUserInfoId),
       )
-      .map((member) => resolveAccountId(member))
-      .filter(Boolean);
+      .map((member) => ({
+        userInfoId: resolveMemberId(member),
+        accountId: resolveAccountId(member),
+      }))
+      .filter((target) => target.accountId);
 
-    if (!recipientAccounts.length) {
+    const notificationTargets = recipientTargets.filter(
+      (target) => !isUserInConversationRoom(io, conversationId, target.userInfoId),
+    );
+
+    if (!notificationTargets.length) {
       return {
         successCount: 0,
         failureCount: 0,
@@ -85,9 +110,9 @@ async function sendChatMessageNotification({
     };
 
     const results = await Promise.all(
-      recipientAccounts.map((accountId) =>
+      notificationTargets.map((target) =>
         pushNotification.sendToAccount({
-          account_id: accountId,
+          account_id: target.accountId,
           title,
           body,
           data,

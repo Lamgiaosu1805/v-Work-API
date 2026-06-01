@@ -15,6 +15,7 @@ const WorkScheduleModel = require("../models/WorkScheduleModel");
 const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
+const heicConvert = require("heic-convert");
 
 const uploadDir =
   process.env.NODE_ENV === "production"
@@ -413,11 +414,41 @@ const UserController = {
         department_id,
         from_date,
         to_date,
+        module, // lọc theo module_access (vd: "crm")
       } = req.query;
 
       const skip = (Number(page) - 1) * Number(limit);
 
       const filter = { isDeleted: false };
+
+      // Admin hoặc có module hrm → xem tất cả; còn lại chỉ xem phòng ban của mình
+      const isFullAccess =
+        req.account.role === "admin" || req.account.module_access?.includes("hrm");
+
+      if (!isFullAccess) {
+        const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });
+        if (!myInfo) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+
+        const myDeptIds = await UserDepartmentPositionModel.distinct("department", {
+          user: myInfo._id, isDeleted: false,
+        });
+        const deptUserIds = await UserDepartmentPositionModel.distinct("user", {
+          department: { $in: myDeptIds }, isDeleted: false,
+        });
+        filter._id = { $in: deptUserIds };
+      }
+
+      // Lọc theo module_access: tìm account có module đó rồi map sang user_info
+      if (module) {
+        const accountIds = await AccountModel.find({
+          $or: [
+            { role: "admin" },
+            { module_access: module },
+          ],
+          isDeleted: false,
+        }).distinct("_id");
+        filter.id_account = { $in: accountIds };
+      }
 
       if (employment_type) filter.employment_type = employment_type;
 
@@ -441,7 +472,14 @@ const UserController = {
           department: department_id,
           isDeleted: false,
         }).distinct("user");
-        filter._id = { $in: udpIds };
+
+        if (filter._id) {
+          // Giao với dept-scope đã có
+          const deptSet = new Set(udpIds.map(String));
+          filter._id.$in = filter._id.$in.filter((id) => deptSet.has(String(id)));
+        } else {
+          filter._id = { $in: udpIds };
+        }
       }
 
       const [users, total] = await Promise.all([
@@ -538,6 +576,28 @@ const UserController = {
       const user = await UserInfoModel.findOne({ _id: id, isDeleted: false });
       if (!user) {
         return res.status(404).json({ message: "Không tìm thấy user" });
+      }
+
+      // Nếu không phải admin/hrm, kiểm tra user được xem phải cùng phòng ban
+      const isFullAccess =
+        req.account.role === "admin" || req.account.module_access?.includes("hrm");
+
+      if (!isFullAccess) {
+        const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });
+        if (myInfo && myInfo._id.equals(user._id)) {
+          // Xem hồ sơ chính mình — luôn cho phép
+        } else {
+          const myDeptIds = await UserDepartmentPositionModel.distinct("department", {
+            user: myInfo?._id, isDeleted: false,
+          });
+          const targetDeptIds = await UserDepartmentPositionModel.distinct("department", {
+            user: user._id, isDeleted: false,
+          });
+          const sameDept = myDeptIds.some((d) => targetDeptIds.some((t) => t.equals(d)));
+          if (!sameDept) {
+            return res.status(403).json({ message: "Bạn không có quyền xem hồ sơ nhân viên này" });
+          }
+        }
       }
 
       const [userDepartments, userDocuments, laborContracts, workSchedules] = await Promise.all([
@@ -790,24 +850,103 @@ const UserController = {
         return res.status(400).json({ message: "Không có file được upload" });
       }
 
-      // Xóa avatar cũ nếu có
       if (userInfo.avatar) {
         const oldPath = path.join(uploadDir, userInfo.avatar);
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
-        }
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
       }
 
-      // Lưu tên file mới vào DB
-      const fileName = req.file.filename ?? req.file.originalname;
+      let fileName = req.file.filename ?? req.file.originalname;
+      if (/\.(heic|heif)$/i.test(fileName)) {
+        const srcPath = path.join(uploadDir, fileName);
+        const inputBuffer = fs.readFileSync(srcPath);
+        const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 0.9 });
+        const jpegName = fileName.replace(/\.(heic|heif)$/i, ".jpg");
+        fs.writeFileSync(path.join(uploadDir, jpegName), Buffer.from(outputBuffer));
+        fs.unlinkSync(srcPath);
+        fileName = jpegName;
+      }
       await UserInfoModel.findByIdAndUpdate(userInfo._id, { avatar: fileName });
 
-      return res.status(200).json({
-        message: "Upload avatar thành công",
-        avatar: fileName,
-      });
+      return res.status(200).json({ message: "Upload avatar thành công", avatar: fileName });
     } catch (error) {
       console.error("Error in uploadAvatar:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
+  uploadCoverPhoto: async (req, res) => {
+    try {
+      const accountId = req.account._id;
+
+      const userInfo = await UserInfoModel.findOne({ id_account: accountId });
+      if (!userInfo) return res.status(404).json({ message: "User not found" });
+      if (!req.file) return res.status(400).json({ message: "Không có file được upload" });
+
+      if (userInfo.cover_photo) {
+        const oldPath = path.join(uploadDir, userInfo.cover_photo);
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      }
+
+      let fileName = req.file.filename ?? req.file.originalname;
+      if (/\.(heic|heif)$/i.test(fileName)) {
+        const srcPath = path.join(uploadDir, fileName);
+        const inputBuffer = fs.readFileSync(srcPath);
+        const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 0.9 });
+        const jpegName = fileName.replace(/\.(heic|heif)$/i, ".jpg");
+        fs.writeFileSync(path.join(uploadDir, jpegName), Buffer.from(outputBuffer));
+        fs.unlinkSync(srcPath);
+        fileName = jpegName;
+      }
+      await UserInfoModel.findByIdAndUpdate(userInfo._id, { cover_photo: fileName });
+
+      return res.status(200).json({ message: "Upload ảnh bìa thành công", cover_photo: fileName });
+    } catch (error) {
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
+  // GET /user/profile/:accountId  — trang cá nhân (không cần quyền HRM)
+  getProfile: async (req, res) => {
+    try {
+      const { accountId } = req.params;
+      const targetId = accountId === "me" ? req.account._id : accountId;
+
+      if (!mongoose.Types.ObjectId.isValid(targetId)) {
+        return res.status(400).json({ message: "ID không hợp lệ" });
+      }
+
+      const userInfo = await UserInfoModel.findOne({ id_account: targetId, isDeleted: false });
+      if (!userInfo) return res.status(404).json({ message: "Không tìm thấy người dùng" });
+
+      const departments = await UserDepartmentPositionModel.find({ user: userInfo._id })
+        .populate("department", "department_name department_code")
+        .populate("position", "position_name")
+        .lean();
+
+      const isSelf = String(req.account._id) === String(targetId);
+
+      return res.status(200).json({
+        account_id: targetId,
+        full_name: userInfo.full_name,
+        ma_nv: userInfo.ma_nv,
+        avatar: userInfo.avatar ?? null,
+        cover_photo: userInfo.cover_photo ?? null,
+        employment_type: userInfo.employment_type,
+        sex: userInfo.sex,
+        date_of_birth: userInfo.date_of_birth ?? null,
+        // Thông tin nhạy cảm chỉ trả cho chính mình
+        ...(isSelf && {
+          phone_number: userInfo.phone_number,
+          address: userInfo.address,
+        }),
+        departments: departments.map((d) => ({
+          department_name: d.department?.department_name ?? null,
+          department_code: d.department?.department_code ?? null,
+          position_name: d.position?.position_name ?? null,
+        })),
+        createdAt: userInfo.createdAt,
+      });
+    } catch (error) {
       return res.status(500).json({ message: "Internal server error", error: error.message });
     }
   },

@@ -45,22 +45,31 @@ const DocumentController = {
                     return res.status(400).json({ message: "Thiếu tham số filename" });
                 }
 
-                const filePath = path.join(process.env.UPLOAD_DIR_PROD, filename);
+                let filePath = path.join(process.env.UPLOAD_DIR_PROD, filename);
 
                 if (!fs.existsSync(filePath)) {
-                    return res.status(404).json({ message: "Không tìm thấy file trên server" });
+                    // Fallback: bài viết cũ lưu tên không có tiền tố feed/
+                    const fallback = path.join(process.env.UPLOAD_DIR_PROD, 'feed', path.basename(filename));
+                    if (fs.existsSync(fallback)) {
+                        filePath = fallback;
+                    } else {
+                        return res.status(404).json({ message: "Không tìm thấy file trên server" });
+                    }
                 }
 
-                // Xác định loại file (image, pdf, ...)
-                const ext = path.extname(filename).toLowerCase();
-                let contentType = "application/octet-stream";
-
-                if (ext === ".pdf") contentType = "application/pdf";
-                else if ([".jpg", ".jpeg"].includes(ext)) contentType = "image/jpeg";
-                else if (ext === ".png") contentType = "image/png";
+                const ext = path.extname(filePath).toLowerCase();
+                const contentTypeMap = {
+                    ".pdf":  "application/pdf",
+                    ".jpg":  "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".png":  "image/png",
+                    ".webp": "image/webp",
+                    ".gif":  "image/gif",
+                };
+                const contentType = contentTypeMap[ext] ?? "application/octet-stream";
 
                 res.setHeader("Content-Type", contentType);
-                res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+                res.setHeader("Content-Disposition", `inline; filename="${path.basename(filePath)}"`);
 
                 return res.sendFile(filePath);
             } else {

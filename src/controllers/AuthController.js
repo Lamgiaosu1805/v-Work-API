@@ -309,6 +309,12 @@ const AuthController = {
 
             await account.save();
 
+            // Invalidate auth cache để quyền mới có hiệu lực ngay
+            try {
+                const redis = require('../config/redis');
+                await redis.del(`auth:account:${accountId}`);
+            } catch { /* ignore */ }
+
             return res.status(200).json({
                 message: "Cập nhật quyền thành công",
                 data: {

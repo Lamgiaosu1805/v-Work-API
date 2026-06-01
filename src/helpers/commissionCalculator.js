@@ -26,7 +26,6 @@ function calculateCommission({ amount, term_months, tncn_rate }) {
 
 function createCifCommission(sale_id, granted_by = null) {
     return {
-        status: "pending",
         amount: CIF_COMMISSION_AMOUNT,
         sale_id,
         granted_by,
@@ -36,7 +35,6 @@ function createCifCommission(sale_id, granted_by = null) {
 
 function createEkycCommission(sale_id, granted_by = null) {
     return {
-        status: "pending",
         amount: EKYC_COMMISSION_AMOUNT,
         sale_id,
         granted_by,

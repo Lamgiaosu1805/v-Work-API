@@ -4,6 +4,7 @@ const CustomerInteractionModel = require("../models/CustomerInteractionModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AppModel = require("../models/AppModel");
 const AgentModel = require("../models/AgentModel");
+const InvestmentModel = require("../models/InvestmentModel");
 const { createCifCommission, createEkycCommission } = require("../helpers/commissionCalculator");
 const { computeClaimWindow } = require("../helpers/claimWindowHelper");
 
@@ -249,16 +250,16 @@ const CustomerController = {
                 updateData.source_type = "sale";
                 updateData.referred_at = now;
                 // HH CIF: sale được gán lần đầu
-                if (existingCustomer.cif_commission?.status !== "pending") {
+                if (!existingCustomer.cif_commission?.sale_id) {
                     updateData.cif_commission = createCifCommission(referred_by);
                 }
                 // Nếu cùng lúc eKYC → HH eKYC luôn
-                if (isFirstEkyc && existingCustomer.ekyc_commission?.status !== "pending") {
+                if (isFirstEkyc && !existingCustomer.ekyc_commission?.sale_id) {
                     updateData.ekyc_commission = createEkycCommission(referred_by);
                 }
             } else if (isFirstEkyc && existingCustomer.referred_by && existingCustomer.referred_at) {
                 // eKYC lần đầu, đã có sale từ trước → HH eKYC tự động
-                if (existingCustomer.ekyc_commission?.status !== "pending") {
+                if (!existingCustomer.ekyc_commission?.sale_id) {
                     updateData.ekyc_commission = createEkycCommission(existingCustomer.referred_by);
                 }
             }
@@ -702,7 +703,7 @@ const CustomerController = {
             // Gán referred_at và HH CIF khi sale nhập mã muộn
             if (referred_by) {
                 applyUpdate.referred_at = new Date();
-                if (customer.cif_commission?.status !== "pending") {
+                if (!customer.cif_commission?.sale_id) {
                     applyUpdate.cif_commission = createCifCommission(referred_by);
                 }
                 // Không tự grant eKYC HH — nếu khách đã eKYC trước khi nhập mã
@@ -928,8 +929,6 @@ const CustomerController = {
             const {
                 sale_user_info_id,
                 reason,
-                include_cif_hh = false,
-                include_ekyc_hh = false,
             } = req.body;
             const accountId = req.account._id;
 
@@ -972,13 +971,9 @@ const CustomerController = {
                 ref_code: `${newSale.phone_number}-${newSale.ma_nv}`,
                 // Giữ nguyên referred_at gốc nếu đã có, nếu chưa thì set mới
                 ...(customer.referred_at ? {} : { referred_at: new Date() }),
-                // Hoa hồng: reset theo lựa chọn của admin
-                cif_commission: include_cif_hh
-                    ? createCifCommission(newSale._id, accountId)
-                    : { status: "none", amount: 0, sale_id: null, granted_by: null, granted_at: null },
-                ekyc_commission: include_ekyc_hh && !isEkycDone
-                    ? createEkycCommission(newSale._id, accountId)
-                    : { status: "none", amount: 0, sale_id: null, granted_by: null, granted_at: null },
+                // Giữ nguyên cif_commission và ekyc_commission — HH sale cũ đã nhận vẫn thuộc về họ
+                // Sale mới chỉ nhận HH cho hành động mới: eKYC HH (nếu KH chưa eKYC) sẽ auto-trigger sau,
+                // investment HH cho gói đầu tư mới sẽ tự dùng referred_by mới
             };
 
             await CustomerModel.findByIdAndUpdate(
@@ -1000,8 +995,6 @@ const CustomerController = {
                     to_sale_id: newSale._id,
                     reason,
                     assigned_by: accountId,
-                    cif_hh_granted: include_cif_hh,
-                    ekyc_hh_granted: include_ekyc_hh && !isEkycDone,
                 },
             }], { session });
 
@@ -1018,14 +1011,72 @@ const CustomerController = {
                         ma_nv: newSale.ma_nv,
                         full_name: newSale.full_name,
                     },
-                    cif_hh_granted: include_cif_hh,
-                    ekyc_hh_granted: include_ekyc_hh && !isEkycDone,
                 },
             });
         } catch (error) {
             await session.abortTransaction();
             session.endSession();
             console.error("Error in reassignCustomer:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
+
+    // PATCH /customer/:id/unassign-sale — Admin xóa phân công sale (nhận nhầm)
+    unassignSale: async (req, res) => {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        try {
+            const { id: customer_id } = req.params;
+            const { reason } = req.body;
+            const accountId = req.account._id;
+
+            const customer = await CustomerModel.findOne({ _id: customer_id, isDeleted: false }).session(session);
+            if (!customer) {
+                await session.abortTransaction(); session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            }
+            if (!customer.referred_by) {
+                await session.abortTransaction(); session.endSession();
+                return res.status(400).json({ message: "Khách hàng này chưa được gán sale" });
+            }
+
+            const oldSaleId = customer.referred_by;
+            const oldSale = await UserInfoModel.findById(oldSaleId).select("full_name ma_nv").session(session);
+
+            const resetData = {
+                referred_by: null,
+                source_type: "marketing",
+                ref_code: null,
+                referred_at: null,
+            };
+            if (customer.cif_commission?.sale_id?.toString() === oldSaleId.toString()) resetData.cif_commission = null;
+            if (customer.ekyc_commission?.sale_id?.toString() === oldSaleId.toString()) resetData.ekyc_commission = null;
+
+            await CustomerModel.findByIdAndUpdate(customer._id, { $set: resetData }, { session });
+
+            await InvestmentModel.updateMany(
+                { customer_id: customer._id, "commission.sale_id": oldSaleId, isDeleted: false },
+                { $set: { "commission.sale_id": null, "commission.receiver_type": null, "commission.status": "none", "commission.gross_amount": 0, "commission.tncn_amount": 0, "commission.net_amount": 0 } },
+                { session }
+            );
+
+            const saleName = oldSale ? `${oldSale.full_name} (${oldSale.ma_nv})` : String(oldSaleId);
+            await CustomerInteractionModel.create([{
+                app_id: customer.app_id,
+                customer_id: customer._id,
+                sale_id: oldSaleId,
+                agent_id: null,
+                type: "note",
+                content: `Admin xóa phân công sale ${saleName} — khách trở về trạng thái chưa được nhận${reason?.trim() ? ` (lý do: ${reason.trim()})` : ""}`,
+                result: null,
+                metadata: { removed_by: accountId, removed_sale_id: oldSaleId, reason: reason?.trim() || null },
+            }], { session });
+
+            await session.commitTransaction(); session.endSession();
+            return res.status(200).json({ message: "Đã xóa phân công sale. Khách hàng trở về trạng thái chưa được nhận." });
+        } catch (error) {
+            await session.abortTransaction(); session.endSession();
+            console.error("Error in unassignSale:", error);
             return res.status(500).json({ message: "Internal server error", error: error.message });
         }
     },
@@ -1038,9 +1089,7 @@ const CustomerController = {
             const { id: customer_id } = req.params;
             const {
                 sale_user_info_id,
-                include_cif_hh = false,
-                include_ekyc_hh = false,
-                confirm_sale_source = false, // true = KH do sale giới thiệu → source_type "sale"; false = giữ "marketing"
+                confirm_sale_source = false,
             } = req.body;
             const accountId = req.account._id;
 
@@ -1082,14 +1131,6 @@ const CustomerController = {
                 referred_at: new Date(),
             };
 
-            if (include_cif_hh && customer.cif_commission?.status !== "pending") {
-                updateData.cif_commission = createCifCommission(sale._id, accountId);
-            }
-
-            if (include_ekyc_hh && customer.ekyc_commission?.status !== "pending") {
-                updateData.ekyc_commission = createEkycCommission(sale._id, accountId);
-            }
-
             await CustomerModel.findByIdAndUpdate(
                 customer._id,
                 { $set: updateData },
@@ -1109,8 +1150,6 @@ const CustomerController = {
                 metadata: {
                     assigned_by: accountId,
                     confirm_sale_source,
-                    include_cif_hh,
-                    include_ekyc_hh,
                 },
             }], { session });
 
@@ -1126,8 +1165,6 @@ const CustomerController = {
                         ma_nv: sale.ma_nv,
                         full_name: sale.full_name,
                     },
-                    cif_hh_granted: include_cif_hh && customer.cif_commission?.status !== "pending",
-                    ekyc_hh_granted: include_ekyc_hh && customer.ekyc_commission?.status !== "pending",
                 },
             });
         } catch (error) {

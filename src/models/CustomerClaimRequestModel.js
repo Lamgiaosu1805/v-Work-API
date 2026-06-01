@@ -9,9 +9,10 @@ const CustomerClaimRequestSchema = new mongoose.Schema(
         note: { type: String, default: null },
         status: {
             type: String,
-            enum: ["pending", "approved", "rejected"],
+            enum: ["pending", "approved", "rejected", "revoked"],
             default: "pending",
         },
+        revoke_reason: { type: String, default: null },
         resolved_by: { type: mongoose.Schema.Types.ObjectId, ref: "account", default: null },
         resolved_at: { type: Date, default: null },
         reject_reason: { type: String, default: null },

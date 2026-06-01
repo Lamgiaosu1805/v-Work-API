@@ -317,13 +317,44 @@ Các trường hợp **bắt buộc** dùng transaction:
 | `/laborContract` | laborContract.js | `isManager` | Hợp đồng lao động |
 | `/customer` | customer.js | `hasCrmAccess` | Khách hàng |
 | `/referral` | referral.js | — | Giới thiệu (internal) |
-| `/investments` | investment.js | `hasCrmAccess` | Đầu tư |
+| `/investments` | investment.js | `hasCrmAccess` | Đầu tư (upsert từ hệ thống ngoài + list cho sale/manager) |
 | `/claim-period` | claimPeriod.js | `hasCrmAccess` | Kỳ claim hoa hồng |
 | `/agents` | agent.js | `hasCrmAccess` | Đại lý |
 | `/app` | app.js | — | App config |
 | `/notification` | notification.js | `authenticate` | FCM device token |
 | `/internal-files` | internalFile.js | `authenticate` | Ổ file nội bộ theo phòng ban |
 | `/weekly-reports` | weeklyReport.js | `authenticate` | Báo cáo tuần |
+
+---
+
+## Investment API
+
+`GET /investments/list` — trả về danh sách khoản đầu tư, lọc server-side theo role:
+
+- **Sale** (`user`): chỉ thấy đầu tư có `commission.sale_id` trỏ về `UserInfo` của account đó.
+- **Manager / Admin**: thấy tất cả.
+
+Query params: `page`, `limit`, `status`, `date_from`, `date_to`, `q` (tìm theo SĐT / tên KH).
+
+Tìm kiếm theo `q` cần pre-query `CustomerModel` để lấy danh sách `_id` khớp rồi dùng `$in`.
+
+**InvestmentModel fields quan trọng:**
+
+| Field | Ghi chú |
+|---|---|
+| `product_name` | Tên sản phẩm đầu tư |
+| `amount` | Số tiền (Number) |
+| `term_type` | `"month"` hoặc `"week"` |
+| `term_value` | Giá trị kỳ hạn — khi `term_type="week"` đây là **số ngày** (không phải tuần) |
+| `interest_rate` | Lãi suất (%/năm) |
+| `invested_at` | Ngày đầu tư |
+| `maturity_at` | Ngày đáo hạn |
+| `status` | `active` / `matured` / `cancelled` / `renewed` / `early_terminated` |
+| `commission.sale_id` | Ref → `UserInfo._id` (không phải account._id) |
+| `commission.net_amount` | Hoa hồng net sau TNCN |
+| `commission.tncn_amount` | Thuế TNCN khấu trừ |
+| `commission.receiver_type` | `"sale"` / `"agent"` / `"marketing"` |
+| `customer_id` | Ref → `CustomerModel` |
 
 ---
 

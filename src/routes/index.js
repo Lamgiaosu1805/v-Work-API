@@ -1,3 +1,4 @@
+const postRouter = require('./post')
 const userRouter = require('./user')
 const documentRouter = require('./document')
 const authRouter = require('./auth')
@@ -16,10 +17,12 @@ const weeklyReportRouter = require('./weeklyReport')
 const branchRouter = require('./branch')
 const printRouter = require('./print')
 const customerClaimRequestRouter = require('./customerClaimRequest')
+const aiRouter = require('./ai')
 const requestRouter = require('./request')
 const holidayRouter = require('./holiday')
 
 const route = (app) => {
+    app.use(`/posts`, postRouter)
     app.use(`/user`, userRouter)
     app.use(`/document`, documentRouter)
     app.use(`/auth`, authRouter)
@@ -40,6 +43,7 @@ const route = (app) => {
     app.use(`/customer-claim-request`, customerClaimRequestRouter)
     app.use(`/requests`, requestRouter)
     app.use(`/holidays`, holidayRouter)
+    app.use(`/ai`, aiRouter)
 }
 
 module.exports = route;

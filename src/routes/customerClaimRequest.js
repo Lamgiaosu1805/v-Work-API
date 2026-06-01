@@ -16,4 +16,8 @@ router.get("/", authenticate, canManage("crm"), CustomerClaimRequestController.l
 router.patch("/:id/approve", authenticate, canManage("crm"), CustomerClaimRequestController.approve);
 router.patch("/:id/reject", authenticate, canManage("crm"), CustomerClaimRequestController.reject);
 
+// Admin hủy phân công (nhận nhầm) — chỉ admin
+const { isAdmin } = require('../middlewares/authMiddleware');
+router.patch("/:id/revoke", authenticate, isAdmin, CustomerClaimRequestController.revoke);
+
 module.exports = router;

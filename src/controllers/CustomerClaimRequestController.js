@@ -4,6 +4,7 @@ const CustomerClaimRequestModel = require("../models/CustomerClaimRequestModel")
 const CustomerInteractionModel = require("../models/CustomerInteractionModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AppModel = require("../models/AppModel");
+const InvestmentModel = require("../models/InvestmentModel");
 const { createCifCommission, createEkycCommission } = require("../helpers/commissionCalculator");
 
 const CustomerClaimRequestController = {
@@ -175,7 +176,6 @@ const CustomerClaimRequestController = {
         session.startTransaction();
         try {
             const { id } = req.params;
-            const { include_cif_hh = true, include_ekyc_hh = false } = req.body;
             const accountId = req.account._id;
 
             const claimReq = await CustomerClaimRequestModel.findOne({
@@ -229,16 +229,32 @@ const CustomerClaimRequestController = {
                 referred_at: new Date(),
             };
 
-            if (include_cif_hh && customer.cif_commission?.status !== "pending") {
+            // Auto-grant HH theo trạng thái KH tại thời điểm duyệt
+            const cifGranted = !customer.cif_commission?.sale_id;
+            const ekycGranted = isEkycDone && !customer.ekyc_commission?.sale_id;
+
+            if (cifGranted) {
                 updateData.cif_commission = createCifCommission(sale._id, accountId);
             }
-            if (include_ekyc_hh && !isEkycDone && customer.ekyc_commission?.status !== "pending") {
+            if (ekycGranted) {
                 updateData.ekyc_commission = createEkycCommission(sale._id, accountId);
             }
 
             await CustomerModel.findByIdAndUpdate(
                 customer._id,
                 { $set: updateData },
+                { session }
+            );
+
+            // Gán sale vào các gói đầu tư chưa có sale (KH đã đầu tư trước khi được nhận)
+            await InvestmentModel.updateMany(
+                {
+                    customer_id: customer._id,
+                    "commission.sale_id": null,
+                    status: { $ne: "cancelled" },
+                    isDeleted: false,
+                },
+                { $set: { "commission.sale_id": sale._id } },
                 { session }
             );
 
@@ -272,8 +288,8 @@ const CustomerClaimRequestController = {
                 metadata: {
                     claim_request_id: claimReq._id,
                     approved_by: accountId,
-                    include_cif_hh,
-                    include_ekyc_hh,
+                    cif_hh_granted: cifGranted,
+                    ekyc_hh_granted: ekycGranted,
                 },
             }], { session });
 
@@ -292,6 +308,109 @@ const CustomerClaimRequestController = {
             await session.abortTransaction();
             session.endSession();
             console.error("Error in approve claim request:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
+
+    // PATCH /customer-claim-request/:id/revoke — Admin hủy phân công (nhận nhầm)
+    revoke: async (req, res) => {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        try {
+            const { id } = req.params;
+            const { revoke_reason } = req.body;
+            const accountId = req.account._id;
+
+            const claimReq = await CustomerClaimRequestModel.findOne({
+                _id: id,
+                status: "approved",
+                isDeleted: false,
+            }).session(session);
+            if (!claimReq) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy yêu cầu đã duyệt" });
+            }
+
+            const customer = await CustomerModel.findOne({
+                _id: claimReq.customer_id,
+                isDeleted: false,
+            }).session(session);
+            if (!customer) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            }
+
+            const saleId = claimReq.sale_id;
+
+            // Reset thông tin phân công trên customer
+            const resetData = {
+                referred_by: null,
+                source_type: null,
+                ref_code: null,
+                referred_at: null,
+            };
+
+            // Xóa HH CIF/eKYC nếu được gán trong lần duyệt này
+            if (customer.cif_commission?.sale_id?.toString() === saleId.toString()) {
+                resetData.cif_commission = null;
+            }
+            if (customer.ekyc_commission?.sale_id?.toString() === saleId.toString()) {
+                resetData.ekyc_commission = null;
+            }
+
+            await CustomerModel.findByIdAndUpdate(
+                customer._id,
+                { $set: resetData },
+                { session }
+            );
+
+            // Reset commission.sale_id trên tất cả investment của khách thuộc sale này
+            await InvestmentModel.updateMany(
+                { customer_id: customer._id, "commission.sale_id": saleId, isDeleted: false },
+                {
+                    $set: {
+                        "commission.sale_id": null,
+                        "commission.receiver_type": null,
+                        "commission.status": "none",
+                        "commission.gross_amount": 0,
+                        "commission.tncn_amount": 0,
+                        "commission.net_amount": 0,
+                    },
+                },
+                { session }
+            );
+
+            // Đánh dấu claim request này thành revoked
+            await CustomerClaimRequestModel.findByIdAndUpdate(id, {
+                status: "revoked",
+                resolved_by: accountId,
+                resolved_at: new Date(),
+                revoke_reason: revoke_reason?.trim() || null,
+            }, { session });
+
+            await CustomerInteractionModel.create([{
+                app_id: customer.app_id,
+                customer_id: customer._id,
+                sale_id: saleId,
+                agent_id: null,
+                type: "note",
+                content: `Admin hủy phân công sale — khách trở về trạng thái chưa được nhận${revoke_reason ? ` (lý do: ${revoke_reason.trim()})` : ""}`,
+                result: null,
+                metadata: { revoked_by: accountId, claim_request_id: claimReq._id },
+            }], { session });
+
+            await session.commitTransaction();
+            session.endSession();
+
+            return res.status(200).json({
+                message: "Đã hủy phân công thành công. Khách hàng trở về trạng thái chưa được nhận.",
+            });
+        } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
+            console.error("Error in revoke claim request:", error);
             return res.status(500).json({ message: "Internal server error", error: error.message });
         }
     },

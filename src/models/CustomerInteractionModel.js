@@ -17,6 +17,7 @@ const CustomerInteractionModel = new mongoose.Schema(
                 "note",
                 "kyc_updated",
                 "status_changed",
+                "reassigned",
             ],
             required: true,
         },

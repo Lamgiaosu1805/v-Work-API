@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const ConversationModel = require("../models/ConversationModel");
 const MessageModel = require("../models/MessageModel");
 const UserInfoModel = require("../models/UserInfoModel");
@@ -90,6 +91,7 @@ async function loadConversationById(
     .populate("createdBy", "full_name avatar ma_nv id_account")
     .populate({
       path: "lastMessage",
+      match: { isDeleted: false },
       populate: {
         path: "senderId",
         select: "full_name avatar ma_nv id_account",
@@ -171,6 +173,7 @@ async function createPrivateConversation({
     .populate("members", "full_name avatar ma_nv id_account")
     .populate({
       path: "lastMessage",
+      match: { isDeleted: false },
       populate: {
         path: "senderId",
         select: "full_name avatar ma_nv id_account",
@@ -288,7 +291,56 @@ async function createGroupConversation({
   );
   return loadConversationById(conversation._id, creatorUserInfoId, session);
 }
-async function listConversations(userInfoId) {
+
+async function updateGroupConversationName({
+  conversationId,
+  userInfoId,
+  name,
+}) {
+  const groupName = String(name || "").trim();
+  if (!groupName) {
+    throw new ChatError("Thiếu name", 400);
+  }
+
+  const conversation = await ConversationModel.findOne({
+    _id: conversationId,
+    members: userInfoId,
+    type: "group",
+    isDeleted: false,
+  })
+    .populate("members", "full_name avatar ma_nv id_account")
+    .populate("admins", "full_name avatar ma_nv id_account")
+    .populate("createdBy", "full_name avatar ma_nv id_account")
+    .populate({
+      path: "lastMessage",
+      match: { isDeleted: false },
+      populate: {
+        path: "senderId",
+        select: "full_name avatar ma_nv id_account",
+      },
+    })
+    .lean();
+
+  if (!conversation) {
+    throw new ChatError(
+      "Conversation không tồn tại hoặc bạn không có quyền truy cập",
+      404,
+    );
+  }
+
+  await ConversationModel.updateOne(
+    { _id: conversationId },
+    {
+      $set: {
+        name: groupName,
+        updatedAt: new Date(),
+      },
+    },
+  );
+
+  return loadConversationById(conversationId, userInfoId);
+}
+async function listConversations(userInfoId, search = "") {
   // Lấy toàn bộ conversation mà user là member, sau đó format lại cho UI.
   const conversations = await ConversationModel.find({
     members: userInfoId,
@@ -299,6 +351,7 @@ async function listConversations(userInfoId) {
     .populate("createdBy", "full_name avatar ma_nv id_account")
     .populate({
       path: "lastMessage",
+      match: { isDeleted: false },
       populate: {
         path: "senderId",
         select: "full_name avatar ma_nv id_account",
@@ -307,9 +360,36 @@ async function listConversations(userInfoId) {
     .sort({ updatedAt: -1 })
     .lean();
 
-  return conversations.map((conversation) =>
+  const keyword = String(search || "")
+    .trim()
+    .toLowerCase();
+
+  const formattedConversations = conversations.map((conversation) =>
     formatConversation(conversation, userInfoId),
   );
+
+  if (!keyword) {
+    return formattedConversations;
+  }
+
+  return formattedConversations.filter((conversation) => {
+    const memberNames = (conversation.members || [])
+      .map((member) => String(member?.full_name || "").toLowerCase())
+      .join(" ");
+
+    const lastMessageContent = String(
+      conversation.lastMessage?.content || "",
+    ).toLowerCase();
+    const displayName = String(conversation.display_name || "").toLowerCase();
+    const groupName = String(conversation.name || "").toLowerCase();
+
+    return (
+      displayName.includes(keyword) ||
+      groupName.includes(keyword) ||
+      memberNames.includes(keyword) ||
+      lastMessageContent.includes(keyword)
+    );
+  });
 }
 
 async function getConversationDetail({ conversationId, userInfoId }) {
@@ -327,7 +407,6 @@ async function getConversationMessages({
 
   const filter = {
     conversationId,
-    isDeleted: false,
   };
 
   const total = await MessageModel.countDocuments(filter);
@@ -422,6 +501,136 @@ async function markConversationSeen({ conversationId, userInfoId }) {
   };
 }
 
+async function deleteConversation({ conversationId, userInfoId }) {
+  const session = await mongoose.startSession();
+
+  try {
+    session.startTransaction();
+
+    const conversation = await ConversationModel.findOne({
+      _id: conversationId,
+      members: userInfoId,
+      isDeleted: false,
+    }).session(session);
+
+    if (!conversation) {
+      throw new ChatError(
+        "Conversation không tồn tại hoặc bạn không có quyền truy cập",
+        404,
+      );
+    }
+
+    await ConversationModel.updateOne(
+      { _id: conversationId, isDeleted: false },
+      {
+        $set: {
+          isDeleted: true,
+          updatedAt: new Date(),
+        },
+      },
+      { session },
+    );
+
+    await MessageModel.updateMany(
+      {
+        conversationId,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+          updatedAt: new Date(),
+        },
+      },
+      { session },
+    );
+
+    await session.commitTransaction();
+
+    return {
+      conversationId: String(conversationId),
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
+}
+
+async function deleteMessage({ conversationId, messageId, userInfoId }) {
+  const session = await mongoose.startSession();
+
+  try {
+    session.startTransaction();
+
+    const conversation = await ConversationModel.findOne({
+      _id: conversationId,
+      members: userInfoId,
+      isDeleted: false,
+    }).session(session);
+
+    if (!conversation) {
+      throw new ChatError(
+        "Conversation không tồn tại hoặc bạn không có quyền truy cập",
+        404,
+      );
+    }
+
+    const message = await MessageModel.findOne({
+      _id: messageId,
+      conversationId,
+      isDeleted: false,
+    }).session(session);
+
+    if (!message) {
+      throw new ChatError("Tin nhắn không tồn tại", 404);
+    }
+
+    if (String(message.senderId) !== String(userInfoId)) {
+      throw new ChatError("Bạn không có quyền thu hồi tin nhắn này", 403);
+    }
+
+    const millisecondsSinceSent =
+      Date.now() - new Date(message.createdAt).getTime();
+    if (millisecondsSinceSent > 60 * 60 * 1000) {
+      throw new ChatError(
+        "Chỉ được thu hồi tin nhắn trong vòng 1 giờ kể từ khi gửi",
+        400,
+      );
+    }
+
+    message.isDeleted = true;
+    await message.save({ session });
+
+    if (String(conversation.lastMessage || "") === String(message._id)) {
+      const latestVisibleMessage = await MessageModel.findOne({
+        conversationId,
+        isDeleted: false,
+      })
+        .sort({ createdAt: -1 })
+        .session(session);
+
+      conversation.lastMessage = latestVisibleMessage?._id || null;
+    }
+
+    conversation.updatedAt = new Date();
+    await conversation.save({ session });
+
+    await session.commitTransaction();
+
+    return {
+      conversationId: String(conversationId),
+      messageId: String(messageId),
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
+}
+
 module.exports = {
   ChatError,
   getCurrentUserInfo,
@@ -432,6 +641,9 @@ module.exports = {
   getConversationMessages,
   sendMessage,
   markConversationSeen,
+  deleteConversation,
+  deleteMessage,
+  updateGroupConversationName,
   ensureConversationAccess,
   createMessageDocument,
   formatConversation,

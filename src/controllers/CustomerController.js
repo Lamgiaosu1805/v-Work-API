@@ -5,7 +5,7 @@ const UserInfoModel = require("../models/UserInfoModel");
 const AppModel = require("../models/AppModel");
 const AgentModel = require("../models/AgentModel");
 const InvestmentModel = require("../models/InvestmentModel");
-const { createCifCommission, createEkycCommission } = require("../helpers/commissionCalculator");
+const { createCifCommission, createEkycCommission, calculateCommission, getTNCNRate } = require("../helpers/commissionCalculator");
 const { computeClaimWindow } = require("../helpers/claimWindowHelper");
 
 const CustomerController = {
@@ -996,17 +996,41 @@ const CustomerController = {
                 );
             }
 
-            // Gán sale mới cho investment chưa có sale (KH đầu tư trước khi được nhận)
-            await InvestmentModel.updateMany(
-                {
-                    customer_id: customer._id,
-                    "commission.sale_id": null,
-                    status: { $nin: ["cancelled", "early_terminated"] },
-                    isDeleted: false,
-                },
-                { $set: { "commission.sale_id": newSale._id } },
-                { session }
-            );
+            // Tính và ghi nhận HH cho investment chưa có sale
+            const unownedInvestments = await InvestmentModel.find({
+                customer_id: customer._id,
+                "commission.sale_id": null,
+                status: { $nin: ["cancelled", "early_terminated"] },
+                isDeleted: false,
+            }).session(session);
+
+            if (unownedInvestments.length > 0) {
+                const tncn_rate = getTNCNRate(newSale.employment_type);
+                const bulkOps = unownedInvestments.map((inv) => {
+                    if (inv.term_type !== "month") {
+                        return { updateOne: { filter: { _id: inv._id }, update: { $set: { "commission.sale_id": newSale._id } } } };
+                    }
+                    const calc = calculateCommission({ amount: inv.amount, term_months: inv.term_value, tncn_rate });
+                    return {
+                        updateOne: {
+                            filter: { _id: inv._id },
+                            update: {
+                                $set: {
+                                    "commission.receiver_type": "sale",
+                                    "commission.sale_id": newSale._id,
+                                    "commission.commission_rate": calc.commission_rate,
+                                    "commission.gross_amount": calc.gross_amount,
+                                    "commission.tncn_rate": tncn_rate,
+                                    "commission.tncn_amount": calc.tncn_amount,
+                                    "commission.net_amount": calc.net_amount,
+                                    "commission.status": "pending",
+                                },
+                            },
+                        },
+                    };
+                });
+                await InvestmentModel.bulkWrite(bulkOps, { session });
+            }
 
             await CustomerInteractionModel.create([{
                 app_id: customer.app_id,
@@ -1163,17 +1187,41 @@ const CustomerController = {
                 { session }
             );
 
-            // Gán sale cho investment chưa có sale (KH đầu tư trước khi được nhận)
-            await InvestmentModel.updateMany(
-                {
-                    customer_id: customer._id,
-                    "commission.sale_id": null,
-                    status: { $nin: ["cancelled", "early_terminated"] },
-                    isDeleted: false,
-                },
-                { $set: { "commission.sale_id": sale._id } },
-                { session }
-            );
+            // Tính và ghi nhận HH cho investment chưa có sale
+            const unownedInvestments = await InvestmentModel.find({
+                customer_id: customer._id,
+                "commission.sale_id": null,
+                status: { $nin: ["cancelled", "early_terminated"] },
+                isDeleted: false,
+            }).session(session);
+
+            if (unownedInvestments.length > 0) {
+                const tncn_rate = getTNCNRate(sale.employment_type);
+                const bulkOps = unownedInvestments.map((inv) => {
+                    if (inv.term_type !== "month") {
+                        return { updateOne: { filter: { _id: inv._id }, update: { $set: { "commission.sale_id": sale._id } } } };
+                    }
+                    const calc = calculateCommission({ amount: inv.amount, term_months: inv.term_value, tncn_rate });
+                    return {
+                        updateOne: {
+                            filter: { _id: inv._id },
+                            update: {
+                                $set: {
+                                    "commission.receiver_type": "sale",
+                                    "commission.sale_id": sale._id,
+                                    "commission.commission_rate": calc.commission_rate,
+                                    "commission.gross_amount": calc.gross_amount,
+                                    "commission.tncn_rate": tncn_rate,
+                                    "commission.tncn_amount": calc.tncn_amount,
+                                    "commission.net_amount": calc.net_amount,
+                                    "commission.status": "pending",
+                                },
+                            },
+                        },
+                    };
+                });
+                await InvestmentModel.bulkWrite(bulkOps, { session });
+            }
 
             await CustomerInteractionModel.create([{
                 app_id: customer.app_id,

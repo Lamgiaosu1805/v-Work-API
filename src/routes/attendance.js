@@ -17,7 +17,12 @@ router.post('/checkIn', authenticate, AttendanceController.checkIn);
 router.post('/checkOut', authenticate, AttendanceController.checkOut);
 router.post('/createShift', authenticate, isAdmin, AttendanceController.createShift);
 
+//PUT
+router.put('/updateAllowedWifiLocation/:id', authenticate, isAdmin, AttendanceController.updateAllowedWifiLocation);
+router.put('/updateShift/:id', authenticate, isAdmin, AttendanceController.updateShift);
+
 //DELETE
 router.delete('/deleteAllowedWifiLocation/:id', authenticate, isAdmin, AttendanceController.deleteAllowedWifiLocation);
+router.delete('/deleteShift/:id', authenticate, isAdmin, AttendanceController.deleteShift);
 
 module.exports = router;

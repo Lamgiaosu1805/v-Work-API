@@ -40,6 +40,37 @@ const AttendanceController = {
         }
     },
 
+    updateAllowedWifiLocation: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { name, ssid, latitude, longitude, radius } = req.body;
+
+            const doc = await AllowedWifiLocationModel.findOne({_id: id, isDeleted: false});
+            if (!doc) return res.status(404).json({ message: "Không tìm thấy điểm chấm công" });
+
+            // Chỉ cập nhật nếu có dữ liệu mới
+            if (ssid != null && ssid !== doc.ssid) {
+                const existing = await AllowedWifiLocationModel.findOne({
+                    ssid,
+                    isDeleted: false,
+                    _id: { $ne: id },
+                });
+                if (existing) return res.status(400).json({ message: `SSID "${ssid}" đã tồn tại` });
+                doc.ssid = ssid;
+            }
+
+            if (name != null) doc.name = name;
+            if (latitude != null) doc.latitude = latitude;
+            if (longitude != null) doc.longitude = longitude;
+            if (radius != null) doc.radius = radius; 
+            await doc.save();
+            res.json({ message: "Cập nhật điểm chấm công thành công", data: doc });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ message: "Lỗi server.", error: error.message });
+        }
+    },
+
     deleteAllowedWifiLocation: async (req, res) => {
         try {
             const { id } = req.params;
@@ -63,11 +94,58 @@ const AttendanceController = {
                 return res.status(400).json({ message: "name, start_time, end_time là bắt buộc" });
             }
 
-            const existing = await ShiftModel.findOne({ name });
+            const existing = await ShiftModel.findOne({ name, isDeleted: false });
             if (existing) return res.status(400).json({ message: `Shift ${name} đã tồn tại` });
 
             const shift = await ShiftModel.create({ name, start_time, end_time, late_allowance_minutes });
             return res.status(201).json({ message: "Tạo ca làm việc thành công", data: shift });
+        } catch (err) {
+            console.error(err);
+            return res.status(500).json({ message: "Lỗi server", error: err.message });
+        }
+    },
+
+    updateShift: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { name, start_time, end_time, late_allowance_minutes } = req.body;
+
+            const shift = await ShiftModel.findOne({ _id: id, isDeleted: false });
+            if (!shift) return res.status(404).json({ message: "Không tìm thấy ca làm việc" });
+
+            // Nếu đổi tên → kiểm tra trùng với ca khác (loại trừ chính nó)
+            if (name != null && name !== shift.name) {
+                const existing = await ShiftModel.findOne({
+                    name,
+                    isDeleted: false,
+                    _id: { $ne: id },
+                });
+                if (existing) return res.status(400).json({ message: `Shift ${name} đã tồn tại` });
+                shift.name = name;
+            }
+
+            if (start_time != null) shift.start_time = start_time;
+            if (end_time != null) shift.end_time = end_time;
+            if (late_allowance_minutes != null) shift.late_allowance_minutes = late_allowance_minutes;
+
+            await shift.save();
+            return res.status(200).json({ message: "Cập nhật ca làm việc thành công", data: shift });
+        } catch (err) {
+            console.error(err);
+            return res.status(500).json({ message: "Lỗi server", error: err.message });
+        }
+    },
+
+    deleteShift: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const shift = await ShiftModel.findOneAndUpdate(
+                { _id: id, isDeleted: false },
+                { isDeleted: true },
+                { new: true }
+            );
+            if (!shift) return res.status(404).json({ message: "Không tìm thấy ca làm việc" });
+            return res.status(200).json({ message: "Xóa ca làm việc thành công" });
         } catch (err) {
             console.error(err);
             return res.status(500).json({ message: "Lỗi server", error: err.message });
@@ -325,7 +403,7 @@ const AttendanceController = {
 
     getAllShifts: async (req, res) => {
         try {
-            const shifts = await ShiftModel.find();
+            const shifts = await ShiftModel.find({ isDeleted: false }).sort({ start_time: 1 });
             return res.status(200).json({
                 message: 'Lấy danh sách ca làm việc thành công',
                 data: shifts,

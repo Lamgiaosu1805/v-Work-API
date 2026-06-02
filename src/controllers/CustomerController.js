@@ -762,6 +762,7 @@ const CustomerController = {
                 source_type,    // "sale" | "agent" | "marketing"
                 from_date,
                 to_date,
+                branch_id,
             } = req.query;
 
             const skip = (Number(page) - 1) * Number(limit);
@@ -780,6 +781,12 @@ const CustomerController = {
                 filter.createdAt = {};
                 if (from_date) filter.createdAt.$gte = new Date(from_date);
                 if (to_date) filter.createdAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
+            }
+
+            if (branch_id) {
+                const salesInBranch = await UserInfoModel.find({ branch_id, isDeleted: false }).select("_id").lean();
+                const saleIds = salesInBranch.map((s) => s._id);
+                filter.referred_by = { $in: saleIds };
             }
 
             if (search) {

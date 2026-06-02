@@ -1,13 +1,14 @@
 /**
- * Script fix commission.sale_id cho investment của khách đã được chuyển/gán sale.
+ * Script fix commission.sale_id cho investment của khách đã được gán sale lần đầu
+ * nhưng investment tạo trước khi gán (commission.sale_id = null).
  *
- * Vấn đề: reassignCustomer và assignCustomer trước đây chỉ update customer.referred_by
- * nhưng không cập nhật commission.sale_id trên InvestmentModel.
- *
- * Script này tìm tất cả investment bị lệch và fix lại dựa trên customer.referred_by hiện tại.
+ * Lưu ý nghiệp vụ:
+ * - Investment tạo TRƯỚC khi đổi sale → HH vẫn thuộc sale cũ, KHÔNG đụng vào.
+ * - Chỉ fix investment có commission.sale_id = null (chưa từng có sale nào nhận).
+ * - Investment mới sau khi gán/đổi sale tự dùng customer.referred_by → không cần fix.
  *
  * Chạy: node scripts/fixInvestmentCommission.js
- * Dry run (chỉ xem, không sửa): node scripts/fixInvestmentCommission.js --dry-run
+ * Dry run: node scripts/fixInvestmentCommission.js --dry-run
  */
 
 require("dotenv").config();
@@ -44,7 +45,7 @@ async function run() {
     const investments = db.collection("investments");
     const userInfos = db.collection("user_infos");
 
-    // Lấy tất cả khách có referred_by (đã có sale)
+    // Chỉ xử lý khách đã có sale (referred_by != null)
     const assignedCustomers = await customers.find(
         { referred_by: { $ne: null, $exists: true }, isDeleted: false },
         { projection: { _id: 1, referred_by: 1, phone_number: 1 } }
@@ -59,74 +60,64 @@ async function run() {
     for (const customer of assignedCustomers) {
         const currentSaleId = customer.referred_by;
 
-        // Lấy thông tin sale hiện tại
         const sale = await userInfos.findOne(
             { _id: currentSaleId },
             { projection: { _id: 1, full_name: 1, ma_nv: 1, employment_type: 1 } }
         );
         if (!sale) continue;
 
-        const tncn_rate = getTNCNRate(sale.employment_type);
-
-        // Tìm investment bị lệch:
-        // 1. commission.sale_id khác currentSaleId (trỏ sai sale) và chưa paid
-        // 2. commission.sale_id = null (chưa gán sale)
-        const badInvestments = await investments.find({
+        // Chỉ tìm investment chưa có sale nào nhận (commission.sale_id = null)
+        // KHÔNG đụng vào investment đã có sale_id dù là sale cũ hay mới
+        const unownedInvestments = await investments.find({
             customer_id: customer._id,
+            "commission.sale_id": null,
+            "commission.status": { $ne: "paid" },
             status: { $nin: ["cancelled", "early_terminated"] },
             isDeleted: false,
-            "commission.status": { $ne: "paid" },
-            $or: [
-                { "commission.sale_id": null },
-                {
-                    "commission.sale_id": { $ne: currentSaleId, $exists: true },
-                    "commission.receiver_type": "sale",
-                },
-            ],
         }).toArray();
 
-        if (badInvestments.length === 0) continue;
+        if (unownedInvestments.length === 0) continue;
 
-        totalChecked += badInvestments.length;
+        totalChecked += unownedInvestments.length;
 
-        console.log(`\nKhách ${customer.phone_number} (${customer._id}) — sale hiện tại: ${sale.full_name} (${sale.ma_nv})`);
-        console.log(`  → ${badInvestments.length} investment cần fix`);
+        const tncn_rate = getTNCNRate(sale.employment_type);
+        console.log(`\nKhách ${customer.phone_number} — sale: ${sale.full_name} (${sale.ma_nv})`);
+        console.log(`  → ${unownedInvestments.length} investment chưa có sale`);
 
-        for (const inv of badInvestments) {
-            const oldSaleId = inv.commission?.sale_id ?? null;
-            const oldStatus = inv.commission?.status ?? "none";
-            const oldGross = inv.commission?.gross_amount ?? 0;
-
-            let update;
-
+        for (const inv of unownedInvestments) {
             if (inv.term_type !== "month") {
-                // Kỳ hạn tuần — không tính HH, chỉ gán sale_id
-                update = { $set: { "commission.sale_id": currentSaleId } };
-                console.log(`    [week] inv ${inv._id}: sale_id ${oldSaleId} → ${currentSaleId}`);
-            } else if (oldStatus === "none" || (!oldGross && oldSaleId === null)) {
-                // Chưa có HH — tính mới
-                const calc = calculateCommission({ amount: inv.amount, term_months: inv.term_value, tncn_rate });
-                update = {
-                    $set: {
-                        "commission.receiver_type": "sale",
-                        "commission.sale_id": currentSaleId,
-                        "commission.commission_rate": calc.commission_rate,
-                        "commission.gross_amount": calc.gross_amount,
-                        "commission.tncn_rate": tncn_rate,
-                        "commission.tncn_amount": calc.tncn_amount,
-                        "commission.net_amount": calc.net_amount,
-                        "commission.status": "pending",
-                    },
-                };
-                console.log(`    [new HH] inv ${inv._id}: gross 0 → ${calc.gross_amount.toLocaleString()}đ, sale ${currentSaleId}`);
-            } else {
-                // Đã có HH pending nhưng trỏ sai sale — chỉ chuyển sale_id
-                update = { $set: { "commission.sale_id": currentSaleId } };
-                console.log(`    [transfer] inv ${inv._id}: sale_id ${oldSaleId} → ${currentSaleId}, giữ gross ${oldGross.toLocaleString()}đ`);
+                console.log(`    [week/skip] inv ${inv._id}: term_type=${inv.term_type}, chỉ gán sale_id`);
+                if (!isDryRun) {
+                    await investments.updateOne(
+                        { _id: inv._id },
+                        { $set: { "commission.sale_id": currentSaleId } }
+                    );
+                    totalFixed++;
+                } else {
+                    totalSkipped++;
+                }
+                continue;
             }
 
+            const calc = calculateCommission({ amount: inv.amount, term_months: inv.term_value, tncn_rate });
+            console.log(`    [new HH] inv ${inv._id}: ${inv.amount?.toLocaleString()}đ × ${inv.term_value}th → gross ${calc.gross_amount.toLocaleString()}đ`);
+
             if (!isDryRun) {
-                await investments.updateOne({ _id: inv._id }, update);
+                await investments.updateOne(
+                    { _id: inv._id },
+                    {
+                        $set: {
+                            "commission.receiver_type": "sale",
+                            "commission.sale_id": currentSaleId,
+                            "commission.commission_rate": calc.commission_rate,
+                            "commission.gross_amount": calc.gross_amount,
+                            "commission.tncn_rate": tncn_rate,
+                            "commission.tncn_amount": calc.tncn_amount,
+                            "commission.net_amount": calc.net_amount,
+                            "commission.status": "pending",
+                        },
+                    }
+                );
                 totalFixed++;
             } else {
                 totalSkipped++;

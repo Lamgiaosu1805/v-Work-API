@@ -982,55 +982,8 @@ const CustomerController = {
                 { session }
             );
 
-            // Chuyển HH pending của investment từ sale cũ sang sale mới
-            if (oldSaleId) {
-                await InvestmentModel.updateMany(
-                    {
-                        customer_id: customer._id,
-                        "commission.sale_id": oldSaleId,
-                        "commission.status": "pending",
-                        isDeleted: false,
-                    },
-                    { $set: { "commission.sale_id": newSale._id } },
-                    { session }
-                );
-            }
-
-            // Tính và ghi nhận HH cho investment chưa có sale
-            const unownedInvestments = await InvestmentModel.find({
-                customer_id: customer._id,
-                "commission.sale_id": null,
-                status: { $nin: ["cancelled", "early_terminated"] },
-                isDeleted: false,
-            }).session(session);
-
-            if (unownedInvestments.length > 0) {
-                const tncn_rate = getTNCNRate(newSale.employment_type);
-                const bulkOps = unownedInvestments.map((inv) => {
-                    if (inv.term_type !== "month") {
-                        return { updateOne: { filter: { _id: inv._id }, update: { $set: { "commission.sale_id": newSale._id } } } };
-                    }
-                    const calc = calculateCommission({ amount: inv.amount, term_months: inv.term_value, tncn_rate });
-                    return {
-                        updateOne: {
-                            filter: { _id: inv._id },
-                            update: {
-                                $set: {
-                                    "commission.receiver_type": "sale",
-                                    "commission.sale_id": newSale._id,
-                                    "commission.commission_rate": calc.commission_rate,
-                                    "commission.gross_amount": calc.gross_amount,
-                                    "commission.tncn_rate": tncn_rate,
-                                    "commission.tncn_amount": calc.tncn_amount,
-                                    "commission.net_amount": calc.net_amount,
-                                    "commission.status": "pending",
-                                },
-                            },
-                        },
-                    };
-                });
-                await InvestmentModel.bulkWrite(bulkOps, { session });
-            }
+            // Không cập nhật investment cũ — HH trước khi đổi sale vẫn thuộc sale cũ
+            // Investment mới sau khi reassign sẽ tự dùng customer.referred_by mới khi upsert
 
             await CustomerInteractionModel.create([{
                 app_id: customer.app_id,

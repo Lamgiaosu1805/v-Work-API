@@ -361,7 +361,6 @@ const ChatController = {
 
       const io = req.app.get("io");
       if (io) {
-        // Broadcast cho toàn room để mọi người thấy placeholder "Tin nhắn đã bị thu hồi".
         io.to(`conversation:${String(req.params.conversationId)}`).emit(
           "message:recalled",
           {
@@ -370,7 +369,6 @@ const ChatController = {
           },
         );
 
-        // Đồng bộ sidebar để lastMessage hiển thị placeholder.
         const conversation = await getConversationDetail({
           conversationId: req.params.conversationId,
           userInfoId: currentUserInfo._id,

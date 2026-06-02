@@ -519,10 +519,16 @@ async function deleteConversation({ conversationId, userInfoId }) {
     );
   }
 
-  await ConversationModel.updateOne(
-    { _id: conversationId },
-    { $addToSet: { deletedFor: userInfoId } },
-  );
+  await Promise.all([
+    ConversationModel.updateOne(
+      { _id: conversationId },
+      { $addToSet: { deletedFor: userInfoId } },
+    ),
+    MessageModel.updateMany(
+      { conversationId, isDeleted: false },
+      { $addToSet: { deletedFor: userInfoId } },
+    ),
+  ]);
 
   return { conversationId: String(conversationId) };
 }

@@ -982,6 +982,32 @@ const CustomerController = {
                 { session }
             );
 
+            // Chuyển HH pending của investment từ sale cũ sang sale mới
+            if (oldSaleId) {
+                await InvestmentModel.updateMany(
+                    {
+                        customer_id: customer._id,
+                        "commission.sale_id": oldSaleId,
+                        "commission.status": "pending",
+                        isDeleted: false,
+                    },
+                    { $set: { "commission.sale_id": newSale._id } },
+                    { session }
+                );
+            }
+
+            // Gán sale mới cho investment chưa có sale (KH đầu tư trước khi được nhận)
+            await InvestmentModel.updateMany(
+                {
+                    customer_id: customer._id,
+                    "commission.sale_id": null,
+                    status: { $nin: ["cancelled", "early_terminated"] },
+                    isDeleted: false,
+                },
+                { $set: { "commission.sale_id": newSale._id } },
+                { session }
+            );
+
             await CustomerInteractionModel.create([{
                 app_id: customer.app_id,
                 customer_id: customer._id,
@@ -1134,6 +1160,18 @@ const CustomerController = {
             await CustomerModel.findByIdAndUpdate(
                 customer._id,
                 { $set: updateData },
+                { session }
+            );
+
+            // Gán sale cho investment chưa có sale (KH đầu tư trước khi được nhận)
+            await InvestmentModel.updateMany(
+                {
+                    customer_id: customer._id,
+                    "commission.sale_id": null,
+                    status: { $nin: ["cancelled", "early_terminated"] },
+                    isDeleted: false,
+                },
+                { $set: { "commission.sale_id": sale._id } },
                 { session }
             );
 

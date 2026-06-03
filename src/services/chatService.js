@@ -29,6 +29,7 @@ function toPlainObject(doc) {
 
 function formatConversation(conversation, currentUserInfoId) {
   const plainConversation = toPlainObject(conversation);
+  if (!plainConversation) return null;
   const members = plainConversation.members || [];
   const myId = String(currentUserInfoId);
 
@@ -585,6 +586,110 @@ async function deleteMessageForSelf({ conversationId, messageId, userInfoId }) {
   };
 }
 
+async function addMembers({ conversationId, userInfoId, newMemberIds }) {
+  const conversation = await ConversationModel.findOne({
+    _id: conversationId, type: "group", members: userInfoId, isDeleted: false,
+  });
+  if (!conversation) throw new ChatError("Không tìm thấy nhóm", 404);
+
+  const normalizedIds = normalizeObjectIds(newMemberIds || []);
+  if (!normalizedIds.length) throw new ChatError("Danh sách thành viên không được rỗng", 400);
+
+  const existingIds = new Set(conversation.members.map(String));
+  const toAdd = normalizedIds.filter((id) => !existingIds.has(String(id)));
+  if (!toAdd.length) throw new ChatError("Tất cả thành viên đã có trong nhóm", 400);
+
+  const found = await UserInfoModel.find({ _id: { $in: toAdd }, isDeleted: false })
+    .select("_id").lean();
+  if (found.length !== toAdd.length) throw new ChatError("Một số thành viên không tồn tại", 404);
+
+  await ConversationModel.updateOne(
+    { _id: conversationId },
+    { $addToSet: { members: { $each: toAdd } } },
+  );
+
+  return loadConversationById(conversationId, userInfoId);
+}
+
+async function kickMember({ conversationId, adminUserInfoId, targetUserInfoId }) {
+  const conversation = await ConversationModel.findOne({
+    _id: conversationId, type: "group", members: adminUserInfoId, isDeleted: false,
+  });
+  if (!conversation) throw new ChatError("Không tìm thấy nhóm", 404);
+
+  const isAdmin = conversation.admins.some((a) => String(a) === String(adminUserInfoId));
+  if (!isAdmin) throw new ChatError("Bạn không có quyền xóa thành viên", 403);
+
+  if (String(targetUserInfoId) === String(adminUserInfoId))
+    throw new ChatError("Hãy dùng chức năng rời nhóm để tự xóa bản thân", 400);
+
+  const isMember = conversation.members.some((m) => String(m) === String(targetUserInfoId));
+  if (!isMember) throw new ChatError("Thành viên không tồn tại trong nhóm", 404);
+
+  await ConversationModel.updateOne(
+    { _id: conversationId },
+    { $pull: { members: targetUserInfoId, admins: targetUserInfoId } },
+  );
+
+  return loadConversationById(conversationId, adminUserInfoId);
+}
+
+async function promoteMember({ conversationId, adminUserInfoId, targetUserInfoId }) {
+  const conversation = await ConversationModel.findOne({
+    _id: conversationId, type: "group", members: adminUserInfoId, isDeleted: false,
+  });
+  if (!conversation) throw new ChatError("Không tìm thấy nhóm", 404);
+
+  const isAdmin = conversation.admins.some((a) => String(a) === String(adminUserInfoId));
+  if (!isAdmin) throw new ChatError("Bạn không có quyền thăng chức thành viên", 403);
+
+  const isMember = conversation.members.some((m) => String(m) === String(targetUserInfoId));
+  if (!isMember) throw new ChatError("Thành viên không tồn tại trong nhóm", 404);
+
+  await ConversationModel.updateOne(
+    { _id: conversationId },
+    { $addToSet: { admins: targetUserInfoId } },
+  );
+
+  return loadConversationById(conversationId, adminUserInfoId);
+}
+
+async function leaveGroup({ conversationId, userInfoId }) {
+  const conversation = await ConversationModel.findOne({
+    _id: conversationId, type: "group", members: userInfoId, isDeleted: false,
+  });
+  if (!conversation) throw new ChatError("Không tìm thấy nhóm hoặc bạn không phải thành viên", 404);
+
+  const remainingMembers = conversation.members
+    .map(String)
+    .filter((m) => m !== String(userInfoId));
+
+  if (remainingMembers.length === 0) {
+    await ConversationModel.updateOne({ _id: conversationId }, { isDeleted: true });
+    return { conversationId: String(conversationId), disbanded: true, conversation: null };
+  }
+
+  const remainingAdmins = conversation.admins
+    .map(String)
+    .filter((a) => a !== String(userInfoId));
+
+  await ConversationModel.updateOne(
+    { _id: conversationId },
+    { $pull: { members: userInfoId, admins: userInfoId } },
+  );
+
+  if (remainingAdmins.length === 0) {
+    const newAdmin = remainingMembers[Math.floor(Math.random() * remainingMembers.length)];
+    await ConversationModel.updateOne(
+      { _id: conversationId },
+      { $addToSet: { admins: newAdmin } },
+    );
+  }
+
+  const updatedConv = await loadConversationById(conversationId, remainingMembers[0]);
+  return { conversationId: String(conversationId), disbanded: false, conversation: updatedConv };
+}
+
 module.exports = {
   ChatError,
   getCurrentUserInfo,
@@ -599,6 +704,10 @@ module.exports = {
   recallMessage,
   deleteMessageForSelf,
   updateGroupConversationName,
+  addMembers,
+  kickMember,
+  promoteMember,
+  leaveGroup,
   ensureConversationAccess,
   createMessageDocument,
   formatConversation,

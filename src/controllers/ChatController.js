@@ -16,6 +16,10 @@ const {
   deleteConversation,
   recallMessage,
   deleteMessageForSelf,
+  kickMember,
+  promoteMember,
+  leaveGroup,
+  addMembers,
 } = require("../services/chatService");
 
 function handleChatError(res, error) {
@@ -382,6 +386,87 @@ const ChatController = {
         message: "Thu hồi tin nhắn thành công",
         data: message,
       });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  addMembers: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const conversation = await addMembers({
+        conversationId: req.params.conversationId,
+        userInfoId: currentUserInfo._id,
+        newMemberIds: req.body.member_ids,
+      });
+      const io = req.app.get("io");
+      if (io) {
+        emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
+      }
+      return res.status(200).json({ message: "Thêm thành viên thành công", data: conversation });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  kickMember: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const conversation = await kickMember({
+        conversationId: req.params.conversationId,
+        adminUserInfoId: currentUserInfo._id,
+        targetUserInfoId: req.params.memberId,
+      });
+      const io = req.app.get("io");
+      if (io) {
+        emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
+        io.to(`user:${req.params.memberId}`).emit("conversation:deleted", {
+          conversationId: String(req.params.conversationId),
+        });
+      }
+      return res.status(200).json({ message: "Xóa thành viên thành công", data: conversation });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  promoteMember: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const conversation = await promoteMember({
+        conversationId: req.params.conversationId,
+        adminUserInfoId: currentUserInfo._id,
+        targetUserInfoId: req.params.memberId,
+      });
+      const io = req.app.get("io");
+      if (io) {
+        emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
+      }
+      return res.status(200).json({ message: "Thăng chức thành công", data: conversation });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  leaveGroup: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const result = await leaveGroup({
+        conversationId: req.params.conversationId,
+        userInfoId: currentUserInfo._id,
+      });
+      const io = req.app.get("io");
+      if (io) {
+        if (!result.disbanded && result.conversation) {
+          emitConversationEvent(io, "conversation:upserted", result.conversation, {
+            conversation: result.conversation,
+          });
+        }
+        io.to(`user:${String(currentUserInfo._id)}`).emit("conversation:deleted", {
+          conversationId: String(req.params.conversationId),
+        });
+      }
+      return res.status(200).json({ message: "Rời nhóm thành công" });
     } catch (error) {
       return handleChatError(res, error);
     }

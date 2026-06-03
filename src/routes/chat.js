@@ -38,6 +38,26 @@ router.delete(
   authenticate,
   ChatController.deleteConversation,
 );
+router.post(
+  "/conversations/:conversationId/members",
+  authenticate,
+  ChatController.addMembers,
+);
+router.delete(
+  "/conversations/:conversationId/members/me",
+  authenticate,
+  ChatController.leaveGroup,
+);
+router.delete(
+  "/conversations/:conversationId/members/:memberId",
+  authenticate,
+  ChatController.kickMember,
+);
+router.patch(
+  "/conversations/:conversationId/members/:memberId/promote",
+  authenticate,
+  ChatController.promoteMember,
+);
 router.delete(
   "/conversations/:conversationId/messages/:messageId",
   authenticate,

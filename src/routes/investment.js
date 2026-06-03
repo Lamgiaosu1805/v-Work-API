@@ -10,6 +10,7 @@ router.post("/bulk-sync", verifyInternalRequest, InvestmentController.bulkSync);
 router.get("/agent-commission", verifyInternalRequest, InvestmentController.getAgentCommission);
 
 // Sale nội bộ đăng nhập CRM
+router.get("/fluctuation", authenticate, hasModuleAccess("crm"), InvestmentController.getFluctuation);
 router.get("/my-commission", authenticate, hasModuleAccess("crm"), InvestmentController.getMyCommission);
 router.get("/staff-commission", authenticate, canManage("crm"), InvestmentController.getStaffCommission);
 router.get("/sales-chart", authenticate, hasModuleAccess("crm"), InvestmentController.getSalesChart);

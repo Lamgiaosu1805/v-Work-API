@@ -9,6 +9,103 @@ const { createCifCommission, createEkycCommission, calculateCommission, getTNCNR
 const { computeClaimWindow } = require("../helpers/claimWindowHelper");
 
 const CustomerController = {
+    getDetail: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const accountId = req.account._id;
+            const isManager = req.account.role === "admin" || req.account.role === "manager";
+
+            let customer;
+
+            if (isManager) {
+                customer = await CustomerModel.findOne({ _id: id, isDeleted: false })
+                    .populate("app_id", "name code")
+                    .populate("referred_by", "full_name phone_number ma_nv")
+                    .populate("agent_id", "agent_code full_name phone_number");
+            } else {
+                const sale = await UserInfoModel.findOne({ id_account: accountId });
+                if (!sale) {
+                    return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+                }
+
+                customer = await CustomerModel.findOne({
+                    _id: id,
+                    referred_by: sale._id,
+                    isDeleted: false,
+                })
+                    .populate("app_id", "name code")
+                    .populate("referred_by", "full_name phone_number ma_nv")
+                    .populate("agent_id", "agent_code full_name phone_number");
+            }
+
+            if (!customer) {
+                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            }
+
+            return res.status(200).json({
+                message: "Lấy thông tin khách hàng thành công",
+                data: customer,
+            });
+        } catch (error) {
+            console.error("Error in getDetail:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
+
+    // GET /customer/:id/investments — Sale xem danh sách đầu tư của khách mình
+    getCustomerInvestments: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { page = 1, limit = 20, status } = req.query;
+            const accountId = req.account._id;
+            const isManager = req.account.role === "admin" || req.account.role === "manager";
+
+            // Verify quyền truy cập
+            const customer = await CustomerModel.findOne({ _id: id, isDeleted: false }).select("referred_by");
+            if (!customer) {
+                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            }
+
+            if (!isManager) {
+                const sale = await UserInfoModel.findOne({ id_account: accountId });
+                if (!sale) {
+                    return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+                }
+                if (!customer.referred_by || customer.referred_by.toString() !== sale._id.toString()) {
+                    return res.status(403).json({ message: "Bạn không có quyền xem đầu tư của khách hàng này" });
+                }
+            }
+
+            const filter = { customer_id: id, isDeleted: false };
+            if (status) filter.status = status;
+
+            const skip = (Number(page) - 1) * Number(limit);
+
+            const [investments, total] = await Promise.all([
+                InvestmentModel.find(filter)
+                    .select("product_name amount term_type term_value interest_rate invested_at maturity_at status commission")
+                    .sort({ invested_at: -1 })
+                    .skip(skip)
+                    .limit(Number(limit)),
+                InvestmentModel.countDocuments(filter),
+            ]);
+
+            return res.status(200).json({
+                message: "Lấy danh sách đầu tư thành công",
+                data: investments,
+                pagination: {
+                    total,
+                    page: Number(page),
+                    limit: Number(limit),
+                    total_pages: Math.ceil(total / Number(limit)),
+                },
+            });
+        } catch (error) {
+            console.error("Error in getCustomerInvestments:", error);
+            return res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    },
+
     upsert: async (req, res) => {
         const session = await mongoose.startSession();
         session.startTransaction();

@@ -6,6 +6,8 @@ const router = express.Router();
 
 // GET
 router.get("/my-customers", authenticate, hasModuleAccess("crm"), CustomerController.getMyCustomers);
+router.get("/:id/investments", authenticate, hasModuleAccess("crm"), CustomerController.getCustomerInvestments);
+router.get("/:id", authenticate, hasModuleAccess("crm"), CustomerController.getDetail);
 router.get("/agent-customers", verifyInternalRequest, CustomerController.getMyCustomersAsAgent);
 router.get("/my-info", verifyInternalRequest, CustomerController.getMyInfo);
 router.get("/all", authenticate, canManage("crm"), CustomerController.getAll);

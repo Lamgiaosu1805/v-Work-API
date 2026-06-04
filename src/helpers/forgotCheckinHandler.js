@@ -65,7 +65,6 @@ async function validateAsync(payload, userInfo, session) {
     request_type: "forgot_checkin",
     status: { $in: ["pending", "approved"] },
     date: new Date(payload.date),
-    type: payload.type,
     isDeleted: false,
   }).session(session);
   if (dup)

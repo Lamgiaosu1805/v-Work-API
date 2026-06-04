@@ -15,31 +15,23 @@ const CustomerController = {
             const accountId = req.account._id;
             const isManager = req.account.role === "admin" || req.account.role === "manager";
 
-            let customer;
+            const customer = await CustomerModel.findOne({ _id: id, isDeleted: false })
+                .populate("app_id", "name code")
+                .populate("referred_by", "full_name phone_number ma_nv")
+                .populate("agent_id", "agent_code full_name phone_number");
 
-            if (isManager) {
-                customer = await CustomerModel.findOne({ _id: id, isDeleted: false })
-                    .populate("app_id", "name code")
-                    .populate("referred_by", "full_name phone_number ma_nv")
-                    .populate("agent_id", "agent_code full_name phone_number");
-            } else {
+            if (!customer) {
+                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            }
+
+            if (!isManager) {
                 const sale = await UserInfoModel.findOne({ id_account: accountId });
                 if (!sale) {
                     return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
                 }
-
-                customer = await CustomerModel.findOne({
-                    _id: id,
-                    referred_by: sale._id,
-                    isDeleted: false,
-                })
-                    .populate("app_id", "name code")
-                    .populate("referred_by", "full_name phone_number ma_nv")
-                    .populate("agent_id", "agent_code full_name phone_number");
-            }
-
-            if (!customer) {
-                return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+                if (!customer.referred_by || customer.referred_by._id.toString() !== sale._id.toString()) {
+                    return res.status(403).json({ message: "Bạn không có quyền xem thông tin khách hàng này" });
+                }
             }
 
             return res.status(200).json({
@@ -52,7 +44,6 @@ const CustomerController = {
         }
     },
 
-    // GET /customer/:id/investments — Sale xem danh sách đầu tư của khách mình
     getCustomerInvestments: async (req, res) => {
         try {
             const { id } = req.params;
@@ -60,7 +51,6 @@ const CustomerController = {
             const accountId = req.account._id;
             const isManager = req.account.role === "admin" || req.account.role === "manager";
 
-            // Verify quyền truy cập
             const customer = await CustomerModel.findOne({ _id: id, isDeleted: false }).select("referred_by");
             if (!customer) {
                 return res.status(404).json({ message: "Không tìm thấy khách hàng" });

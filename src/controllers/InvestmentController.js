@@ -1223,27 +1223,15 @@ const InvestmentController = {
       const {
         pageSize = 10,
         pageNumber = 0,
-        userId,
+        customer_id,
         startDate,
         endDate,
         isPlus,
       } = req.query;
 
-      if (!userId) {
-        return res.status(400).json({ message: "Thiếu userId" });
+      if (!customer_id) {
+        return res.status(400).json({ message: "Thiếu thông tin khách hàng" });
       }
-
-      const baseUrl = process.env.TIKLUY_BASE_URL;
-      if (!baseUrl) {
-        return res
-          .status(500)
-          .json({ message: "Chưa cấu hình TIKLUY_BASE_URL" });
-      }
-
-      const params = new URLSearchParams({ pageSize, pageNumber, userId });
-      if (startDate) params.append("startDate", startDate);
-      if (endDate) params.append("endDate", endDate);
-      if (isPlus !== undefined) params.append("isPlus", isPlus);
 
       const transactionId = String(
         req.headers["transactionid"] ||
@@ -1251,12 +1239,74 @@ const InvestmentController = {
           Date.now(),
       );
 
+      const isManager =
+        req.account.role === "admin" || req.account.role === "manager";
+
+      const customer = await CustomerModel.findOne({
+        _id: customer_id,
+        isDeleted: false,
+      }).select("referred_by external_id");
+      if (!customer) {
+        return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+      }
+
+      if (!isManager) {
+        const sale = await UserInfoModel.findOne({
+          id_account: req.account._id,
+        });
+        if (!sale) {
+          return res
+            .status(404)
+            .json({ message: "Không tìm thấy thông tin nhân viên" });
+        }
+        if (
+          !customer.referred_by ||
+          customer.referred_by.toString() !== sale._id.toString()
+        ) {
+          return res
+            .status(403)
+            .json({
+              message: "Bạn không có quyền xem thông tin khách hàng này",
+            });
+        }
+      }
+
+      if (!customer.external_id) {
+        return res
+          .status(404)
+          .json({
+            message: "Khách hàng chưa có tài khoản trên hệ thống đầu tư",
+          });
+      }
+
+      const baseUrl = process.env.TIKLUY_BASE_URL;
+
+      const params = new URLSearchParams({
+        pageSize,
+        pageNumber,
+        userId: customer.external_id,
+      });
+      if (startDate) params.append("startDate", startDate);
+      if (endDate) params.append("endDate", endDate);
+      if (isPlus !== undefined) params.append("isPlus", isPlus);
+
+      const basicAuth = Buffer.from(
+        `${process.env.CRM_SYNC_USERNAME}:${process.env.CRM_SYNC_PASSWORD}`,
+      ).toString("base64");
+
+      console.log(
+        "basic auth",
+        basicAuth,
+        process.env.CRM_SYNC_USERNAME,
+        process.env.CRM_SYNC_PASSWORD,
+      );
+
       const response = await axios.get(
         `${baseUrl}/account/fluctuation/crm?${params.toString()}`,
         {
           headers: {
+            Authorization: `Basic ${basicAuth}`,
             transactionId,
-            "x-api-key": process.env.TIKLUY_API_KEY,
           },
           timeout: 10000,
         },

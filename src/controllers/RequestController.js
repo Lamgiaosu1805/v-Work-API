@@ -70,6 +70,8 @@ const RequestController = {
       });
       if (!userInfo)
         return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+      if (!userInfo.branch_id)
+        return res.status(400).json({ message: "Tài khoản của bạn chưa được gán chi nhánh, vui lòng liên hệ admin" });
 
       const eligible = await getEligibleReviewers(userInfo._id);
       if (!eligible.length)

@@ -60,17 +60,11 @@ async function createDailyWorkSheets() {
       const shift = dayOfWeek === 6 ? morningShift : adminShift;
       if (!shift) continue;
 
-      const exist = await WorkSheet.findOne({ user_id: user._id, date: { $gte: today, $lt: tomorrow } });
-      if (exist) {
-        await ensurePendingStatus(user._id, exist._id, today);
-        continue;
-      }
-
-      const worksheet = await WorkSheet.create({
-        user_id: user._id,
-        date: today,
-        shifts: [shift._id],
-      });
+      const worksheet = await WorkSheet.findOneAndUpdate(
+        { user_id: user._id, date: today },
+        { $setOnInsert: { shifts: [shift._id] } },
+        { upsert: true, new: true },
+      );
       await ensurePendingStatus(user._id, worksheet._id, today);
     }
 
@@ -79,18 +73,12 @@ async function createDailyWorkSheets() {
       const workSchedule = await WorkSchedule.find({ userId: user._id, dayOfWeek }).populate("shifts");
       if (!workSchedule || workSchedule.length === 0) continue;
 
-      const exist = await WorkSheet.findOne({ user_id: user._id, date: { $gte: today, $lt: tomorrow } });
-      if (exist) {
-        await ensurePendingStatus(user._id, exist._id, today);
-        continue;
-      }
-
       const shiftsToday = workSchedule.flatMap(ws => ws.shifts);
-      const worksheet = await WorkSheet.create({
-        user_id: user._id,
-        date: today,
-        shifts: shiftsToday.map(s => s._id),
-      });
+      const worksheet = await WorkSheet.findOneAndUpdate(
+        { user_id: user._id, date: today },
+        { $setOnInsert: { shifts: shiftsToday.map(s => s._id) } },
+        { upsert: true, new: true },
+      );
       await ensurePendingStatus(user._id, worksheet._id, today);
     }
 

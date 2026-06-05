@@ -18,8 +18,8 @@ function validate(body) {
   const today = moment.tz(TZ);
   const dateMoment = moment.tz(date, TZ);
   if (
-    dateMoment.isBefore(today.startOf("day")) ||
-    dateMoment.isAfter(today.endOf("day"))
+    dateMoment.isBefore(today.clone().startOf("day")) ||
+    dateMoment.isAfter(today.clone().endOf("day"))
   )
     return { error: { status: 400, message: "Chỉ được tạo đơn quên chấm công cho hôm nay" } };
 

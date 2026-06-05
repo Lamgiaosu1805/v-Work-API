@@ -21,6 +21,10 @@ const UserInfoModel = new mongoose.Schema(
     leave_balance: { // phép đang có (số ngày, có thể là float: 0.5)
       annual: { type: Number, default: 0 }, // phép năm hiện có
     },
+    employment_status: { type: mongoose.Schema.Types.ObjectId, ref: "employment_status", default: null },
+    start_date: { type: Date, default: null },
+    employment_status_date: { type: Date, default: null },
+    resignation_date: { type: Date, default: null },
     avatar: { type: String, default: null },
     cover_photo: { type: String, default: null },
     ...BaseSchema.obj,

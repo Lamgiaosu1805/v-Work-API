@@ -20,6 +20,7 @@ const customerClaimRequestRouter = require('./customerClaimRequest')
 const aiRouter = require('./ai')
 const requestRouter = require('./request')
 const holidayRouter = require('./holiday')
+const employmentStatusRouter = require('./employmentStatus')
 
 const route = (app) => {
     app.use(`/posts`, postRouter)
@@ -43,6 +44,7 @@ const route = (app) => {
     app.use(`/customer-claim-request`, customerClaimRequestRouter)
     app.use(`/requests`, requestRouter)
     app.use(`/holidays`, holidayRouter)
+    app.use(`/employment-status`, employmentStatusRouter)
     app.use(`/ai`, aiRouter)
 }
 

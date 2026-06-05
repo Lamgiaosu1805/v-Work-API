@@ -4,6 +4,7 @@ const UserInfoModel = require("../models/UserInfoModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const HolidayModel = require("../models/HolidayModel");
+const EmploymentStatusModel = require("../models/EmploymentStatusModel");
 const { calcTotalDays, buildWorkDatesWithStatus } = require("./requestUtils");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 
@@ -121,6 +122,12 @@ function toSlot(date, period) {
 }
 
 async function validateAsync(payload, userInfo, session) {
+  if (payload.leave_type === "paid" && userInfo.employment_status) {
+    const empStatus = await EmploymentStatusModel.findById(userInfo.employment_status);
+    if (empStatus && !empStatus.can_use_annual_leave)
+      return { status: 403, message: "Loại hợp đồng hiện tại chưa được sử dụng ngày phép có lương" };
+  }
+
   const fromDate = moment.tz(payload.from_date, TZ).startOf("day").toDate();
   const toDate = moment.tz(payload.to_date, TZ).startOf("day").toDate();
 

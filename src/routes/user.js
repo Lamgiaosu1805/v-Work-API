@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { authenticate, hasModuleAccess, canManage } = require("../middlewares/authMiddleware");
+const { authenticate, hasModuleAccess, canManage, isAdmin } = require("../middlewares/authMiddleware");
 const upload = require("../middlewares/uploadFile");
 const uploadDocuments = require("../middlewares/uploadDocuments");
 const UserController = require("../controllers/UserController");
@@ -20,5 +20,7 @@ router.put("/updateUser/:id", authenticate, canManage("hrm"), uploadDocuments, U
 router.post("/createUser", authenticate, canManage("hrm"), uploadDocuments, UserController.createUser);
 router.post("/uploadAvatar", authenticate, upload.single("avatar"), UserController.uploadAvatar);
 router.post("/uploadCoverPhoto", authenticate, upload.single("cover_photo"), UserController.uploadCoverPhoto);
+
+router.patch("/:id/employment-status", authenticate, isAdmin, UserController.setEmploymentStatus);
 
 module.exports = router;

@@ -8,6 +8,8 @@ const dayjs = require('dayjs');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+const ENV_PREFIX = (process.env.BASE_URL ?? 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
+
 const formatMoney = (v) => {
     if (!v) return '0 đ';
     if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)} tỷ đ`;
@@ -73,7 +75,7 @@ Văn phong chuyên nghiệp, súc tích. KHÔNG giải thích thêm, KHÔNG dùn
 
 exports.customerSummary = async (req, res) => {
     const { customerId } = req.params;
-    const cacheKey = `ai:customer_summary:${customerId}`;
+    const cacheKey = `${ENV_PREFIX}:ai:customer_summary:${customerId}`;
 
     try {
         // Trả cache nếu còn hạn
@@ -146,7 +148,9 @@ exports.getChurnRisks = async (req, res) => {
             saleId = userInfo?._id ?? null;
         }
 
-        const cacheKey = saleId ? `ai:churn_risks:sale:${saleId}` : 'ai:churn_risks:all';
+        
+
+        const cacheKey = saleId ? `${ENV_PREFIX}:ai:churn_risks:sale:${saleId}` : `${ENV_PREFIX}:ai:churn_risks:all`;
         const cached = await redis.get(cacheKey);
         if (cached) return res.json(JSON.parse(cached));
 

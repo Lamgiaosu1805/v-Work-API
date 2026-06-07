@@ -7,7 +7,6 @@ const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const HolidayModel = require("../models/HolidayModel");
 const { RequestModel } = require("../models/RequestModel");
-const { calcWorkUnit } = require("../helpers/requestUtils");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 const { resolveLeaveConflictOnAttendance } = require("../helpers/leaveHandler");
 const moment = require("moment-timezone");
@@ -310,24 +309,6 @@ const AttendanceController = {
       worksheet.check_out = now.toDate();
       worksheet.minute_early = minuteEarly;
 
-      const populatedShifts = worksheet.shifts.filter((s) => s && s.start_time);
-      if (populatedShifts.length === 0) {
-        const fetched = await ShiftModel.find({
-          _id: { $in: worksheet.shifts },
-        });
-        worksheet.work_unit = calcWorkUnit(
-          fetched,
-          worksheet.minutes_late,
-          minuteEarly,
-        );
-      } else {
-        worksheet.work_unit = calcWorkUnit(
-          populatedShifts,
-          worksheet.minutes_late,
-          minuteEarly,
-        );
-      }
-
       session = await mongoose.startSession();
       session.startTransaction();
 
@@ -361,7 +342,6 @@ const AttendanceController = {
         message: "Check-out thành công",
         check_out: worksheet.check_out,
         minute_early: worksheet.minute_early,
-        work_unit: worksheet.work_unit,
       });
     } catch (err) {
       if (session) await session.abortTransaction().catch(() => {});

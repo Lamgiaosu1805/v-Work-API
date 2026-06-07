@@ -40,6 +40,7 @@ const UserController = {
         tinh_trang_hon_nhan,
         employment_type,
         branch_id,
+        employment_status,
       } = req.body;
 
       let { userDepartments = [], schedules = [] } = req.body;
@@ -143,6 +144,8 @@ const UserController = {
             ma_nv: maNV,
             employment_type,
             branch_id: branch_id || null,
+            employment_status: employment_status || null,
+            leave_balance: { annual: 0 },
           },
         ],
         { session }
@@ -680,6 +683,16 @@ const UserController = {
         if (req.body[field] !== undefined) {
           updates[field] = req.body[field];
         }
+      }
+
+      if (req.body.leave_balance_annual !== undefined) {
+        const val = Number(req.body.leave_balance_annual);
+        if (isNaN(val) || val < 0) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({ message: "leave_balance_annual không hợp lệ" });
+        }
+        updates["leave_balance.annual"] = val;
       }
 
       const hasFiles = Object.keys(req.files || {}).length > 0;

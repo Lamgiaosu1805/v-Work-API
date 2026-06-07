@@ -220,17 +220,17 @@ const RequestController = {
       const skip = (Number(page) - 1) * Number(limit);
       const filter = { isDeleted: false };
 
-      if (req.account.role !== "admin") {
-        const managerInfo = await UserInfoModel.findOne({
-          id_account: req.account._id,
-          isDeleted: false,
-        });
-        if (!managerInfo)
-          return res
-            .status(404)
-            .json({ message: "Không tìm thấy thông tin quản lý" });
-        filter.assigned_reviewer = managerInfo._id;
-      }
+      // if (req.account.role !== "admin") {
+      const managerInfo = await UserInfoModel.findOne({
+        id_account: req.account._id,
+        isDeleted: false,
+      });
+      if (!managerInfo)
+        return res
+          .status(404)
+          .json({ message: "Không tìm thấy thông tin quản lý" });
+      filter.assigned_reviewer = managerInfo._id;
+      // }
 
       if (request_type && VALID_TYPES.includes(request_type))
         filter.request_type = request_type;
@@ -334,22 +334,22 @@ const RequestController = {
           .json({ message: "Đơn không ở trạng thái chờ duyệt" });
       }
 
-      if (req.account.role !== "admin") {
-        if (request.user_id.equals(reviewerInfo._id)) {
-          await session.abortTransaction();
-          session.endSession();
-          return res
-            .status(403)
-            .json({ message: "Không thể tự duyệt đơn của mình" });
-        }
-        if (!request.assigned_reviewer.equals(reviewerInfo._id)) {
-          await session.abortTransaction();
-          session.endSession();
-          return res
-            .status(403)
-            .json({ message: "Bạn không được chỉ định duyệt đơn này" });
-        }
+      // if (req.account.role !== "admin") {
+      if (request.user_id.equals(reviewerInfo._id)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(403)
+          .json({ message: "Không thể tự duyệt đơn của mình" });
       }
+      if (!request.assigned_reviewer.equals(reviewerInfo._id)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(403)
+          .json({ message: "Bạn không được chỉ định duyệt đơn này" });
+      }
+      // }
 
       request.status = action === "approve" ? "approved" : "rejected";
       request.reviewed_by = reviewerInfo._id;
@@ -390,7 +390,7 @@ const RequestController = {
             uri: `/requests/${request._id}`,
           });
         })
-        .catch(() => {});
+        .catch(() => { });
 
       return res.status(200).json({
         message: action === "approve" ? "Đã duyệt đơn" : "Đã từ chối đơn",

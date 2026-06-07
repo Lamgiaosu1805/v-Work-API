@@ -4,6 +4,7 @@ const { RequestModel } = require("../models/RequestModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
 
 const TZ = "Asia/Ho_Chi_Minh";
+const RETROACTIVE_LIMIT_DAYS = 3;
 
 function validate(body) {
   const { date, shift_id, type, minutes } = body;
@@ -18,8 +19,13 @@ function validate(body) {
     return { error: { status: 400, message: "Ca làm không hợp lệ" } };
   if (typeof minutes !== "number" || minutes <= 0)
     return { error: { status: 400, message: "Số phút không hợp lệ" } };
-  if (moment.tz(date, TZ).isAfter(moment.tz(TZ).endOf("day")))
+
+  const today = moment.tz(TZ).startOf("day");
+  const dateMoment = moment.tz(date, TZ).startOf("day");
+  if (dateMoment.isAfter(today))
     return { error: { status: 400, message: "Ngày không hợp lệ" } };
+  if (dateMoment.isBefore(today.clone().subtract(RETROACTIVE_LIMIT_DAYS, "days")))
+    return { error: { status: 400, message: `Chỉ được tạo đơn trong vòng ${RETROACTIVE_LIMIT_DAYS} ngày gần nhất` } };
 
   return { payload: { date, shift_id, type, minutes } };
 }

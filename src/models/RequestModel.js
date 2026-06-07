@@ -47,7 +47,6 @@ const LeaveRequest = RequestModel.discriminator(
     leave_type: { type: String, enum: ["paid", "unpaid"], required: true },
     paid_days: { type: Number, default: 0 },
     unpaid_days: { type: Number, default: 0 },
-    is_retroactive: { type: Boolean, default: false },
   }),
 );
 

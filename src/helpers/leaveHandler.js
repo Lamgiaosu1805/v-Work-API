@@ -18,7 +18,6 @@ function validate(body, userInfo) {
     to_date,
     to_period,
     leave_type,
-    is_retroactive,
   } = body;
 
   if (!from_date || !from_period || !to_date || !to_period || !leave_type)
@@ -39,49 +38,19 @@ function validate(body, userInfo) {
   const today = now.clone().startOf("day");
   const fromMoment = moment.tz(from_date, TZ).startOf("day");
 
-  if (is_retroactive) {
-    const limit = today.clone().subtract(RETROACTIVE_LIMIT_DAYS, "days");
-    if (fromMoment.isBefore(limit))
-      return {
-        error: {
-          status: 400,
-          message: `Chỉ được nộp đơn muộn trong vòng ${RETROACTIVE_LIMIT_DAYS} ngày`,
-        },
-      };
-    if (fromMoment.isSameOrAfter(today))
-      return {
-        error: { status: 400, message: "Đơn muộn phải là ngày trong quá khứ" },
-      };
-  } else {
-    if (fromMoment.isBefore(today))
-      return {
-        error: {
-          status: 400,
-          message: "Không thể tạo đơn nghỉ cho ngày trong quá khứ",
-        },
-      };
-    if (fromMoment.isSame(today, "day")) {
-      if (
-        from_period === "morning" &&
-        now.isSameOrAfter(today.clone().hour(12))
-      )
-        return {
-          error: {
-            status: 400,
-            message: "Không thể tạo đơn nghỉ cho buổi đã qua",
-          },
-        };
-      if (
-        from_period === "afternoon" &&
-        now.isSameOrAfter(today.clone().hour(13))
-      )
-        return {
-          error: {
-            status: 400,
-            message: "Không thể tạo đơn nghỉ cho buổi đã qua",
-          },
-        };
-    }
+  if (fromMoment.isBefore(today.clone().subtract(RETROACTIVE_LIMIT_DAYS, "days")))
+    return {
+      error: {
+        status: 400,
+        message: `Chỉ được tạo đơn trong vòng ${RETROACTIVE_LIMIT_DAYS} ngày gần nhất`,
+      },
+    };
+
+  if (fromMoment.isSame(today, "day")) {
+    if (from_period === "morning" && now.isSameOrAfter(today.clone().hour(12)))
+      return { error: { status: 400, message: "Không thể tạo đơn nghỉ cho buổi đã qua" } };
+    if (from_period === "afternoon" && now.isSameOrAfter(today.clone().hour(13)))
+      return { error: { status: 400, message: "Không thể tạo đơn nghỉ cho buổi đã qua" } };
   }
 
   const total_days = calcTotalDays(from_date, from_period, to_date, to_period);
@@ -112,7 +81,6 @@ function validate(body, userInfo) {
       leave_type,
       paid_days,
       unpaid_days,
-      is_retroactive: !!is_retroactive,
     },
   };
 }

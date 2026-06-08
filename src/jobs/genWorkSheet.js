@@ -35,17 +35,28 @@ async function createDailyWorkSheets() {
       return;
     }
 
-    const holiday = await HolidayModel.findOne({ date: today, isDeleted: false });
-    if (holiday) {
-      console.log(`[Cron] Hôm nay là ngày lễ (${holiday.name}), bỏ qua việc tạo worksheet.`);
+    const todayHolidays = await HolidayModel.find({ date: today, isDeleted: false });
+    const globalHoliday = todayHolidays.find(h => h.scope_type === "all");
+    if (globalHoliday) {
+      console.log(`[Cron] Hôm nay là ngày lễ toàn công ty (${globalHoliday.name}), bỏ qua việc tạo worksheet.`);
       return;
     }
+
+    const branchHolidayIds = new Set(
+      todayHolidays
+        .filter(h => h.scope_type === "branch")
+        .flatMap(h => h.branches.map(b => b.toString())),
+    );
 
     console.log(`[Cron] Bắt đầu tạo worksheet cho ngày ${moment.tz(today, TZ).format("DD/MM/YYYY")}`);
 
     const users = await UserInfo.find({ isDeleted: false });
-    const fulltimeUsers = users.filter(u => !u.employment_type || u.employment_type === "fulltime");
-    const parttimeUsers = users.filter(u => u.employment_type === "parttime");
+
+    const isOnHoliday = (user) =>
+      branchHolidayIds.size > 0 && user.branch_id && branchHolidayIds.has(user.branch_id.toString());
+
+    const fulltimeUsers = users.filter(u => !isOnHoliday(u) && (!u.employment_type || u.employment_type === "fulltime"));
+    const parttimeUsers = users.filter(u => !isOnHoliday(u) && u.employment_type === "parttime");
 
     // ---- FULLTIME ----
     const [adminShift, morningShift] = await Promise.all([

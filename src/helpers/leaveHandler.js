@@ -121,7 +121,13 @@ async function validateAsync(payload, userInfo, session) {
     isDeleted: false,
   }).session(session);
 
-  const workingHolidays = holidays.filter((h) => moment.tz(h.date, TZ).day() !== 0);
+  const userBranchId = userInfo.branch_id?.toString();
+  const applicableHolidays = holidays.filter((h) => {
+    if (h.scope_type === "all") return true;
+    return userBranchId && h.branches.some((b) => b.toString() === userBranchId);
+  });
+
+  const workingHolidays = applicableHolidays.filter((h) => moment.tz(h.date, TZ).day() !== 0);
   if (workingHolidays.length) {
     const names = workingHolidays.map((h) => h.name).join(", ");
     return {

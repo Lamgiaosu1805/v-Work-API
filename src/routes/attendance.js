@@ -1,11 +1,14 @@
 const express = require('express');
+const multer = require('multer');
 const AttendanceController = require('../controllers/AttendanceController');
 const { authenticate, isAdmin, hasModuleAccess } = require('../middlewares/authMiddleware');
-const router = express.Router()
+const router = express.Router();
+const uploadMemory = multer({ storage: multer.memoryStorage() });
 
 
 //GET
 router.get('/getWorkSheet', authenticate, AttendanceController.getWorkSheet);
+router.get('/standard-work-units', authenticate, AttendanceController.getStandardWorkUnits);
 router.get('/getLichCong', authenticate, AttendanceController.getLichCong);
 router.get('/getAllShifts', authenticate, AttendanceController.getAllShifts);
 router.get('/stats', authenticate, AttendanceController.getStats);
@@ -19,6 +22,7 @@ router.post('/createAllowedWifiLocation', authenticate, isAdmin, AttendanceContr
 router.post('/checkIn', authenticate, AttendanceController.checkIn);
 router.post('/checkOut', authenticate, AttendanceController.checkOut);
 router.post('/createShift', authenticate, isAdmin, AttendanceController.createShift);
+router.post('/import-excel', authenticate, isAdmin, uploadMemory.single('file'), AttendanceController.importExcel);
 
 //DELETE
 router.delete('/deleteAllowedWifiLocation/:id', authenticate, isAdmin, AttendanceController.deleteAllowedWifiLocation);

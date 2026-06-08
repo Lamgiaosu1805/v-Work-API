@@ -6,10 +6,12 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const HolidayModel = require("../models/HolidayModel");
+const AttendanceMachineMappingModel = require("../models/AttendanceMachineMappingModel");
 const { RequestModel } = require("../models/RequestModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 const { resolveLeaveConflictOnAttendance } = require("../helpers/leaveHandler");
 const moment = require("moment-timezone");
+const xlsx = require("xlsx");
 
 const AttendanceController = {
   getAllowedWifiLocations: async (req, res) => {
@@ -930,6 +932,213 @@ const AttendanceController = {
             period: s.period,
             status: s.status,
           })),
+        },
+      });
+    } catch (err) {
+      console.error(err);
+      return res
+        .status(500)
+        .json({ message: "Lỗi server", error: err.message });
+    }
+  },
+
+  importExcel: async (req, res) => {
+    const TZ = "Asia/Ho_Chi_Minh";
+    try {
+      if (!req.file)
+        return res.status(400).json({ message: "Chưa upload file" });
+
+      const wb = xlsx.read(req.file.buffer, { type: "buffer" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = xlsx.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+      const employeeHeaderRegex = /Mã nhân viên:\s*(\S+)/;
+      const blocks = [];
+      for (let i = 0; i < rows.length; i++) {
+        const cell = String(rows[i][0] || "");
+        const match = cell.match(employeeHeaderRegex);
+        if (match) blocks.push({ machine_code: match[1], startRow: i });
+      }
+
+      const allMappings = await AttendanceMachineMappingModel.find({
+        isDeleted: false,
+      });
+      const mappingMap = new Map(
+        allMappings.map((m) => [m.machine_code, m.user_id]),
+      );
+
+      const unmatched = [];
+      let imported = 0;
+      let skipped = 0;
+
+      const dateRegex = /^\d{2}\/\d{2}\/\d{4}$/;
+
+      for (let bi = 0; bi < blocks.length; bi++) {
+        const { machine_code, startRow } = blocks[bi];
+        const nextStart =
+          bi + 1 < blocks.length ? blocks[bi + 1].startRow : rows.length;
+        const userId = mappingMap.get(machine_code);
+
+        if (!userId) {
+          unmatched.push(machine_code);
+          continue;
+        }
+
+        for (let r = startRow + 1; r < nextStart; r++) {
+          const row = rows[r];
+          const dateStr = String(row[0] || "").trim();
+          if (!dateStr.match(dateRegex)) continue;
+
+          const rawIn = [row[2], row[4], row[6]].find((v) =>
+            String(v)
+              .trim()
+              .match(/^\d{2}:\d{2}/),
+          );
+          const rawOut = [row[7], row[5], row[3]].find((v) =>
+            String(v)
+              .trim()
+              .match(/^\d{2}:\d{2}/),
+          );
+
+          if (!rawIn) {
+            skipped++;
+            continue;
+          }
+
+          const dateMoment = moment
+            .tz(dateStr, "DD/MM/YYYY", TZ)
+            .startOf("day");
+          const checkIn = moment
+            .tz(
+              `${dateMoment.format("YYYY-MM-DD")} ${rawIn}`,
+              "YYYY-MM-DD HH:mm",
+              TZ,
+            )
+            .toDate();
+          const checkOut = rawOut
+            ? moment
+                .tz(
+                  `${dateMoment.format("YYYY-MM-DD")} ${rawOut}`,
+                  "YYYY-MM-DD HH:mm",
+                  TZ,
+                )
+                .toDate()
+            : null;
+
+          const worksheet = await WorkSheetModel.findOne({
+            user_id: userId,
+            date: {
+              $gte: dateMoment.toDate(),
+              $lt: moment(dateMoment).add(1, "day").toDate(),
+            },
+          });
+
+          if (!worksheet) {
+            skipped++;
+            continue;
+          }
+
+          worksheet.check_in = checkIn;
+          worksheet.check_out = checkOut;
+          await worksheet.save();
+          imported++;
+        }
+      }
+
+      const unmatchedUniq = [...new Set(unmatched)];
+
+      return res.json({
+        message: `Import hoàn tất: ${imported} ngày đã cập nhật, ${skipped} ngày bỏ qua`,
+        data: {
+          imported,
+          skipped,
+          unmatched_codes: unmatchedUniq,
+        },
+      });
+    } catch (err) {
+      console.error(err);
+      return res
+        .status(500)
+        .json({ message: "Lỗi server", error: err.message });
+    }
+  },
+
+  getStandardWorkUnits: async (req, res) => {
+    const TZ = "Asia/Ho_Chi_Minh";
+    try {
+      const month = parseInt(req.query.month);
+      const year = parseInt(req.query.year);
+      if (!month || !year || month < 1 || month > 12)
+        return res
+          .status(400)
+          .json({ message: "month và year là bắt buộc (month: 1-12)" });
+
+      const refDate = moment.tz({ year, month: month - 1, day: 1 }, TZ);
+      const periodStart = refDate
+        .clone()
+        .subtract(1, "month")
+        .date(26)
+        .startOf("day");
+      const periodEnd = refDate.clone().date(25).endOf("day");
+
+      const { branch_id } = req.query;
+      const holidays = await HolidayModel.find({
+        date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+        isDeleted: false,
+      });
+
+      const applicableHolidays = holidays.filter((h) => {
+        if (h.scope_type === "all") return true;
+        return branch_id && h.branches.some((b) => b.toString() === branch_id);
+      });
+
+      const holidayMap = new Map();
+      for (const h of applicableHolidays) {
+        const key = moment.tz(h.date, TZ).format("YYYY-MM-DD");
+        holidayMap.set(key, h.duration_days ?? 1);
+      }
+
+      let weekdays = 0;
+      let saturdays = 0;
+      let holidayDeduction = 0;
+
+      const cursor = periodStart.clone();
+      while (cursor.isSameOrBefore(periodEnd, "day")) {
+        const day = cursor.day();
+        const key = cursor.format("YYYY-MM-DD");
+
+        if (day === 0) {
+          cursor.add(1, "day");
+          continue;
+        }
+
+        if (holidayMap.has(key)) {
+          holidayDeduction += day === 6 ? 0.5 : holidayMap.get(key);
+        } else if (day === 6) {
+          saturdays++;
+        } else {
+          weekdays++;
+        }
+
+        cursor.add(1, "day");
+      }
+
+      const standard_work_units = weekdays * 1 + saturdays * 0.5;
+
+      return res.json({
+        message: "OK",
+        data: {
+          period: {
+            from: periodStart.format("DD/MM/YYYY"),
+            to: periodEnd.format("DD/MM/YYYY"),
+          },
+          standard_work_units,
+          breakdown: {
+            weekdays,
+            saturdays,
+            holiday_days: applicableHolidays.length,
+            holiday_deduction: holidayDeduction,
+          },
         },
       });
     } catch (err) {

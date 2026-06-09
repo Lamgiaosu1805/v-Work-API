@@ -905,6 +905,207 @@ const AttendanceController = {
     }
   },
 
+  getPayrollStatsAll: async (req, res) => {
+    const TZ = "Asia/Ho_Chi_Minh";
+    try {
+      const month = parseInt(req.query.month);
+      const year = parseInt(req.query.year);
+      if (!month || !year || month < 1 || month > 12)
+        return res
+          .status(400)
+          .json({ message: "month và year là bắt buộc (month: 1-12)" });
+
+      const page = Math.max(1, parseInt(req.query.page) || 1);
+      const limit = Math.max(1, Math.min(200, parseInt(req.query.limit) || 50));
+      const { department, q } = req.query;
+
+      const refDate = moment.tz({ year, month: month - 1, day: 1 }, TZ);
+      const periodStart = refDate
+        .clone()
+        .subtract(1, "month")
+        .date(26)
+        .startOf("day");
+      const periodEnd = refDate.clone().date(25).endOf("day");
+
+      const userFilter = { isDeleted: false };
+      if (req.account.role !== "admin" && req.account.dept_scope !== "all") {
+        const myInfo = await UserInfoModel.findOne({
+          id_account: req.account._id,
+          isDeleted: false,
+        });
+        if (!myInfo)
+          return res
+            .status(404)
+            .json({ message: "Không tìm thấy thông tin quản lý" });
+        const myDeptIds = await UserDepartmentPositionModel.distinct(
+          "department",
+          { user: myInfo._id },
+        );
+        const memberUserIds = await UserDepartmentPositionModel.distinct(
+          "user",
+          { department: { $in: myDeptIds } },
+        );
+        userFilter._id = { $in: memberUserIds };
+      }
+
+      if (department && mongoose.Types.ObjectId.isValid(department)) {
+        const deptUserIds = await UserDepartmentPositionModel.distinct("user", {
+          department,
+        });
+        if (userFilter._id) {
+          const allowed = new Set(userFilter._id.$in.map(String));
+          userFilter._id = {
+            $in: deptUserIds.filter((id) => allowed.has(String(id))),
+          };
+        } else {
+          userFilter._id = { $in: deptUserIds };
+        }
+      }
+
+      if (q && q.trim()) {
+        const kw = q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        userFilter.$or = [
+          { full_name: { $regex: kw, $options: "i" } },
+          { ma_nv: { $regex: kw, $options: "i" } },
+        ];
+      }
+
+      const totalUsers = await UserInfoModel.countDocuments(userFilter);
+      const users = await UserInfoModel.find(
+        userFilter,
+        "ma_nv full_name probation_end_date employment_type",
+      )
+        .sort({ ma_nv: 1 })
+        .skip((page - 1) * limit)
+        .limit(limit);
+
+      const userIds = users.map((u) => u._id);
+
+      const [worksheets, dayStatuses] = await Promise.all([
+        WorkSheetModel.find({
+          user_id: { $in: userIds },
+          date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+          isDeleted: false,
+        }),
+        WorkDayStatusModel.find({
+          user_id: { $in: userIds },
+          date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+          isDeleted: false,
+        }),
+      ]);
+
+      const wsByUser = new Map();
+      for (const ws of worksheets) {
+        const k = ws.user_id.toString();
+        if (!wsByUser.has(k)) wsByUser.set(k, []);
+        wsByUser.get(k).push(ws);
+      }
+      const dsByUser = new Map();
+      for (const ds of dayStatuses) {
+        const k = ds.user_id.toString();
+        if (!dsByUser.has(k)) dsByUser.set(k, []);
+        dsByUser.get(k).push(ds);
+      }
+
+      const data = users.map((u) => {
+        const uid = u._id.toString();
+        const wss = wsByUser.get(uid) || [];
+        const dss = dsByUser.get(uid) || [];
+
+        const probationEnd = u.probation_end_date
+          ? moment.tz(u.probation_end_date, TZ).startOf("day")
+          : null;
+
+        let work_unit_total = 0,
+          work_unit_official = 0,
+          work_unit_probation = 0,
+          penalty_amount_total = 0;
+        let late_days = 0,
+          total_minutes_late = 0,
+          early_days = 0,
+          total_minutes_early = 0;
+
+        for (const ws of wss) {
+          const wu = ws.work_unit ?? 0;
+          work_unit_total += wu;
+          const isProbation =
+            probationEnd && moment.tz(ws.date, TZ).isBefore(probationEnd, "day");
+          if (isProbation) work_unit_probation += wu;
+          else work_unit_official += wu;
+          penalty_amount_total += ws.penalty_amount ?? 0;
+          if ((ws.minutes_late ?? 0) > 0) {
+            late_days++;
+            total_minutes_late += ws.minutes_late;
+          }
+          if ((ws.minute_early ?? 0) > 0) {
+            early_days++;
+            total_minutes_early += ws.minute_early;
+          }
+        }
+
+        let present_days = 0,
+          missed_clock_days = 0,
+          absent_days = 0,
+          leave_paid_days = 0,
+          leave_unpaid_days = 0,
+          remote_days = 0;
+        for (const s of dss) {
+          const w = s.period === "full" ? 1 : 0.5;
+          if (s.status === "present") present_days += w;
+          else if (s.status === "missed_clock") missed_clock_days += w;
+          else if (s.status === "absent") absent_days += w;
+          else if (s.status === "leave_paid") leave_paid_days += w;
+          else if (s.status === "leave_unpaid") leave_unpaid_days += w;
+          else if (s.status === "remote") remote_days += w;
+        }
+
+        return {
+          user_id: u._id,
+          ma_nv: u.ma_nv,
+          full_name: u.full_name,
+          employment_type: u.employment_type,
+          probation_end_date: u.probation_end_date
+            ? moment.tz(u.probation_end_date, TZ).format("DD/MM/YYYY")
+            : null,
+          work_unit_total,
+          work_unit_official,
+          work_unit_probation,
+          penalty_amount_total,
+          present_days,
+          missed_clock_days,
+          absent_days,
+          leave_paid_days,
+          leave_unpaid_days,
+          remote_days,
+          late_days,
+          total_minutes_late,
+          early_days,
+          total_minutes_early,
+        };
+      });
+
+      return res.status(200).json({
+        message: "OK",
+        period: {
+          from: periodStart.format("DD/MM/YYYY"),
+          to: periodEnd.format("DD/MM/YYYY"),
+        },
+        pagination: {
+          page,
+          limit,
+          total: totalUsers,
+          total_pages: Math.ceil(totalUsers / limit),
+        },
+        data,
+      });
+    } catch (err) {
+      console.error(err);
+      return res
+        .status(500)
+        .json({ message: "Lỗi server", error: err.message });
+    }
+  },
+
   getCalendar: async (req, res) => {
     try {
       const month = parseInt(req.query.month);

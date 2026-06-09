@@ -15,6 +15,7 @@ router.get('/stats', authenticate, AttendanceController.getStats);
 router.get('/calendar', authenticate, AttendanceController.getCalendar);
 router.get('/getAllowedWifiLocations', authenticate, isAdmin, AttendanceController.getAllowedWifiLocations);
 router.get('/getAllWorkSheets', authenticate, hasModuleAccess('hrm'), AttendanceController.getAllWorkSheets);
+router.get('/payroll-stats-all', authenticate, hasModuleAccess('hrm'), AttendanceController.getPayrollStatsAll);
 router.get('/payroll-stats/:userId', authenticate, hasModuleAccess('hrm'), AttendanceController.getPayrollStats);
 
 //POST

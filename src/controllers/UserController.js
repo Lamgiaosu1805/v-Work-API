@@ -674,7 +674,7 @@ const UserController = {
         "employment_type",
         "branch_id",
         "start_date",
-        "employment_status_date",
+        "probation_end_date",
         "resignation_date",
       ];
 
@@ -1003,7 +1003,6 @@ const UserController = {
       }
 
       userInfo.employment_status = newStatus._id;
-      userInfo.employment_status_date = effectiveMoment;
       await userInfo.save({ session });
 
       await session.commitTransaction();

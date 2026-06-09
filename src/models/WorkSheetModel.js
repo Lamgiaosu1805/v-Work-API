@@ -15,6 +15,7 @@ const WorkSheetModel = new mongoose.Schema(
     minutes_late: { type: Number, default: 0 },
     minute_early: { type: Number, default: 0 },
     work_unit: { type: Number, default: null },
+    penalty_amount: { type: Number, default: 0 },
     ...BaseSchema.obj,
   },
   {

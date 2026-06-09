@@ -10,6 +10,13 @@ const AttendanceMachineMappingModel = require("../models/AttendanceMachineMappin
 const { RequestModel } = require("../models/RequestModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 const { resolveLeaveConflictOnAttendance } = require("../helpers/leaveHandler");
+const { buildLatePenaltyResolver } = require("../helpers/attendancePenalty");
+const {
+  parseExcelToBlocks,
+  parseDayRows,
+  resolveAttendanceDay,
+  saveAttendanceDay,
+} = require("../helpers/attendanceHelper");
 const moment = require("moment-timezone");
 const xlsx = require("xlsx");
 
@@ -739,6 +746,9 @@ const AttendanceController = {
       ]);
 
       let work_unit_total = 0;
+      let work_unit_official = 0;
+      let work_unit_probation = 0;
+      let penalty_amount_total = 0;
       let present_days = 0,
         missed_clock_days = 0,
         absent_days = 0;
@@ -750,13 +760,22 @@ const AttendanceController = {
         early_days = 0,
         total_minutes_early = 0;
 
+      const probationEnd = userInfo.probation_end_date
+        ? moment.tz(userInfo.probation_end_date, TZ).startOf("day")
+        : null;
+
       const daily = [...allDates].sort().map((dateStr) => {
         const ws = wsMap.get(dateStr);
         const statuses = dsMap.get(dateStr) || [];
         const reqs = reqMap.get(dateStr) || [];
 
         if (ws) {
-          work_unit_total += ws.work_unit ?? 0;
+          const wu = ws.work_unit ?? 0;
+          work_unit_total += wu;
+          const isProbation = probationEnd && moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
+          if (isProbation) work_unit_probation += wu;
+          else work_unit_official += wu;
+          penalty_amount_total += ws.penalty_amount ?? 0;
           if ((ws.minutes_late ?? 0) > 0) {
             late_days++;
             total_minutes_late += ws.minutes_late;
@@ -785,6 +804,7 @@ const AttendanceController = {
             ? moment.tz(ws.check_out, TZ).format("HH:mm")
             : null,
           work_unit: ws?.work_unit ?? null,
+          penalty_amount: ws?.penalty_amount ?? 0,
           minutes_late: ws?.minutes_late ?? 0,
           minute_early: ws?.minute_early ?? 0,
           day_statuses: statuses.map((s) => ({
@@ -851,6 +871,9 @@ const AttendanceController = {
           ma_nv: userInfo.ma_nv,
           full_name: userInfo.full_name,
           employment_type: userInfo.employment_type,
+          probation_end_date: userInfo.probation_end_date
+            ? moment.tz(userInfo.probation_end_date, TZ).format("DD/MM/YYYY")
+            : null,
           leave_balance:
             userInfo.leave_balance?.annual >= 0
               ? userInfo.leave_balance?.annual
@@ -858,6 +881,9 @@ const AttendanceController = {
         },
         summary: {
           work_unit_total,
+          work_unit_official,
+          work_unit_probation,
+          penalty_amount_total,
           present_days,
           missed_clock_days,
           absent_days,
@@ -948,111 +974,163 @@ const AttendanceController = {
       if (!req.file)
         return res.status(400).json({ message: "Chưa upload file" });
 
-      const wb = xlsx.read(req.file.buffer, { type: "buffer" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = xlsx.utils.sheet_to_json(ws, { header: 1, defval: "" });
-
-      const employeeHeaderRegex = /Mã nhân viên:\s*(\S+)/;
-      const blocks = [];
-      for (let i = 0; i < rows.length; i++) {
-        const cell = String(rows[i][0] || "");
-        const match = cell.match(employeeHeaderRegex);
-        if (match) blocks.push({ machine_code: match[1], startRow: i });
+      let blocks;
+      try {
+        blocks = parseExcelToBlocks(req.file.buffer);
+      } catch (e) {
+        console.error("[importExcel] Lỗi đọc file:", e);
+        return res.status(400).json({
+          message: "Không đọc được file Excel. Kiểm tra lại định dạng file (.xlsx).",
+        });
       }
+      if (!blocks.length)
+        return res.status(400).json({
+          message:
+            "File không đúng định dạng bảng chấm công (không tìm thấy nhân viên nào).",
+        });
 
       const allMappings = await AttendanceMachineMappingModel.find({
         isDeleted: false,
       });
+      if (!allMappings.length)
+        return res.status(400).json({
+          message:
+            "Chưa cấu hình mapping mã máy chấm công với nhân viên. Vui lòng tạo mapping trước khi import.",
+        });
       const mappingMap = new Map(
         allMappings.map((m) => [m.machine_code, m.user_id]),
       );
 
+      const resolveLatePenalty = await buildLatePenaltyResolver();
+
       const unmatched = [];
+      const failures = [];
       let imported = 0;
       let skipped = 0;
+      let unchanged = 0;
 
-      const dateRegex = /^\d{2}\/\d{2}\/\d{4}$/;
-
-      for (let bi = 0; bi < blocks.length; bi++) {
-        const { machine_code, startRow } = blocks[bi];
-        const nextStart =
-          bi + 1 < blocks.length ? blocks[bi + 1].startRow : rows.length;
-        const userId = mappingMap.get(machine_code);
-
+      for (const block of blocks) {
+        const userId = mappingMap.get(block.machine_code);
         if (!userId) {
-          unmatched.push(machine_code);
+          unmatched.push(block.machine_code);
           continue;
         }
 
-        for (let r = startRow + 1; r < nextStart; r++) {
-          const row = rows[r];
-          const dateStr = String(row[0] || "").trim();
-          if (!dateStr.match(dateRegex)) continue;
+        const dayRows = parseDayRows(block);
+        if (!dayRows.length) continue;
 
-          const rawIn = [row[2], row[4], row[6]].find((v) =>
-            String(v)
-              .trim()
-              .match(/^\d{2}:\d{2}/),
-          );
-          const rawOut = [row[7], row[5], row[3]].find((v) =>
-            String(v)
-              .trim()
-              .match(/^\d{2}:\d{2}/),
-          );
-
-          if (!rawIn) {
-            skipped++;
-            continue;
-          }
-
-          const dateMoment = moment
-            .tz(dateStr, "DD/MM/YYYY", TZ)
-            .startOf("day");
-          const checkIn = moment
-            .tz(
-              `${dateMoment.format("YYYY-MM-DD")} ${rawIn}`,
-              "YYYY-MM-DD HH:mm",
-              TZ,
-            )
+        let worksheetMap, forgotMap, lateForgivenSet;
+        try {
+          const rangeStart = moment
+            .tz(dayRows[0].dateStr, "DD/MM/YYYY", TZ)
+            .startOf("day")
             .toDate();
-          const checkOut = rawOut
-            ? moment
-                .tz(
-                  `${dateMoment.format("YYYY-MM-DD")} ${rawOut}`,
-                  "YYYY-MM-DD HH:mm",
-                  TZ,
-                )
-                .toDate()
-            : null;
+          const rangeEnd = moment
+            .tz(dayRows[dayRows.length - 1].dateStr, "DD/MM/YYYY", TZ)
+            .endOf("day")
+            .toDate();
 
-          const worksheet = await WorkSheetModel.findOne({
-            user_id: userId,
-            date: {
-              $gte: dateMoment.toDate(),
-              $lt: moment(dateMoment).add(1, "day").toDate(),
-            },
+          const [worksheets, forgotReqs, lateReqs] = await Promise.all([
+            WorkSheetModel.find({
+              user_id: userId,
+              date: { $gte: rangeStart, $lte: rangeEnd },
+              isDeleted: false,
+            }).populate("shifts"),
+            RequestModel.find({
+              user_id: userId,
+              request_type: "forgot_checkin",
+              status: "approved",
+              isDeleted: false,
+              date: { $gte: rangeStart, $lte: rangeEnd },
+            }),
+            RequestModel.find({
+              user_id: userId,
+              request_type: "late_early",
+              type: "late",
+              status: "approved",
+              isDeleted: false,
+              date: { $gte: rangeStart, $lte: rangeEnd },
+            }),
+          ]);
+
+          worksheetMap = new Map(
+            worksheets.map((ws) => [
+              moment.tz(ws.date, TZ).format("YYYY-MM-DD"),
+              ws,
+            ]),
+          );
+          forgotMap = new Map(
+            forgotReqs.map((r) => [
+              moment.tz(r.date, TZ).format("YYYY-MM-DD"),
+              r,
+            ]),
+          );
+          lateForgivenSet = new Set(
+            lateReqs.map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD")),
+          );
+        } catch (e) {
+          console.error(
+            `[importExcel] Lỗi tải dữ liệu nhân viên (mã ${block.machine_code}):`,
+            e,
+          );
+          failures.push({
+            machine_code: block.machine_code,
+            date: null,
+            reason: `Không tải được dữ liệu: ${e.message}`,
           });
+          skipped += dayRows.length;
+          continue;
+        }
 
-          if (!worksheet) {
-            skipped++;
+        for (const { dateStr, rawIn, rawOut } of dayRows) {
+          const dateKey = moment
+            .tz(dateStr, "DD/MM/YYYY", TZ)
+            .format("YYYY-MM-DD");
+          const worksheet = worksheetMap.get(dateKey);
+
+          const computed = resolveAttendanceDay({
+            dateKey,
+            rawIn,
+            rawOut,
+            worksheet,
+            forgotMap,
+            lateForgivenSet,
+            resolveLatePenalty,
+          });
+          if (computed.skip) {
+            if (computed.unchanged) unchanged++;
+            else skipped++;
             continue;
           }
 
-          worksheet.check_in = checkIn;
-          worksheet.check_out = checkOut;
-          await worksheet.save();
-          imported++;
+          try {
+            await saveAttendanceDay({ userId, dateKey, worksheet, computed });
+            imported++;
+          } catch (e) {
+            console.error(
+              `[importExcel] Lỗi ngày ${dateStr} (mã ${block.machine_code}):`,
+              e,
+            );
+            failures.push({
+              machine_code: block.machine_code,
+              date: dateStr,
+              reason: e.message,
+            });
+            skipped++;
+          }
         }
       }
 
       const unmatchedUniq = [...new Set(unmatched)];
 
       return res.json({
-        message: `Import hoàn tất: ${imported} ngày đã cập nhật, ${skipped} ngày bỏ qua`,
+        message: `Import hoàn tất: ${imported} ngày cập nhật, ${unchanged} ngày không đổi, ${skipped} ngày bỏ qua`,
         data: {
           imported,
+          unchanged,
           skipped,
           unmatched_codes: unmatchedUniq,
+          failures,
         },
       });
     } catch (err) {

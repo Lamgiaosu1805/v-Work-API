@@ -22,6 +22,7 @@ const requestRouter = require('./request')
 const holidayRouter = require('./holiday')
 const employmentStatusRouter = require('./employmentStatus')
 const attendanceMappingRouter = require('./attendanceMapping')
+const penaltyTierRouter = require('./penaltyTier')
 
 const route = (app) => {
     app.use(`/posts`, postRouter)
@@ -47,6 +48,7 @@ const route = (app) => {
     app.use(`/holidays`, holidayRouter)
     app.use(`/employment-status`, employmentStatusRouter)
     app.use(`/attendance-mapping`, attendanceMappingRouter)
+    app.use(`/penalty-tier`, penaltyTierRouter)
     app.use(`/ai`, aiRouter)
 }
 

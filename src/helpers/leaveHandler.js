@@ -5,6 +5,8 @@ const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const HolidayModel = require("../models/HolidayModel");
 const EmploymentStatusModel = require("../models/EmploymentStatusModel");
+const WorkScheduleModel = require("../models/WorkScheduleModel");
+const ShiftModel = require("../models/ShiftModel");
 const { calcTotalDays, buildWorkDatesWithStatus } = require("./requestUtils");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 
@@ -150,6 +152,44 @@ async function onCreate(request, userInfo, session) {
   return null;
 }
 
+async function resolveShiftsForDates(userId, dates, session) {
+  const userInfo = await UserInfoModel.findById(userId, {
+    employment_type: 1,
+  }).session(session);
+  const isParttime = userInfo?.employment_type === "parttime";
+
+  const dated = dates.map(({ date }) => {
+    const m = moment.tz(date, TZ);
+    return { key: m.format("YYYY-MM-DD"), dayOfWeek: m.day() === 0 ? 7 : m.day() };
+  });
+
+  const map = new Map();
+
+  if (isParttime) {
+    const schedules = await WorkScheduleModel.find({ userId }).session(session);
+    const byDow = new Map();
+    for (const s of schedules) {
+      const arr = byDow.get(s.dayOfWeek) || [];
+      arr.push(...s.shifts);
+      byDow.set(s.dayOfWeek, arr);
+    }
+    for (const { key, dayOfWeek } of dated) {
+      map.set(key, byDow.get(dayOfWeek) || []);
+    }
+  } else {
+    const [adminShift, morningShift] = await Promise.all([
+      ShiftModel.findOne({ name: "Ca hành chính" }).session(session),
+      ShiftModel.findOne({ name: "Ca sáng" }).session(session),
+    ]);
+    for (const { key, dayOfWeek } of dated) {
+      const shift = dayOfWeek === 6 ? morningShift : adminShift;
+      map.set(key, shift ? [shift._id] : []);
+    }
+  }
+
+  return map;
+}
+
 async function onApprove(request, session) {
   const fromMoment = moment.tz(request.from_date, TZ).startOf("day");
   const toMoment = moment.tz(request.to_date, TZ).startOf("day");
@@ -170,8 +210,13 @@ async function onApprove(request, session) {
     (d) => !sheetMap.has(moment.tz(d.date, TZ).format("YYYY-MM-DD")),
   );
   if (missing.length) {
+    const shiftMap = await resolveShiftsForDates(request.user_id, missing, session);
     const created = await WorkSheetModel.insertMany(
-      missing.map(({ date }) => ({ user_id: request.user_id, date, shifts: [] })),
+      missing.map(({ date }) => ({
+        user_id: request.user_id,
+        date,
+        shifts: shiftMap.get(moment.tz(date, TZ).format("YYYY-MM-DD")) || [],
+      })),
       { session },
     );
     created.forEach((w) => sheetMap.set(moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id));

@@ -1283,10 +1283,13 @@ const AttendanceController = {
           continue;
         }
 
+        const excelDateKeys = new Set();
+
         for (const { dateStr, rawIn, rawOut } of dayRows) {
           const dateKey = moment
             .tz(dateStr, "DD/MM/YYYY", TZ)
             .format("YYYY-MM-DD");
+          excelDateKeys.add(dateKey);
           const worksheet = worksheetMap.get(dateKey);
 
           const computed = resolveAttendanceDay({
@@ -1315,6 +1318,49 @@ const AttendanceController = {
             failures.push({
               machine_code: block.machine_code,
               date: dateStr,
+              reason: e.message,
+            });
+            skipped++;
+          }
+        }
+
+        for (const [dateKey, worksheet] of worksheetMap) {
+          if (excelDateKeys.has(dateKey)) continue;
+          if (!worksheet.check_in && !worksheet.check_out) continue;
+
+          const rawIn = worksheet.check_in
+            ? moment.tz(worksheet.check_in, TZ).format("HH:mm")
+            : null;
+          const rawOut = worksheet.check_out
+            ? moment.tz(worksheet.check_out, TZ).format("HH:mm")
+            : null;
+
+          const computed = resolveAttendanceDay({
+            dateKey,
+            rawIn,
+            rawOut,
+            worksheet,
+            forgotMap,
+            lateForgivenSet,
+            resolveLatePenalty,
+          });
+          if (computed.skip) {
+            if (computed.unchanged) unchanged++;
+            else skipped++;
+            continue;
+          }
+
+          try {
+            await saveAttendanceDay({ userId, dateKey, worksheet, computed });
+            imported++;
+          } catch (e) {
+            console.error(
+              `[importExcel] Lỗi ngày ${dateKey} (mã ${block.machine_code}, dữ liệu app):`,
+              e,
+            );
+            failures.push({
+              machine_code: block.machine_code,
+              date: moment.tz(dateKey, TZ).format("DD/MM/YYYY"),
               reason: e.message,
             });
             skipped++;

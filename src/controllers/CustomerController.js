@@ -10,6 +10,7 @@ const { computeClaimWindow } = require("../helpers/claimWindowHelper");
 const { tikluyClient } = require("../utils/tikluyClient");
 const { decrypt } = require("../helpers/customerHelper");
 const dayjs = require("dayjs");
+const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 
 const CustomerController = {
     upsert: async (req, res) => {
@@ -690,10 +691,7 @@ const CustomerController = {
 
         return res.status(200).json({
           message: "Lấy biến động số dư thành công",
-          data: {
-            totalRecords: total,
-            transactions,
-          },
+          data: transactions,
           pagination: {
             total,
             page: currentPage,
@@ -719,7 +717,7 @@ const CustomerController = {
     }
     },
 
-    getViewImmage: async (req, res) => {
+    getViewImage: async (req, res) => {
         try {
           const { key_image } = req.query;
           
@@ -846,37 +844,48 @@ const CustomerController = {
     },
 
     getCustomerStaffInfo: async (req, res) => {
-     try {
-       const { ma_nv } = req.query;
-        
-       if (!ma_nv) {
-         return res.status(400).json({
-           message: "Thiếu mã nhân viên",
-         });
-       }
+        try {
+          const { ma_nv } = req.query;
 
-       const userInfo = await UserInfoModel.findOne({ ma_nv })
-         .populate("branch_id")
-         .lean();
+          if (!ma_nv) {
+            return res.status(400).json({
+              message: "Thiếu mã nhân viên",
+            });
+          }
 
-       if (!userInfo) {
-         return res.status(404).json({
-           message: "Không tìm thấy nhân viên",
-         });
-       }
+          const userInfo = await UserInfoModel.findOne({ ma_nv })
+            .populate("branch_id")
+            .lean();
 
-       return res.status(200).json({
-         message: "Lấy thông tin nhân viên thành công",
-         data: userInfo,
-       });
-     } catch (error) {
-       console.log("[ERROR_GET_USER_INFO_BY_MANV]", error);
+          if (!userInfo) {
+            return res.status(404).json({
+              message: "Không tìm thấy nhân viên",
+            });
+          }
 
-       return res.status(500).json({
-         message: "Internal server error",
-         error: error.message,
-       });
-     }
+          const userDepartmentPositions =
+            await UserDepartmentPositionModel.find({
+              user: userInfo._id,
+            })
+              .populate("department")
+              .populate("position")
+              .lean();
+
+          return res.status(200).json({
+            message: "Lấy thông tin nhân viên thành công",
+            data: {
+              ...userInfo,
+              department: userDepartmentPositions,
+            },
+          });
+        } catch (error) {
+          console.log("[ERROR_GET_USER_INFO_BY_MANV]", error);
+
+          return res.status(500).json({
+            message: "Internal server error",
+            error: error.message,
+          });
+        }
     },
 
     // POST /customers/apply-referral — ĐÃ VÔ HIỆU HÓA

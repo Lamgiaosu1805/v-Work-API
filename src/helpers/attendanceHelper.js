@@ -59,8 +59,10 @@ function resolveAttendanceDay({
   rawOut,
   worksheet,
   forgotMap,
+  forgotCountMap,
   lateForgivenSet,
   resolveLatePenalty,
+  resolveForgotPenalty,
 }) {
   const forgot = forgotMap.get(dateKey);
 
@@ -79,6 +81,8 @@ function resolveAttendanceDay({
 
   let newCheckIn = machineIn;
   let newCheckOut = machineOut;
+  if (!newCheckIn && worksheet.check_in) newCheckIn = worksheet.check_in;
+  if (!newCheckOut && worksheet.check_out) newCheckOut = worksheet.check_out;
   if (forgot) {
     if (forgot.type === "check_in" || forgot.type === "both")
       newCheckIn = worksheet.check_in;
@@ -108,7 +112,14 @@ function resolveAttendanceDay({
   let work_unit;
   let penalty_amount = 0;
   let morning_absent = false;
-  if (!hasIn) {
+  if (forgot) {
+    // Quên chấm công có đơn duyệt: phạt lũy tiến theo số lần trong tháng,
+    // không áp phạt đi muộn (lần 1-3 đủ công, lần 4-5 trừ tiền, lần 6+ mất công).
+    const occurrence = forgotCountMap?.get(dateKey) || 0;
+    const r = resolveForgotPenalty(dayStart, occurrence, isSaturday);
+    work_unit = r.work_unit;
+    penalty_amount = r.penalty_amount;
+  } else if (!hasIn) {
     work_unit = isSaturday ? 0.5 : 1;
   } else if (forgiven) {
     work_unit = isSaturday ? 0.5 : 1;

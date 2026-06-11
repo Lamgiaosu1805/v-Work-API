@@ -10,7 +10,10 @@ const AttendanceMachineMappingModel = require("../models/AttendanceMachineMappin
 const { RequestModel } = require("../models/RequestModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 const { resolveLeaveConflictOnAttendance } = require("../helpers/leaveHandler");
-const { buildLatePenaltyResolver } = require("../helpers/attendancePenalty");
+const {
+  buildLatePenaltyResolver,
+  buildForgotPenaltyResolver,
+} = require("../helpers/attendancePenalty");
 const {
   parseExcelToBlocks,
   parseDayRows,
@@ -681,32 +684,42 @@ const AttendanceController = {
             .json({ message: "Bạn không có quyền xem nhân viên này" });
       }
 
-      const [worksheets, dayStatuses, requests] = await Promise.all([
-        WorkSheetModel.find({
-          user_id: userInfo._id,
-          date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
-          isDeleted: false,
-        }),
-        WorkDayStatusModel.find({
-          user_id: userInfo._id,
-          date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
-          isDeleted: false,
-        }),
-        RequestModel.find({
-          user_id: userInfo._id,
-          isDeleted: false,
-          status: "approved",
-          $or: [
-            {
-              from_date: { $lte: periodEnd.toDate() },
-              to_date: { $gte: periodStart.toDate() },
-            },
-            {
-              date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
-            },
-          ],
-        }),
-      ]);
+      const [worksheets, dayStatuses, requests, forgotRequests] =
+        await Promise.all([
+          WorkSheetModel.find({
+            user_id: userInfo._id,
+            date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+            isDeleted: false,
+          }),
+          WorkDayStatusModel.find({
+            user_id: userInfo._id,
+            date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+            isDeleted: false,
+          }),
+          RequestModel.find({
+            user_id: userInfo._id,
+            isDeleted: false,
+            status: "approved",
+            $or: [
+              {
+                from_date: { $lte: periodEnd.toDate() },
+                to_date: { $gte: periodStart.toDate() },
+              },
+              {
+                date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+              },
+            ],
+          }),
+          // Đơn quên chấm công còn hiệu lực (chờ duyệt hoặc đã duyệt) để hiển thị
+          // note "đã có đơn / chưa có đơn" cho ngày thiếu chấm công.
+          RequestModel.find({
+            user_id: userInfo._id,
+            request_type: "forgot_checkin",
+            status: { $in: ["pending", "approved"] },
+            isDeleted: false,
+            date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+          }),
+        ]);
 
       const wsMap = new Map();
       for (const ws of worksheets) {
@@ -739,10 +752,18 @@ const AttendanceController = {
         }
       }
 
+      // Đơn quên chấm công theo ngày (tối đa 1 đơn còn hiệu lực/ngày).
+      const forgotReqMap = new Map();
+      for (const r of forgotRequests) {
+        if (r.date)
+          forgotReqMap.set(moment.tz(r.date, TZ).format("YYYY-MM-DD"), r);
+      }
+
       const allDates = new Set([
         ...wsMap.keys(),
         ...dsMap.keys(),
         ...reqMap.keys(),
+        ...forgotReqMap.keys(),
       ]);
 
       let work_unit_total = 0;
@@ -772,7 +793,9 @@ const AttendanceController = {
         if (ws) {
           const wu = ws.work_unit ?? 0;
           work_unit_total += wu;
-          const isProbation = probationEnd && moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
+          const isProbation =
+            probationEnd &&
+            moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
           if (isProbation) work_unit_probation += wu;
           else work_unit_official += wu;
           penalty_amount_total += ws.penalty_amount ?? 0;
@@ -811,6 +834,24 @@ const AttendanceController = {
             period: s.period,
             status: s.status,
           })),
+          // Note "đã có đơn / chưa có đơn" cho ngày thiếu chấm công:
+          // null = chưa có đơn; có object = đã có đơn (kèm trạng thái duyệt).
+          forgot_request: (() => {
+            const r = forgotReqMap.get(dateStr);
+            if (!r) return null;
+            return {
+              _id: r._id,
+              status: r.status,
+              forgot_type: r.type,
+              expected_check_in: r.expected_check_in
+                ? moment.tz(r.expected_check_in, TZ).format("HH:mm")
+                : null,
+              expected_check_out: r.expected_check_out
+                ? moment.tz(r.expected_check_out, TZ).format("HH:mm")
+                : null,
+              reason: r.reason || "",
+            };
+          })(),
           requests: reqs.map((r) => {
             const base = {
               _id: r._id,
@@ -1029,7 +1070,8 @@ const AttendanceController = {
           const wu = ws.work_unit ?? 0;
           work_unit_total += wu;
           const isProbation =
-            probationEnd && moment.tz(ws.date, TZ).isBefore(probationEnd, "day");
+            probationEnd &&
+            moment.tz(ws.date, TZ).isBefore(probationEnd, "day");
           if (isProbation) work_unit_probation += wu;
           else work_unit_official += wu;
           penalty_amount_total += ws.penalty_amount ?? 0;
@@ -1181,7 +1223,8 @@ const AttendanceController = {
       } catch (e) {
         console.error("[importExcel] Lỗi đọc file:", e);
         return res.status(400).json({
-          message: "Không đọc được file Excel. Kiểm tra lại định dạng file (.xlsx).",
+          message:
+            "Không đọc được file Excel. Kiểm tra lại định dạng file (.xlsx).",
         });
       }
       if (!blocks.length)
@@ -1203,6 +1246,7 @@ const AttendanceController = {
       );
 
       const resolveLatePenalty = await buildLatePenaltyResolver();
+      const resolveForgotPenalty = await buildForgotPenaltyResolver();
 
       const unmatched = [];
       const failures = [];
@@ -1220,7 +1264,7 @@ const AttendanceController = {
         const dayRows = parseDayRows(block);
         if (!dayRows.length) continue;
 
-        let worksheetMap, forgotMap, lateForgivenSet;
+        let worksheetMap, forgotMap, forgotCountMap, lateForgivenSet;
         try {
           const rangeStart = moment
             .tz(dayRows[0].dateStr, "DD/MM/YYYY", TZ)
@@ -1230,6 +1274,11 @@ const AttendanceController = {
             .tz(dayRows[dayRows.length - 1].dateStr, "DD/MM/YYYY", TZ)
             .endOf("day")
             .toDate();
+
+          // Mở rộng ra ranh giới tháng dương lịch để đếm đúng "lần thứ mấy"
+          // trong tháng (số lần quên chấm công reset vào mùng 1 hàng tháng).
+          const monthStart = moment.tz(rangeStart, TZ).startOf("month").toDate();
+          const monthEnd = moment.tz(rangeEnd, TZ).endOf("month").toDate();
 
           const [worksheets, forgotReqs, lateReqs] = await Promise.all([
             WorkSheetModel.find({
@@ -1242,8 +1291,8 @@ const AttendanceController = {
               request_type: "forgot_checkin",
               status: "approved",
               isDeleted: false,
-              date: { $gte: rangeStart, $lte: rangeEnd },
-            }),
+              date: { $gte: monthStart, $lte: monthEnd },
+            }).sort({ date: 1 }),
             RequestModel.find({
               user_id: userId,
               request_type: "late_early",
@@ -1266,6 +1315,17 @@ const AttendanceController = {
               r,
             ]),
           );
+          // Đếm số lần quên chấm công lũy kế trong từng tháng dương lịch:
+          // dateKey -> đây là lần thứ mấy (1-based) tính tới ngày đó.
+          forgotCountMap = new Map();
+          const monthlyCounter = new Map();
+          for (const r of forgotReqs) {
+            const m = moment.tz(r.date, TZ);
+            const monthKey = m.format("YYYY-MM");
+            const n = (monthlyCounter.get(monthKey) || 0) + 1;
+            monthlyCounter.set(monthKey, n);
+            forgotCountMap.set(m.format("YYYY-MM-DD"), n);
+          }
           lateForgivenSet = new Set(
             lateReqs.map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD")),
           );
@@ -1289,7 +1349,10 @@ const AttendanceController = {
           const dateKey = moment
             .tz(dateStr, "DD/MM/YYYY", TZ)
             .format("YYYY-MM-DD");
-          excelDateKeys.add(dateKey);
+
+          if (rawIn || rawOut || forgotMap.has(dateKey)) {
+            excelDateKeys.add(dateKey);
+          }
           const worksheet = worksheetMap.get(dateKey);
 
           const computed = resolveAttendanceDay({
@@ -1298,8 +1361,10 @@ const AttendanceController = {
             rawOut,
             worksheet,
             forgotMap,
+            forgotCountMap,
             lateForgivenSet,
             resolveLatePenalty,
+            resolveForgotPenalty,
           });
           if (computed.skip) {
             if (computed.unchanged) unchanged++;
@@ -1327,7 +1392,6 @@ const AttendanceController = {
         for (const [dateKey, worksheet] of worksheetMap) {
           if (excelDateKeys.has(dateKey)) continue;
           if (!worksheet.check_in && !worksheet.check_out) continue;
-
           const rawIn = worksheet.check_in
             ? moment.tz(worksheet.check_in, TZ).format("HH:mm")
             : null;
@@ -1341,8 +1405,10 @@ const AttendanceController = {
             rawOut,
             worksheet,
             forgotMap,
+            forgotCountMap,
             lateForgivenSet,
             resolveLatePenalty,
+            resolveForgotPenalty,
           });
           if (computed.skip) {
             if (computed.unchanged) unchanged++;

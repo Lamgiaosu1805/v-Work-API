@@ -100,6 +100,38 @@ async function validateAsync(payload, userInfo, session) {
   return null;
 }
 
+// Đánh dấu ngày có đơn quên chấm công ngay khi nộp (pending): ghi nguồn đơn
+// vào WorkDayStatus.sources để phân biệt "đã có đơn" / "chưa có đơn" cho ngày
+// thiếu chấm công (missed_clock), kể cả khi đơn chưa được duyệt.
+async function onCreate(request, _userInfo, session) {
+  const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
+  const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
+  await WorkDayStatusModel.updateMany(
+    {
+      user_id: request.user_id,
+      date: { $gte: dateStart, $lte: dateEnd },
+      isDeleted: false,
+    },
+    { $addToSet: { sources: { ref_id: request._id, ref_type: "request" } } },
+    { session },
+  );
+}
+
+// Gỡ nguồn đơn khỏi WorkDayStatus.sources khi đơn bị từ chối hoặc bị hủy.
+async function onReject(request, session) {
+  const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
+  const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
+  await WorkDayStatusModel.updateMany(
+    {
+      user_id: request.user_id,
+      date: { $gte: dateStart, $lte: dateEnd },
+      isDeleted: false,
+    },
+    { $pull: { sources: { ref_id: request._id, ref_type: "request" } } },
+    { session },
+  );
+}
+
 async function onApprove(request, session) {
   const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
   const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
@@ -146,4 +178,4 @@ async function onApprove(request, session) {
   });
 }
 
-module.exports = { validate, validateAsync, onApprove };
+module.exports = { validate, validateAsync, onCreate, onReject, onApprove };

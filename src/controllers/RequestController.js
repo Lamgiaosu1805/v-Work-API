@@ -111,20 +111,20 @@ const RequestController = {
         await session.commitTransaction();
         session.endSession();
 
-        // UserInfoModel.findById(assigned_reviewer)
-        //   .select("id_account full_name")
-        //   .then((reviewerInfo) => {
-        //     if (!reviewerInfo) return;
-        //     return notify(reviewerInfo.id_account, {
-        //       title: "Đơn xin phép mới",
-        //       body: `${userInfo.full_name} gửi đơn ${TYPE_LABELS[request_type]}`,
-        //       type: `${request_type}_created`,
-        //       ref_id: request._id,
-        //       ref_type: "request",
-        //       uri: `/requests/${request._id}`,
-        //     });
-        //   })
-        //   .catch(() => {});
+        UserInfoModel.findById(assigned_reviewer)
+          .select("id_account full_name")
+          .then((reviewerInfo) => {
+            if (!reviewerInfo) return;
+            return notify(reviewerInfo.id_account, {
+              title: "Đơn xin phép mới",
+              body: `${userInfo.full_name} gửi đơn ${TYPE_LABELS[request_type]}`,
+              type: `${request_type}_created`,
+              ref_id: request._id,
+              ref_type: "request",
+              uri: `/requests/${request._id}`,
+            });
+          })
+          .catch(() => {});
 
         return res.status(201).json({ message: "Tạo đơn thành công", data: request });
       } catch (error) {

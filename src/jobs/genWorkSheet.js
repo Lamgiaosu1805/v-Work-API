@@ -1,113 +1,107 @@
 const cron = require("node-cron");
-const mongoose = require("mongoose");
+const moment = require("moment-timezone");
 const UserInfo = require("../models/UserInfoModel");
 const WorkSchedule = require("../models/WorkScheduleModel");
 const WorkSheet = require("../models/WorkSheetModel");
+const WorkDayStatus = require("../models/WorkDayStatusModel");
+const HolidayModel = require("../models/HolidayModel");
 const Shift = require("../models/ShiftModel");
 
-// Hàm chính tạo WorkSheet
-async function createDailyWorkSheets() {
-    try {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const start = new Date(today);
-        const end = new Date(today);
-        end.setDate(end.getDate() + 1);
+const TZ = "Asia/Ho_Chi_Minh";
 
-        const dayOfWeek = today.getDay() === 0 ? 7 : today.getDay(); // 1=Mon ... 7=Sun
-
-        // Nếu là Chủ Nhật thì không chạy
-        if (dayOfWeek === 7) {
-            console.log(`📅 Hôm nay là Chủ Nhật, bỏ qua việc tạo worksheet.`);
-            return;
-        }
-
-        console.log(`📅 [Cron] Bắt đầu tạo worksheet cho ngày ${today.toLocaleDateString("vi-VN")}`);
-
-        // Lấy toàn bộ user active
-        const users = await UserInfo.find({ isDeleted: false });
-        const fulltimeUsers = users.filter(u => !u.employment_type || u.employment_type === "fulltime");
-        const parttimeUsers = users.filter(u => u.employment_type === "parttime");
-
-        // ---- FULLTIME ----
-        let adminShift;
-        let morningShift;
-
-        // Lấy ca hành chính & ca sáng
-        adminShift = await Shift.findOne({ name: "Ca hành chính" });
-        morningShift = await Shift.findOne({ name: "Ca sáng" });
-
-        if (!adminShift) console.warn("Không tìm thấy ca hành chính!");
-        if (!morningShift) console.warn("Không tìm thấy ca sáng!");
-
-        for (const user of fulltimeUsers) {
-            // Nếu đã tồn tại sheet hôm nay thì bỏ
-            const exist = await WorkSheet.findOne({
-                user_id: user._id,
-                date: { $gte: start, $lt: end }
-            });
-            if (exist) continue;
-
-            // Nếu hôm nay là thứ 7 → tạo ca sáng
-            if (dayOfWeek === 6) {
-                if (morningShift) {
-                    await WorkSheet.create({
-                        user_id: user._id,
-                        date: today,
-                        shifts: [morningShift._id],
-                        mergedShift: false,
-                        status: "pending",
-                    });
-                }
-                continue;
-            }
-
-            // Các ngày từ thứ 2 → thứ 6 dùng ca hành chính
-            if (adminShift) {
-                await WorkSheet.create({
-                    user_id: user._id,
-                    date: today,
-                    shifts: [adminShift._id],
-                    mergedShift: true,
-                    status: "pending",
-                });
-            }
-        }
-
-        // ---- PARTTIME ----
-        for (const user of parttimeUsers) {
-            const workSchedule = await WorkSchedule.find({ userId: user._id, dayOfWeek }).populate("shifts");
-            if (!workSchedule || workSchedule.length === 0) continue;
-
-            const exist = await WorkSheet.findOne({
-                user_id: user._id,
-                date: { $gte: start, $lt: end }
-            });
-            if (exist) continue;
-
-            // Merge ca nếu >1 ca trong ngày
-            const shiftsToday = workSchedule.flatMap(ws => ws.shifts);
-            const mergedShift = shiftsToday.length > 1;
-
-            await WorkSheet.create({
-                user_id: user._id,
-                date: today,
-                shifts: shiftsToday.map(s => s._id),
-                mergedShift,
-                status: "pending",
-            });
-        }
-
-        console.log("Cron tạo WorkSheet hằng ngày hoàn tất!");
-    } catch (error) {
-        console.error("Lỗi cron createDailyWorkSheets:", error);
-    }
+async function ensurePendingStatus(userId, worksheetId, date) {
+  await WorkDayStatus.updateOne(
+    { user_id: userId, date, period: "full" },
+    {
+      $setOnInsert: {
+        worksheet_id: worksheetId,
+        status: "pending",
+        sources: [{ ref_id: worksheetId, ref_type: "system" }],
+        isDeleted: false,
+      },
+    },
+    { upsert: true },
+  );
 }
 
-// Lên lịch chạy lúc 00:05 mỗi ngày
+async function createDailyWorkSheets() {
+  try {
+    const today = moment.tz(TZ).startOf("day").toDate();
+    const tomorrow = moment.tz(TZ).startOf("day").add(1, "day").toDate();
+    const dayOfWeek = moment.tz(TZ).day() === 0 ? 7 : moment.tz(TZ).day(); // 1=Mon...7=Sun
+
+    if (dayOfWeek === 7) {
+      console.log("[Cron] Hôm nay là Chủ Nhật, bỏ qua việc tạo worksheet.");
+      return;
+    }
+
+    const todayHolidays = await HolidayModel.find({ date: today, isDeleted: false });
+    const globalHoliday = todayHolidays.find(h => h.scope_type === "all");
+    if (globalHoliday) {
+      console.log(`[Cron] Hôm nay là ngày lễ toàn công ty (${globalHoliday.name}), bỏ qua việc tạo worksheet.`);
+      return;
+    }
+
+    const branchHolidayIds = new Set(
+      todayHolidays
+        .filter(h => h.scope_type === "branch")
+        .flatMap(h => h.branches.map(b => b.toString())),
+    );
+
+    console.log(`[Cron] Bắt đầu tạo worksheet cho ngày ${moment.tz(today, TZ).format("DD/MM/YYYY")}`);
+
+    const users = await UserInfo.find({ isDeleted: false });
+
+    const isOnHoliday = (user) =>
+      branchHolidayIds.size > 0 && user.branch_id && branchHolidayIds.has(user.branch_id.toString());
+
+    const fulltimeUsers = users.filter(u => !isOnHoliday(u) && (!u.employment_type || u.employment_type === "fulltime"));
+    const parttimeUsers = users.filter(u => !isOnHoliday(u) && u.employment_type === "parttime");
+
+    // ---- FULLTIME ----
+    const [adminShift, morningShift] = await Promise.all([
+      Shift.findOne({ name: "Ca hành chính" }),
+      Shift.findOne({ name: "Ca sáng" }),
+    ]);
+
+    if (!adminShift) console.warn("[Cron] Không tìm thấy ca hành chính!");
+    if (!morningShift) console.warn("[Cron] Không tìm thấy ca sáng!");
+
+    for (const user of fulltimeUsers) {
+      const shift = dayOfWeek === 6 ? morningShift : adminShift;
+      if (!shift) continue;
+
+      const worksheet = await WorkSheet.findOneAndUpdate(
+        { user_id: user._id, date: today },
+        { $setOnInsert: { shifts: [shift._id] } },
+        { upsert: true, new: true },
+      );
+      await ensurePendingStatus(user._id, worksheet._id, today);
+    }
+
+    // ---- PARTTIME ----
+    for (const user of parttimeUsers) {
+      const workSchedule = await WorkSchedule.find({ userId: user._id, dayOfWeek }).populate("shifts");
+      if (!workSchedule || workSchedule.length === 0) continue;
+
+      const shiftsToday = workSchedule.flatMap(ws => ws.shifts);
+      const worksheet = await WorkSheet.findOneAndUpdate(
+        { user_id: user._id, date: today },
+        { $setOnInsert: { shifts: shiftsToday.map(s => s._id) } },
+        { upsert: true, new: true },
+      );
+      await ensurePendingStatus(user._id, worksheet._id, today);
+    }
+
+    console.log("[Cron] Tạo WorkSheet hằng ngày hoàn tất!");
+  } catch (error) {
+    console.error("[Cron] Lỗi createDailyWorkSheets:", error);
+  }
+}
+
 cron.schedule("1 0 * * *", async () => {
-    console.log("🕐 [Cron] Bắt đầu chạy createDailyWorkSheets");
-    await createDailyWorkSheets();
-});
+  console.log("[Cron] Bắt đầu chạy createDailyWorkSheets");
+  await createDailyWorkSheets();
+}, { timezone: TZ });
 
 module.exports = createDailyWorkSheets;

@@ -91,6 +91,12 @@ function resolveAttendanceDay({
       newCheckOut = worksheet.check_out;
   }
 
+  const MIN_GAP_MINUTES = 120;
+  if (newCheckIn && newCheckOut) {
+    const gapMinutes = (new Date(newCheckOut) - new Date(newCheckIn)) / 60000;
+    if (gapMinutes < MIN_GAP_MINUTES) newCheckOut = null;
+  }
+
   const hasIn = !!newCheckIn;
   const hasOut = !!newCheckOut;
   if (!hasIn && !hasOut) return { skip: true };

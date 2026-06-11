@@ -820,6 +820,7 @@ const AttendanceController = {
 
         return {
           date: dateStr,
+          worksheet_id: ws?._id ?? null,
           check_in: ws?.check_in
             ? moment.tz(ws.check_in, TZ).format("HH:mm")
             : null,
@@ -1550,6 +1551,35 @@ const AttendanceController = {
       return res
         .status(500)
         .json({ message: "Lỗi server", error: err.message });
+    }
+  },
+
+  adminEditWorksheet: async (req, res) => {
+    try {
+      const { worksheetId } = req.params;
+      const { work_unit } = req.body;
+
+      if (!mongoose.Types.ObjectId.isValid(worksheetId))
+        return res.status(400).json({ message: "worksheetId không hợp lệ" });
+
+      if (work_unit === undefined || work_unit === null || typeof work_unit !== "number" || work_unit < 0)
+        return res.status(400).json({ message: "work_unit phải là số không âm" });
+
+      const worksheet = await WorkSheetModel.findOneAndUpdate(
+        { _id: worksheetId, isDeleted: false },
+        { work_unit },
+        { new: true },
+      );
+      if (!worksheet)
+        return res.status(404).json({ message: "Không tìm thấy bản ghi công" });
+
+      return res.status(200).json({
+        message: "Cập nhật công thành công",
+        data: worksheet,
+      });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Lỗi server", error: err.message });
     }
   },
 };

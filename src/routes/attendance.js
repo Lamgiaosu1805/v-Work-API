@@ -25,6 +25,9 @@ router.post('/checkOut', authenticate, AttendanceController.checkOut);
 router.post('/createShift', authenticate, isAdmin, AttendanceController.createShift);
 router.post('/import-excel', authenticate, isAdmin, uploadMemory.single('file'), AttendanceController.importExcel);
 
+//PATCH
+router.patch('/admin/worksheet/:worksheetId', authenticate, isAdmin, AttendanceController.adminEditWorksheet);
+
 //DELETE
 router.delete('/deleteAllowedWifiLocation/:id', authenticate, isAdmin, AttendanceController.deleteAllowedWifiLocation);
 

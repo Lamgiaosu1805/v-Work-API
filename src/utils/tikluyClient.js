@@ -10,6 +10,6 @@ export const tikluyClient = axios.create({
 });
 
 tikluyClient.interceptors.request.use((config) => {
-  config.headers.transactionId = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  config.headers["transactionId"] = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   return config;
 });

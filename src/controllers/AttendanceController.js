@@ -1264,7 +1264,7 @@ const AttendanceController = {
         const dayRows = parseDayRows(block);
         if (!dayRows.length) continue;
 
-        let worksheetMap, forgotMap, forgotCountMap, lateForgivenSet;
+        let worksheetMap, forgotMap, forgotCountMap, lateForgivenSet, leavePeriodsMap;
         try {
           const rangeStart = moment
             .tz(dayRows[0].dateStr, "DD/MM/YYYY", TZ)
@@ -1275,33 +1275,38 @@ const AttendanceController = {
             .endOf("day")
             .toDate();
 
-          // Mở rộng ra ranh giới tháng dương lịch để đếm đúng "lần thứ mấy"
-          // trong tháng (số lần quên chấm công reset vào mùng 1 hàng tháng).
           const monthStart = moment.tz(rangeStart, TZ).startOf("month").toDate();
           const monthEnd = moment.tz(rangeEnd, TZ).endOf("month").toDate();
 
-          const [worksheets, forgotReqs, lateReqs] = await Promise.all([
-            WorkSheetModel.find({
-              user_id: userId,
-              date: { $gte: rangeStart, $lte: rangeEnd },
-              isDeleted: false,
-            }).populate("shifts"),
-            RequestModel.find({
-              user_id: userId,
-              request_type: "forgot_checkin",
-              status: "approved",
-              isDeleted: false,
-              date: { $gte: monthStart, $lte: monthEnd },
-            }).sort({ date: 1 }),
-            RequestModel.find({
-              user_id: userId,
-              request_type: "late_early",
-              type: "late",
-              status: "approved",
-              isDeleted: false,
-              date: { $gte: rangeStart, $lte: rangeEnd },
-            }),
-          ]);
+          const [worksheets, forgotReqs, lateReqs, leaveStatuses] =
+            await Promise.all([
+              WorkSheetModel.find({
+                user_id: userId,
+                date: { $gte: rangeStart, $lte: rangeEnd },
+                isDeleted: false,
+              }).populate("shifts"),
+              RequestModel.find({
+                user_id: userId,
+                request_type: "forgot_checkin",
+                status: "approved",
+                isDeleted: false,
+                date: { $gte: monthStart, $lte: monthEnd },
+              }).sort({ date: 1 }),
+              RequestModel.find({
+                user_id: userId,
+                request_type: "late_early",
+                type: "late",
+                status: "approved",
+                isDeleted: false,
+                date: { $gte: rangeStart, $lte: rangeEnd },
+              }),
+              WorkDayStatusModel.find({
+                user_id: userId,
+                date: { $gte: rangeStart, $lte: rangeEnd },
+                status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
+                isDeleted: false,
+              }),
+            ]);
 
           worksheetMap = new Map(
             worksheets.map((ws) => [
@@ -1315,8 +1320,7 @@ const AttendanceController = {
               r,
             ]),
           );
-          // Đếm số lần quên chấm công lũy kế trong từng tháng dương lịch:
-          // dateKey -> đây là lần thứ mấy (1-based) tính tới ngày đó.
+      
           forgotCountMap = new Map();
           const monthlyCounter = new Map();
           for (const r of forgotReqs) {
@@ -1329,6 +1333,13 @@ const AttendanceController = {
           lateForgivenSet = new Set(
             lateReqs.map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD")),
           );
+
+          leavePeriodsMap = new Map();
+          for (const ds of leaveStatuses) {
+            const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
+            if (!leavePeriodsMap.has(key)) leavePeriodsMap.set(key, new Set());
+            leavePeriodsMap.get(key).add(ds.period);
+          }
         } catch (e) {
           console.error(
             `[importExcel] Lỗi tải dữ liệu nhân viên (mã ${block.machine_code}):`,
@@ -1363,6 +1374,7 @@ const AttendanceController = {
             forgotMap,
             forgotCountMap,
             lateForgivenSet,
+            leavePeriodsMap,
             resolveLatePenalty,
             resolveForgotPenalty,
           });
@@ -1407,6 +1419,7 @@ const AttendanceController = {
             forgotMap,
             forgotCountMap,
             lateForgivenSet,
+            leavePeriodsMap,
             resolveLatePenalty,
             resolveForgotPenalty,
           });

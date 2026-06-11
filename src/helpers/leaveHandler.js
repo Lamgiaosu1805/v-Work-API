@@ -255,6 +255,9 @@ async function resolveLeaveConflictOnAttendance({
   lastShiftEnd,
   session,
 }) {
+
+  if (!checkInTime || !checkOutTime) return;
+
   const dateStart = moment.tz(date, TZ).startOf("day").toDate();
   const dateEnd = moment.tz(date, TZ).endOf("day").toDate();
 

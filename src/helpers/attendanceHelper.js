@@ -61,6 +61,7 @@ function resolveAttendanceDay({
   forgotMap,
   forgotCountMap,
   lateForgivenSet,
+  leavePeriodsMap,
   resolveLatePenalty,
   resolveForgotPenalty,
 }) {
@@ -97,9 +98,45 @@ function resolveAttendanceDay({
   const isSaturday = dateMoment.day() === 6;
   const forgiven = lateForgivenSet.has(dateKey);
 
+  let lastShiftEnd = null;
+  if (worksheet.shifts?.length) {
+    const lastShift = worksheet.shifts[worksheet.shifts.length - 1];
+    lastShiftEnd = lastShift?.end_time ?? null;
+  }
+
+  const leavePeriods = leavePeriodsMap?.get(dateKey);
+  let leaveMorning =
+    !!leavePeriods && (leavePeriods.has("morning") || leavePeriods.has("full"));
+  let leaveAfternoon =
+    !!leavePeriods &&
+    (leavePeriods.has("afternoon") || leavePeriods.has("full"));
+  if (hasIn && hasOut) {
+    if (leaveMorning) {
+      const noon = moment.tz(dateKey, TZ).hour(12).minute(0).second(0);
+      if (moment.tz(newCheckIn, TZ).isBefore(noon)) leaveMorning = false;
+    }
+    if (leaveAfternoon && lastShiftEnd) {
+      const [endH, endM] = lastShiftEnd.split(":").map(Number);
+      const threshold = moment
+        .tz(dateKey, TZ)
+        .hour(endH)
+        .minute(endM)
+        .second(0)
+        .subtract(60, "minutes");
+      if (moment.tz(newCheckOut, TZ).isSameOrAfter(threshold))
+        leaveAfternoon = false;
+    }
+  }
+  const leaveDeduction = Math.min(
+    isSaturday ? 0.5 : 1,
+    (leaveMorning ? 0.5 : 0) + (leaveAfternoon ? 0.5 : 0),
+  );
+  const missedIn = !hasIn && !leaveMorning;
+  const missedOut = !hasOut && !leaveAfternoon;
+
   let minutesLate = 0;
   const firstShift = worksheet.shifts && worksheet.shifts[0];
-  if (hasIn && firstShift && firstShift.start_time) {
+  if (hasIn && !leaveMorning && firstShift && firstShift.start_time) {
     const [sh, sm] = firstShift.start_time.split(":").map(Number);
     const shiftStart = moment.tz(dateKey, TZ).hour(sh).minute(sm).second(0);
     minutesLate = Math.max(
@@ -112,20 +149,18 @@ function resolveAttendanceDay({
   let work_unit;
   let penalty_amount = 0;
   let morning_absent = false;
-  if (forgot) {
-    // Quên chấm công có đơn duyệt: phạt lũy tiến theo số lần trong tháng,
-    // không áp phạt đi muộn (lần 1-3 đủ công, lần 4-5 trừ tiền, lần 6+ mất công).
+  if (missedIn || missedOut) {
+    work_unit = 0;
+  } else if (forgot) {
     const occurrence = forgotCountMap?.get(dateKey) || 0;
     const r = resolveForgotPenalty(dayStart, occurrence, isSaturday);
-    work_unit = r.work_unit;
+    work_unit = Math.max(0, r.work_unit - leaveDeduction);
     penalty_amount = r.penalty_amount;
-  } else if (!hasIn) {
-    work_unit = isSaturday ? 0.5 : 1;
   } else if (forgiven) {
-    work_unit = isSaturday ? 0.5 : 1;
+    work_unit = Math.max(0, (isSaturday ? 0.5 : 1) - leaveDeduction);
   } else {
     const r = resolveLatePenalty(dayStart, minutesLate, isSaturday);
-    work_unit = r.work_unit;
+    work_unit = Math.max(0, r.work_unit - leaveDeduction);
     penalty_amount = r.penalty_amount;
     morning_absent = r.morning_absent;
   }
@@ -146,12 +181,6 @@ function resolveAttendanceDay({
   worksheet.work_unit = work_unit;
   worksheet.penalty_amount = penalty_amount;
 
-  let lastShiftEnd = null;
-  if (worksheet.shifts?.length) {
-    const lastShift = worksheet.shifts[worksheet.shifts.length - 1];
-    lastShiftEnd = lastShift?.end_time ?? null;
-  }
-
   return {
     skip: false,
     newCheckIn,
@@ -162,6 +191,8 @@ function resolveAttendanceDay({
     morning_absent,
     hasIn,
     hasOut,
+    missedIn,
+    missedOut,
     lastShiftEnd,
   };
 }
@@ -186,12 +217,14 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
       session,
     });
 
+    const OVERRIDABLE = ["pending", "missed_clock", "absent"];
+
     if (computed.morning_absent) {
       await WorkDayStatusModel.deleteMany(
         {
           user_id: userId,
           date: { $gte: dayStart, $lt: dayEnd },
-          status: "pending",
+          status: { $in: OVERRIDABLE },
         },
         { session },
       );
@@ -213,13 +246,13 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
         );
       }
     } else {
-      const newStatus =
-        computed.hasIn && computed.hasOut ? "present" : "missed_clock";
+      const complete = !computed.missedIn && !computed.missedOut;
+      const newStatus = complete ? "present" : "missed_clock";
       await WorkDayStatusModel.updateMany(
         {
           user_id: userId,
           date: { $gte: dayStart, $lt: dayEnd },
-          status: "pending",
+          status: { $in: OVERRIDABLE },
           isDeleted: false,
         },
         { status: newStatus },

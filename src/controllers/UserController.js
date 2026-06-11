@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 const AccountModel = require("../models/AccountModel");
+const EmploymentStatusModel = require("../models/EmploymentStatusModel");
+const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 
 // Multer decode originalname bằng latin1 — cần re-encode sang UTF-8 để giữ tiếng Việt
 const decodeFilename = (name) => Buffer.from(name, 'latin1').toString('utf8');
@@ -38,6 +40,7 @@ const UserController = {
         tinh_trang_hon_nhan,
         employment_type,
         branch_id,
+        employment_status,
       } = req.body;
 
       let { userDepartments = [], schedules = [] } = req.body;
@@ -141,6 +144,8 @@ const UserController = {
             ma_nv: maNV,
             employment_type,
             branch_id: branch_id || null,
+            employment_status: employment_status || null,
+            leave_balance: { annual: 0 },
           },
         ],
         { session }
@@ -668,6 +673,9 @@ const UserController = {
         "tinh_trang_hon_nhan",
         "employment_type",
         "branch_id",
+        "start_date",
+        "probation_end_date",
+        "resignation_date",
       ];
 
       const updates = {};
@@ -675,6 +683,16 @@ const UserController = {
         if (req.body[field] !== undefined) {
           updates[field] = req.body[field];
         }
+      }
+
+      if (req.body.leave_balance_annual !== undefined) {
+        const val = Number(req.body.leave_balance_annual);
+        if (isNaN(val) || val < 0) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({ message: "leave_balance_annual không hợp lệ" });
+        }
+        updates["leave_balance.annual"] = val;
       }
 
       const hasFiles = Object.keys(req.files || {}).length > 0;
@@ -948,6 +966,53 @@ const UserController = {
       });
     } catch (error) {
       return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+  setEmploymentStatus: async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      const { id } = req.params;
+      const { employment_status_id, effective_date } = req.body;
+
+      if (!employment_status_id || !effective_date)
+        return res.status(400).json({ message: "employment_status_id và effective_date là bắt buộc" });
+
+      const [userInfo, newStatus] = await Promise.all([
+        UserInfoModel.findOne({ _id: id, isDeleted: false }).session(session),
+        EmploymentStatusModel.findOne({ _id: employment_status_id, isDeleted: false }),
+      ]);
+
+      if (!userInfo) return res.status(404).json({ message: "Không tìm thấy nhân viên" });
+      if (!newStatus) return res.status(404).json({ message: "Không tìm thấy loại hợp đồng" });
+
+      const effectiveMoment = new Date(effective_date);
+
+      if (newStatus.retroactive_on_promote && userInfo.start_date) {
+        const startMoment = new Date(userInfo.start_date);
+        const months = Math.floor(
+          (effectiveMoment.getFullYear() - startMoment.getFullYear()) * 12 +
+          (effectiveMoment.getMonth() - startMoment.getMonth())
+        );
+        if (months > 0) {
+          userInfo.leave_balance = {
+            ...userInfo.leave_balance,
+            annual: (userInfo.leave_balance?.annual ?? 0) + months * MONTHLY_ACCRUAL,
+          };
+        }
+      }
+
+      userInfo.employment_status = newStatus._id;
+      await userInfo.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      res.json({ message: "Cập nhật loại hợp đồng thành công", data: userInfo });
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      res.status(500).json({ message: "Lỗi server", error: err.message });
     }
   },
 };

@@ -18,6 +18,11 @@ const branchRouter = require('./branch')
 const printRouter = require('./print')
 const customerClaimRequestRouter = require('./customerClaimRequest')
 const aiRouter = require('./ai')
+const requestRouter = require('./request')
+const holidayRouter = require('./holiday')
+const employmentStatusRouter = require('./employmentStatus')
+const attendanceMappingRouter = require('./attendanceMapping')
+const penaltyTierRouter = require('./penaltyTier')
 
 const route = (app) => {
     app.use(`/posts`, postRouter)
@@ -39,6 +44,11 @@ const route = (app) => {
     app.use(`/branch`, branchRouter)
     app.use(`/print`, printRouter)
     app.use(`/customer-claim-request`, customerClaimRequestRouter)
+    app.use(`/requests`, requestRouter)
+    app.use(`/holidays`, holidayRouter)
+    app.use(`/employment-status`, employmentStatusRouter)
+    app.use(`/attendance-mapping`, attendanceMappingRouter)
+    app.use(`/penalty-tier`, penaltyTierRouter)
     app.use(`/ai`, aiRouter)
 }
 

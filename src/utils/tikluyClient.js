@@ -1,4 +1,4 @@
-import axios from "axios";
+const axios = require("axios");
 
 export const tikluyClient = axios.create({
   baseURL: process.env.TIKLUY_BASE_URL,

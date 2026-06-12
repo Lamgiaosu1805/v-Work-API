@@ -1,6 +1,6 @@
-import axios from "axios";
+const axios = require("axios");
 
-export const tikluyClient = axios.create({
+const tikluyClient = axios.create({
   baseURL: process.env.TIKLUY_BASE_URL,
   auth: {
     username: process.env.CRM_SYNC_USERNAME,
@@ -13,3 +13,7 @@ tikluyClient.interceptors.request.use((config) => {
   config.headers["transactionId"] = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   return config;
 });
+
+module.exports = {
+  tikluyClient
+};

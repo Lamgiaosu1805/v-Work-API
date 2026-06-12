@@ -88,12 +88,12 @@ route(app);
   try {
     await db.connect();
 
-    require('./src/jobs/genWorkSheet');
-    require('./src/jobs/finalizeWorkDay');
+    // require('./src/jobs/genWorkSheet');
+    // require('./src/jobs/finalizeWorkDay');
     require('./src/jobs/cleanupDeviceTokens');
     require('./src/jobs/weeklyReportJob');
-    require('./src/jobs/accrueMonthlyLeave');
-    require('./src/jobs/autoRejectLeaveRequests');
+    // require('./src/jobs/accrueMonthlyLeave');
+    // require('./src/jobs/autoRejectLeaveRequests');
     require('./src/jobs/churnDetectionJob')();
     const { ensureAllDeptFolders } = require('./src/jobs/ensureDeptFolders');
     await ensureAllDeptFolders();

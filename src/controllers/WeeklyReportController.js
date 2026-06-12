@@ -255,6 +255,35 @@ const WeeklyReportController = {
             return res.status(500).json({ message: "Lỗi server", error: error.message });
         }
     },
+
+    downloadReportFile: async (req, res) => {
+        try {
+            const { reportId } = req.params;
+            const accountId = req.account._id;
+            const { role, module_access } = req.account;
+
+            const report = await WeeklyReportModel.findOne({ _id: reportId, isDeleted: false }).populate("file");
+            if (!report) return res.status(404).json({ message: "Không tìm thấy báo cáo" });
+            if (!report.file) return res.status(404).json({ message: "Báo cáo này chưa có file" });
+
+            const isWorkplaceManager = role === "admin" || (role === "manager" && module_access?.includes("workplace"));
+            if (!isWorkplaceManager && !(await canViewDept(accountId, report.department))) {
+                return res.status(403).json({ message: "Bạn không có quyền tải báo cáo này" });
+            }
+
+            const file = report.file;
+            const filePath = getInternalFilePath(file.departmentCode, file.subfolder, file.filename);
+            if (!fs.existsSync(filePath)) {
+                return res.status(404).json({ message: "File không tồn tại trên server" });
+            }
+
+            res.setHeader("Content-Type", file.mimeType || "application/octet-stream");
+            res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(file.originalName)}"`);
+            return res.sendFile(filePath);
+        } catch (error) {
+            return res.status(500).json({ message: "Lỗi server", error: error.message });
+        }
+    },
 };
 
 module.exports = WeeklyReportController;

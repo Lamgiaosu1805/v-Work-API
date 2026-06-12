@@ -19,4 +19,6 @@ router.post("/:deptId/submit", authenticate, uploadWeeklyReport.single("file"), 
 // Xem file báo cáo
 router.get("/file/:reportId/view", authenticate, WeeklyReportController.viewReportFile);
 
+router.get("/file/:reportId/download", authenticate, WeeklyReportController.downloadReportFile);
+
 module.exports = router;

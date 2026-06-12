@@ -7,13 +7,8 @@ const router = express.Router();
 // GET
 router.get("/my-customers", authenticate, hasModuleAccess("crm"), CustomerController.getMyCustomers);
 router.get("/agent-customers", verifyInternalRequest, CustomerController.getMyCustomersAsAgent);
-router.get("/my-info",authenticate, CustomerController.getMyInfo);
+router.get("/my-info", verifyInternalRequest, CustomerController.getMyInfo);
 router.get("/all", authenticate, canManage("crm"), CustomerController.getAll);
-router.get("/detail-info-customer", authenticate, canManage("crm"), CustomerController.getDetailInfo);
-router.get("/fluctuation", authenticate, canManage("crm"), CustomerController.getFluctuation);
-router.get("/view-image", authenticate, canManage("crm"), CustomerController.getViewImage);
-router.get("/investment-holding", authenticate, canManage("crm"), CustomerController.getCustomerInvestmentHolding);
-router.get("/staff-info", authenticate, canManage("crm"), CustomerController.getCustomerStaffInfo);
 
 // POST
 router.post("/upsert", verifyInternalRequest, CustomerController.upsert);

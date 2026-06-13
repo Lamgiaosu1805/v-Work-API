@@ -7,10 +7,6 @@ const AgentModel = require("../models/AgentModel");
 const InvestmentModel = require("../models/InvestmentModel");
 const { createCifCommission, createEkycCommission, calculateCommission, getTNCNRate } = require("../helpers/commissionCalculator");
 const { computeClaimWindow } = require("../helpers/claimWindowHelper");
-const { tikluyClient } = require("../utils/tikluyClient");
-const { decrypt } = require("../helpers/customerHelper");
-const dayjs = require("dayjs");
-const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 
 const CustomerController = {
     upsert: async (req, res) => {

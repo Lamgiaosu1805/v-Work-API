@@ -716,7 +716,7 @@ const CustomerController = {
       });
     }
     },
-
+//
     getViewImage: async (req, res) => {
         try {
           const { key_image } = req.query;

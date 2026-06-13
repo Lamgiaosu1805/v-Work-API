@@ -1,5 +1,5 @@
 import crypto from "crypto";
-//
+
 export const decrypt = (encryptedText) => {
   if (!encryptedText) return null;
   const combined = Buffer.from(encryptedText, "base64");

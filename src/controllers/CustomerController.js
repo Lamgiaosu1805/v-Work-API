@@ -7,6 +7,10 @@ const AgentModel = require("../models/AgentModel");
 const InvestmentModel = require("../models/InvestmentModel");
 const { createCifCommission, createEkycCommission, calculateCommission, getTNCNRate } = require("../helpers/commissionCalculator");
 const { computeClaimWindow } = require("../helpers/claimWindowHelper");
+const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
+const { tikluyClient } = require("../utils/tikluyClient");
+const { decrypt } = require("../helpers/customerHelper");
+const dayjs = require("dayjs");
 
 const CustomerController = {
     upsert: async (req, res) => {
@@ -712,7 +716,7 @@ const CustomerController = {
       });
     }
     },
-//
+
     getViewImage: async (req, res) => {
         try {
           const { key_image } = req.query;

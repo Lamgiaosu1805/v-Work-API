@@ -1,4 +1,4 @@
-import crypto from "crypto";
+const crypto = require('crypto');
 
 export const decrypt = (encryptedText) => {
   if (!encryptedText) return null;

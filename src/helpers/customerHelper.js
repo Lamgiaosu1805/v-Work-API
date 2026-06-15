@@ -1,6 +1,6 @@
-const crypto = require('crypto');
+const crypto = require("crypto");
 
-export const decrypt = (encryptedText) => {
+const decrypt = (encryptedText) => {
   if (!encryptedText) return null;
   const combined = Buffer.from(encryptedText, "base64");
 
@@ -19,4 +19,8 @@ export const decrypt = (encryptedText) => {
   return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString(
     "utf8",
   );
+};
+
+module.exports = {
+  decrypt,
 };

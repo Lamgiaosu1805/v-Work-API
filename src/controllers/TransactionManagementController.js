@@ -148,14 +148,12 @@ const TransactionManagementController = {
 
   getCustomerDepositTransactions: async (req, res) => {
     try {
-      const {userId, category, pageNumber, pageSize } = req.query;
+      const {externalId, category, pageNumber, pageSize } = req.query;
 
       const listTransactionRes = await tikluyClient.get(
-        `transaction-management?userId=${userId}&category=${category || 0}&pageNumber=${pageNumber || 0}&pageSize=${pageSize || 10}`,
+        `transaction-management?userId=${externalId}&category=${category || 0}&pageNumber=${pageNumber || 0}&pageSize=${pageSize || 10}`,
       );
 
-      console.log(listTransactionRes.data.data);
-      
       const transactionData = listTransactionRes.data?.data || {};
       const total = Number(transactionData.totalRecords || 0);
       

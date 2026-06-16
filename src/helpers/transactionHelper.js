@@ -30,7 +30,7 @@ const validateImageFile = (file) => {
   if (!file) return "File ảnh là bắt buộc";
 
   if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-    return `Định dạng file không hợp lệ. Chỉ chấp nhận: JPG, PNG, WEBP`;
+    return `Định dạng file không hợp lệ. Chỉ chấp nhận: JPG, PNG`;
   }
 
   if (file.size > MAX_FILE_SIZE) {

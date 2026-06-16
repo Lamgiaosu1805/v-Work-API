@@ -145,6 +145,41 @@ const TransactionManagementController = {
       });
     }
   },
+
+  getCustomerDepositTransactions: async (req, res) => {
+    try {
+      const {userId, category, pageNumber, pageSize } = req.query;
+
+      const listTransactionRes = await tikluyClient.get(
+        `transaction-management?userId=${userId}&category=${category || 0}&pageNumber=${pageNumber || 0}&pageSize=${pageSize || 10}`,
+      );
+
+      console.log(listTransactionRes.data.data);
+      
+      const transactionData = listTransactionRes.data?.data || {};
+      const total = Number(transactionData.totalRecords || 0);
+      
+      return res.status(200).json({
+        message: "Lấy danh sách giao dịch nạp tiền của khách hàng thành công",
+        data: transactionData || [],
+        pagination: {
+          total,
+          page: Number(pageNumber) || 0,
+          limit: Number(pageSize) || 10,
+          total_pages: Math.ceil(total / Number(pageSize) || 10),
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Error fetching customer transactions:",
+        error?.response?.data || error.message,
+      );
+      return res.status(500).json({
+        message: "Lỗi lấy danh sách giao dịch khách hàng",
+        error: error.message,
+      });
+    }
+  },
 };
 
 module.exports = TransactionManagementController;

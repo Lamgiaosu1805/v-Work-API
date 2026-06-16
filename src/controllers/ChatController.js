@@ -1,6 +1,10 @@
 const mongoose = require("mongoose");
+const fs = require("fs");
+const path = require("path");
 const { sendChatMessageNotification } = require("../helpers/chatNotification");
 const UserInfoModel = require("../models/UserInfoModel");
+const MessageModel = require("../models/MessageModel");
+const { getChatDir } = require("../middlewares/uploadChatImage");
 
 const {
   ChatError,
@@ -20,7 +24,16 @@ const {
   promoteMember,
   leaveGroup,
   addMembers,
+  ensureConversationAccess,
 } = require("../services/chatService");
+
+const CONTENT_TYPE_MAP = {
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+};
 
 function handleChatError(res, error) {
   // Chuẩn hoá lỗi nghiệp vụ của chat để controller trả status phù hợp.
@@ -59,6 +72,32 @@ function emitConversationMessageToMembers(io, conversation, payload) {
   memberIds.forEach((memberId) => {
     io.to(`user:${memberId}`).emit("message:new", payload);
   });
+}
+
+async function broadcastNewMessage({ req, currentUserInfo, message, clientMessageId }) {
+  const io = req.app.get("io");
+  let conversation = null;
+  if (!io) return { conversation };
+
+  const payload = {
+    conversationId: String(message.conversationId),
+    message,
+    clientMessageId: clientMessageId ?? null,
+  };
+
+  // Emit vào room conversation để tất cả client đang mở chat nhận ngay.
+  io.to(`conversation:${String(message.conversationId)}`).emit("message:new", payload);
+
+  // Load lại conversation để có đủ members phục vụ emit theo từng user room.
+  conversation = await getConversationDetail({
+    conversationId: message.conversationId,
+    userInfoId: currentUserInfo._id,
+  });
+
+  // Emit thêm theo từng user room để đồng bộ danh sách chat ở sidebar/inbox.
+  emitConversationMessageToMembers(io, conversation, payload);
+
+  return { conversation };
 }
 
 const ChatController = {
@@ -217,43 +256,43 @@ const ChatController = {
   },
 
   sendMessage: async (req, res) => {
+    const session = await mongoose.startSession();
     try {
-      // Gửi message qua service để validate quyền, lưu DB và trả message đã populate.
+      // Route nhận multipart/form-data: có file -> tin nhắn ảnh, không có file -> tin nhắn text.
+      const attachment = req.file
+        ? {
+            url: `chat/${req.params.conversationId}/${req.file.filename}`,
+            thumbnailUrl: req.file.thumbnailFilename
+              ? `chat/${req.params.conversationId}/${req.file.thumbnailFilename}`
+              : null,
+            mimeType: req.file.mimetype,
+            size: req.file.size,
+            width: req.file.width ?? null,
+            height: req.file.height ?? null,
+            originalName: req.file.originalname,
+          }
+        : null;
+
+      session.startTransaction();
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
       const message = await sendMessage({
         conversationId: req.params.conversationId,
         senderUserInfoId: currentUserInfo._id,
         content: req.body.content,
-        type: req.body.type,
+        type: attachment ? "image" : req.body.type,
+        attachment,
+        session,
+      });
+      await session.commitTransaction();
+
+      const { conversation } = await broadcastNewMessage({
+        req,
+        currentUserInfo,
+        message,
+        clientMessageId: req.body.clientMessageId,
       });
 
       const io = req.app.get("io");
-      let conversation = null;
-      if (io) {
-        // Emit vào room conversation để tất cả client đang mở chat nhận ngay.
-        io.to(`conversation:${String(message.conversationId)}`).emit(
-          "message:new",
-          {
-            conversationId: String(message.conversationId),
-            message,
-            clientMessageId: req.body.clientMessageId ?? null,
-          },
-        );
-
-        // Load lại conversation để có đủ members phục vụ emit theo từng user room.
-        conversation = await getConversationDetail({
-          conversationId: message.conversationId,
-          userInfoId: currentUserInfo._id,
-        });
-
-        // Emit thêm theo từng user room để đồng bộ danh sách chat ở sidebar/inbox.
-        emitConversationMessageToMembers(io, conversation, {
-          conversationId: String(message.conversationId),
-          message,
-          clientMessageId: req.body.clientMessageId ?? null,
-        });
-      }
-
       await sendChatMessageNotification({
         io,
         conversationId: message.conversationId,
@@ -267,6 +306,59 @@ const ChatController = {
         message: "Gửi tin nhắn thành công",
         data: message,
       });
+    } catch (error) {
+      // Chỉ dọn file trên đĩa khi DB ghi thất bại thật (transaction chưa commit).
+      // Nếu lỗi xảy ra sau commit (vd: emit/notification), message đã lưu DB nên giữ file lại.
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+        if (req.file) {
+          const chatDir = getChatDir(req.params.conversationId);
+          [req.file.filename, req.file.thumbnailFilename]
+            .filter(Boolean)
+            .forEach((name) => {
+              const filePath = path.join(chatDir, name);
+              if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            });
+        }
+      }
+      return handleChatError(res, error);
+    } finally {
+      session.endSession();
+    }
+  },
+
+  getMessageImage: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      await ensureConversationAccess(req.params.conversationId, currentUserInfo._id);
+
+      const message = await MessageModel.findOne({
+        _id: req.params.messageId,
+        conversationId: req.params.conversationId,
+        type: "image",
+        isDeleted: false,
+      }).lean();
+
+      if (!message?.attachment?.url) {
+        return res.status(404).json({ message: "Không tìm thấy ảnh" });
+      }
+
+      const variant = req.query.variant === "thumb" ? "thumbnailUrl" : "url";
+      const relativePath = message.attachment[variant] ?? message.attachment.url;
+
+      const baseDir =
+        process.env.NODE_ENV === "production"
+          ? process.env.UPLOAD_DIR_PROD
+          : process.env.UPLOAD_DIR_DEV;
+      const filePath = path.resolve(baseDir, relativePath);
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ message: "File ảnh không tồn tại trên server" });
+      }
+
+      const ext = path.extname(filePath).toLowerCase();
+      res.setHeader("Content-Type", CONTENT_TYPE_MAP[ext] ?? "application/octet-stream");
+      return res.sendFile(filePath);
     } catch (error) {
       return handleChatError(res, error);
     }

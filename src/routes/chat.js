@@ -1,6 +1,7 @@
 const express = require("express");
 const { authenticate } = require("../middlewares/authMiddleware");
 const ChatController = require("../controllers/ChatController");
+const { upload, processChatImage } = require("../middlewares/uploadChatImage");
 
 const router = express.Router();
 
@@ -21,7 +22,14 @@ router.get(
 router.post(
   "/conversations/:conversationId/messages",
   authenticate,
+  upload.single("image"),
+  processChatImage,
   ChatController.sendMessage,
+);
+router.get(
+  "/conversations/:conversationId/messages/:messageId/image",
+  authenticate,
+  ChatController.getMessageImage,
 );
 router.patch(
   "/conversations/:conversationId/seen",

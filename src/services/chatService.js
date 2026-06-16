@@ -183,6 +183,7 @@ async function createMessageDocument({
   senderUserInfoId,
   content,
   type = "text",
+  attachment = null,
   seenBy = [],
   session
 }) {
@@ -194,6 +195,10 @@ async function createMessageDocument({
     content: content || "",
     seenBy
   };
+
+  if (attachment) {
+    payload.attachment = attachment;
+  }
 
   const createdMessages = session
     ? await MessageModel.create([payload], { session })
@@ -396,7 +401,14 @@ async function getConversationMessages({ conversationId, userInfoId, page = 1, l
   };
 }
 
-async function sendMessage({ conversationId, senderUserInfoId, content, type = "text", session }) {
+async function sendMessage({
+  conversationId,
+  senderUserInfoId,
+  content,
+  type = "text",
+  attachment = null,
+  session
+}) {
   // Validate membership trước, sau đó mới ghi message và update lastMessage của conversation.
   await ensureConversationAccess(conversationId, senderUserInfoId);
 
@@ -406,8 +418,12 @@ async function sendMessage({ conversationId, senderUserInfoId, content, type = "
   }
 
   const normalizedContent = String(content || "").trim();
-  if (!normalizedContent) {
+  if (type === "text" && !normalizedContent) {
     throw new ChatError("Nội dung tin nhắn không được để trống", 400);
+  }
+
+  if (type === "image" && !attachment) {
+    throw new ChatError("Thiếu file ảnh", 400);
   }
 
   const message = await createMessageDocument({
@@ -415,6 +431,7 @@ async function sendMessage({ conversationId, senderUserInfoId, content, type = "
     senderUserInfoId,
     content: normalizedContent,
     type,
+    attachment,
     seenBy: [senderUserInfoId],
     session
   });
@@ -431,11 +448,15 @@ async function sendMessage({ conversationId, senderUserInfoId, content, type = "
     { session }
   );
 
-  const populatedMessage = await MessageModel.findById(message._id)
-    .populate("senderId", "full_name avatar ma_nv id_account")
-    .lean();
+  const query = MessageModel.findById(message._id).populate(
+    "senderId",
+    "full_name avatar ma_nv id_account"
+  );
+  if (session) {
+    query.session(session);
+  }
 
-  return populatedMessage;
+  return query.lean();
 }
 
 async function markConversationSeen({ conversationId, userInfoId }) {

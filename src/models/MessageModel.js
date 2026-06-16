@@ -22,6 +22,15 @@ const MessageModel = new mongoose.Schema(
       type: String,
       default: "",
     },
+    attachment: {
+      url: { type: String, default: null },
+      thumbnailUrl: { type: String, default: null },
+      mimeType: { type: String, default: null },
+      size: { type: Number, default: null },
+      width: { type: Number, default: null },
+      height: { type: Number, default: null },
+      originalName: { type: String, default: null },
+    },
     seenBy: [
       {
         type: mongoose.Schema.Types.ObjectId,

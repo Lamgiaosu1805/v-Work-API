@@ -4,6 +4,7 @@ const CustomerInteractionModel = require("../models/CustomerInteractionModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AppModel = require("../models/AppModel");
 const AgentModel = require("../models/AgentModel");
+const CustomerClaimRequestModel = require("../models/CustomerClaimRequestModel");
 const InvestmentModel = require("../models/InvestmentModel");
 const { createCifCommission, createEkycCommission, calculateCommission, getTNCNRate } = require("../helpers/commissionCalculator");
 const { computeClaimWindow } = require("../helpers/claimWindowHelper");
@@ -1424,6 +1425,16 @@ const CustomerController = {
                 await session.abortTransaction();
                 session.endSession();
                 return res.status(409).json({ message: "Khách hàng đã có sale phụ trách, không thể gán lại" });
+            }
+
+            const pendingClaim = await CustomerClaimRequestModel.findOne({
+                customer_id: customer._id,
+                status: "pending",
+            }).session(session);
+            if (pendingClaim) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(409).json({ message: "Khách hàng đang có yêu cầu nhận từ sale, vui lòng xử lý yêu cầu đó trước khi phân khách" });
             }
 
             const sale = await UserInfoModel.findById(sale_user_info_id).session(session);

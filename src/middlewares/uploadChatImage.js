@@ -12,8 +12,6 @@ const ALLOWED_MIMETYPES = [
 const HEIC_TYPES = new Set(["image/heic", "image/heif"]);
 const GIF_TYPES = new Set(["image/gif"]);
 
-const THUMBNAIL_SUFFIX = "-thumb";
-
 const getChatDir = (conversationId) => {
   const baseDir =
     process.env.NODE_ENV === "production"
@@ -79,13 +77,6 @@ async function processChatImage(req, res, next) {
     file.width = info.width;
     file.height = info.height;
     file.size = fullBuffer.length;
-
-    const thumbPath = file.path.replace(/\.webp$/, `${THUMBNAIL_SUFFIX}.webp`);
-    await sharp(inputBuffer)
-      .resize(320, 320, { fit: "inside", withoutEnlargement: true })
-      .webp({ quality: 70 })
-      .toFile(thumbPath);
-    file.thumbnailFilename = path.basename(thumbPath);
 
     return next();
   } catch (err) {

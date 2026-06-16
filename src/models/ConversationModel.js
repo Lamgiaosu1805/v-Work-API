@@ -12,6 +12,10 @@ const ConversationModel = new mongoose.Schema(
       type: String,
       default: "",
     },
+    pairKey: {
+      type: String,
+      default: null
+    },
     avatar: {
       type: String,
       default: "",
@@ -50,6 +54,12 @@ const ConversationModel = new mongoose.Schema(
     toJSON: BaseSchema.options.toJSON,
     toObject: BaseSchema.options.toObject,
   },
+);
+
+ConversationModel.index({ members: 1, updatedAt: -1 });
+ConversationModel.index(
+  { pairKey: 1 },
+  { unique: true, partialFilterExpression: { pairKey: { $type: "string" } } }
 );
 
 module.exports = mongoose.model("conversation", ConversationModel);

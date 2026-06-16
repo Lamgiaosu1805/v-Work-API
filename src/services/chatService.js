@@ -1,7 +1,27 @@
 const mongoose = require("mongoose");
+const fs = require("fs");
+const path = require("path");
 const ConversationModel = require("../models/ConversationModel");
 const MessageModel = require("../models/MessageModel");
 const UserInfoModel = require("../models/UserInfoModel");
+
+function removeAttachmentFiles(attachment) {
+  if (!attachment) return;
+
+  const baseDir =
+    process.env.NODE_ENV === "production"
+      ? process.env.UPLOAD_DIR_PROD
+      : process.env.UPLOAD_DIR_DEV;
+
+  [attachment.url, attachment.thumbnailUrl].filter(Boolean).forEach((relativePath) => {
+    try {
+      const filePath = path.resolve(baseDir, relativePath);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (error) {
+      console.error("removeAttachmentFiles error:", error?.message || error);
+    }
+  });
+}
 
 class ChatError extends Error {
   constructor(message, statusCode = 400) {
@@ -144,6 +164,8 @@ async function createPrivateConversation({ currentUserInfoId, receiverUserInfoId
     throw new ChatError("Người dùng không tồn tại", 404);
   }
 
+  const pairKey = [String(currentUserInfoId), String(receiver._id)].sort().join("_");
+
   const existingConversation = await ConversationModel.findOne({
     type: "private",
     isDeleted: false,
@@ -151,30 +173,32 @@ async function createPrivateConversation({ currentUserInfoId, receiverUserInfoId
       $all: [currentUserInfoId, receiver._id],
       $size: 2
     }
-  })
-    .populate("members", "full_name avatar ma_nv id_account")
-    .populate({
-      path: "lastMessage",
-      match: { isDeleted: false },
-      populate: {
-        path: "senderId",
-        select: "full_name avatar ma_nv id_account"
-      }
-    })
-    .lean();
-
-  if (existingConversation) {
-    // Nếu đã có private chat giữa 2 người thì trả về conversation cũ thay vì tạo mới.
-    return formatConversation(existingConversation, currentUserInfoId);
-  }
-
-  // Chưa có conversation thì tạo mới với đúng 2 member.
-  const conversation = await ConversationModel.create({
-    type: "private",
-    members: [currentUserInfoId, receiver._id],
-    createdBy: currentUserInfoId
   });
 
+  if (existingConversation) {
+    if (!existingConversation.pairKey) {
+      await ConversationModel.updateOne({ _id: existingConversation._id }, { $set: { pairKey } });
+    }
+    return loadConversationById(existingConversation._id, currentUserInfoId);
+  }
+
+  try {
+    await ConversationModel.updateOne(
+      { pairKey },
+      {
+        $setOnInsert: {
+          type: "private",
+          members: [currentUserInfoId, receiver._id],
+          createdBy: currentUserInfoId
+        }
+      },
+      { upsert: true, setDefaultsOnInsert: true }
+    );
+  } catch (error) {
+    if (error?.code !== 11000) throw error;
+  }
+
+  const conversation = await ConversationModel.findOne({ pairKey });
   return loadConversationById(conversation._id, currentUserInfoId);
 }
 
@@ -494,13 +518,26 @@ async function deleteConversation({ conversationId, userInfoId }) {
     throw new ChatError("Conversation không tồn tại hoặc bạn không có quyền truy cập", 404);
   }
 
-  await Promise.all([
-    ConversationModel.updateOne({ _id: conversationId }, { $addToSet: { deletedFor: userInfoId } }),
-    MessageModel.updateMany(
+  const session = await mongoose.startSession();
+  try {
+    session.startTransaction();
+    await ConversationModel.updateOne(
+      { _id: conversationId },
+      { $addToSet: { deletedFor: userInfoId } },
+      { session }
+    );
+    await MessageModel.updateMany(
       { conversationId, isDeleted: false },
-      { $addToSet: { deletedFor: userInfoId } }
-    )
-  ]);
+      { $addToSet: { deletedFor: userInfoId } },
+      { session }
+    );
+    await session.commitTransaction();
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
 
   return { conversationId: String(conversationId) };
 }
@@ -528,9 +565,16 @@ async function recallMessage({ conversationId, messageId, userInfoId }) {
     throw new ChatError("Bạn không có quyền thu hồi tin nhắn này", 403);
   }
 
+  if (message.type === "image") {
+    removeAttachmentFiles(message.attachment);
+  }
+
   const recalled = await MessageModel.findByIdAndUpdate(
     messageId,
-    { $set: { recalled: { at: new Date(), by: userInfoId }, content: "" } },
+    {
+      $set: { recalled: { at: new Date(), by: userInfoId }, content: "" },
+      $unset: { attachment: "" }
+    },
     { new: true }
   ).populate("senderId", "full_name avatar ma_nv id_account");
 

@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const AccountModel = require("../models/AccountModel");
 const ConversationModel = require("../models/ConversationModel");
 const UserInfoModel = require("../models/UserInfoModel");
@@ -12,11 +13,16 @@ const {
   recallMessage
 } = require("../services/chatService");
 
-async function resolveSocketUser(socket) {
-  const token =
+function getSocketToken(socket) {
+  return (
     socket.handshake.auth?.token ||
     socket.handshake.headers?.authorization?.split(" ")[1] ||
-    socket.handshake.query?.token;
+    socket.handshake.query?.token
+  );
+}
+
+async function resolveSocketUser(socket) {
+  const token = getSocketToken(socket);
 
   if (!token) return null;
 
@@ -60,19 +66,26 @@ async function emitConversationEventToMembers(io, conversationId, eventName, pay
 }
 
 module.exports = function setupChatSocket(io) {
-  io.on("connection", async (socket) => {
+  io.use(async (socket, next) => {
+    const token = getSocketToken(socket);
+    if (!token) return next();
+
     try {
-      // Khi socket vừa kết nối, đọc token từ handshake để gắn user đang online vào socket.
       const auth = await resolveSocketUser(socket);
-      if (auth?.userInfo?._id) {
-        socket.data.accountId = auth.accountId;
-        socket.data.userInfoId = String(auth.userInfo._id);
-        socket.data.userInfo = auth.userInfo;
-        // Room user:{userInfoId} dùng để push event riêng cho từng người dùng.
-        socket.join(`user:${String(auth.userInfo._id)}`);
-      }
+      if (!auth) return next(new Error("Tài khoản không hợp lệ"));
+
+      socket.data.accountId = auth.accountId;
+      socket.data.userInfoId = String(auth.userInfo._id);
+      socket.data.userInfo = auth.userInfo;
+      return next();
     } catch (error) {
-      console.error("chatSocket auth error:", error.message);
+      return next(new Error("Token không hợp lệ"));
+    }
+  });
+
+  io.on("connection", (socket) => {
+    if (socket.data.userInfoId) {
+      socket.join(`user:${socket.data.userInfoId}`);
     }
 
     socket.on("chat:join", async (payload = {}, callback) => {
@@ -105,45 +118,54 @@ module.exports = function setupChatSocket(io) {
     });
 
     socket.on("chat:send", async (payload = {}, callback) => {
+      const session = await mongoose.startSession();
       try {
         if (!socket.data.userInfoId) {
           throw new ChatError("Bạn chưa xác thực socket", 401);
         }
 
-        // Service sẽ validate quyền truy cập, kiểm tra type/content và lưu message vào DB.
+        session.startTransaction();
         const message = await sendMessage({
           conversationId: payload.conversationId,
           senderUserInfoId: socket.data.userInfoId,
           content: payload.content,
-          type: payload.type
+          type: payload.type,
+          session
         });
+        await session.commitTransaction();
 
-        // Phát event cho toàn bộ room của conversation để mọi client đang mở chat nhận tin nhắn mới.
         io.to(`conversation:${String(payload.conversationId)}`).emit("message:new", {
           conversationId: String(payload.conversationId),
           message,
           clientMessageId: payload.clientMessageId ?? null
         });
 
-        // Phát thêm theo từng member để đảm bảo mọi thiết bị của cùng user đều nhận được update.
-        await emitConversationEventToMembers(io, payload.conversationId, "message:new", {
-          conversationId: String(payload.conversationId),
-          message,
-          clientMessageId: payload.clientMessageId ?? null
+        const conversation = await getConversationDetail({
+          conversationId: payload.conversationId,
+          userInfoId: socket.data.userInfoId
         });
 
-        // Push notification là lớp bổ sung cho user offline hoặc đang ở tab khác.
+        await emitConversationEventToMembers(io, payload.conversationId, "conversation:upserted", {
+          conversation
+        });
+
         await sendChatMessageNotification({
           io,
           conversationId: payload.conversationId,
           senderUserInfoId: socket.data.userInfoId,
           senderName: socket.data.userInfo?.full_name,
-          message
+          message,
+          conversation
         });
 
         ack(callback, { ok: true, data: message });
       } catch (error) {
+        if (session.inTransaction()) {
+          await session.abortTransaction();
+        }
         ack(callback, { ok: false, message: error.message });
+      } finally {
+        session.endSession();
       }
     });
 

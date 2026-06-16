@@ -61,19 +61,6 @@ function emitConversationEvent(io, eventName, conversation, payload) {
   });
 }
 
-function emitConversationMessageToMembers(io, conversation, payload) {
-  if (!io || !conversation?.members?.length) return;
-
-  // Dùng để broadcast tin nhắn mới cho toàn bộ thiết bị của các member.
-  const memberIds = conversation.members
-    .map((member) => String(member?._id || member))
-    .filter((memberId) => memberId);
-
-  memberIds.forEach((memberId) => {
-    io.to(`user:${memberId}`).emit("message:new", payload);
-  });
-}
-
 async function broadcastNewMessage({ req, currentUserInfo, message, clientMessageId }) {
   const io = req.app.get("io");
   let conversation = null;
@@ -85,17 +72,14 @@ async function broadcastNewMessage({ req, currentUserInfo, message, clientMessag
     clientMessageId: clientMessageId ?? null,
   };
 
-  // Emit vào room conversation để tất cả client đang mở chat nhận ngay.
   io.to(`conversation:${String(message.conversationId)}`).emit("message:new", payload);
 
-  // Load lại conversation để có đủ members phục vụ emit theo từng user room.
   conversation = await getConversationDetail({
     conversationId: message.conversationId,
     userInfoId: currentUserInfo._id,
   });
 
-  // Emit thêm theo từng user room để đồng bộ danh sách chat ở sidebar/inbox.
-  emitConversationMessageToMembers(io, conversation, payload);
+  emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
 
   return { conversation };
 }
@@ -262,9 +246,7 @@ const ChatController = {
       const attachment = req.file
         ? {
             url: `chat/${req.params.conversationId}/${req.file.filename}`,
-            thumbnailUrl: req.file.thumbnailFilename
-              ? `chat/${req.params.conversationId}/${req.file.thumbnailFilename}`
-              : null,
+            thumbnailUrl: null,
             mimeType: req.file.mimetype,
             size: req.file.size,
             width: req.file.width ?? null,
@@ -337,6 +319,7 @@ const ChatController = {
         conversationId: req.params.conversationId,
         type: "image",
         isDeleted: false,
+        "recalled.at": null,
       }).lean();
 
       if (!message?.attachment?.url) {
@@ -427,6 +410,7 @@ const ChatController = {
 
       const filter = {
         _id: { $ne: currentUserInfo._id },
+        isDeleted: false,
         ...(search && {
           $or: [
             { full_name: { $regex: search, $options: "i" } },

@@ -9,7 +9,7 @@ const {
   sendMessage,
   markConversationSeen,
   deleteConversation,
-  deleteMessage,
+  recallMessage
 } = require("../services/chatService");
 
 async function resolveSocketUser(socket) {
@@ -26,7 +26,7 @@ async function resolveSocketUser(socket) {
 
   const userInfo = await UserInfoModel.findOne({
     id_account: account._id,
-    isDeleted: false,
+    isDeleted: false
   })
     .select("full_name avatar ma_nv id_account")
     .lean();
@@ -35,7 +35,7 @@ async function resolveSocketUser(socket) {
 
   return {
     accountId: String(account._id),
-    userInfo,
+    userInfo
   };
 }
 
@@ -45,15 +45,8 @@ function ack(ackFn, payload) {
   }
 }
 
-async function emitConversationEventToMembers(
-  io,
-  conversationId,
-  eventName,
-  payload,
-) {
-  const conversation = await ConversationModel.findById(conversationId)
-    .select("members")
-    .lean();
+async function emitConversationEventToMembers(io, conversationId, eventName, payload) {
+  const conversation = await ConversationModel.findById(conversationId).select("members").lean();
 
   if (!conversation?.members?.length) return;
 
@@ -91,7 +84,7 @@ module.exports = function setupChatSocket(io) {
         // Kiểm tra quyền truy cập conversation trước khi cho join room.
         const conversation = await getConversationDetail({
           conversationId: payload.conversationId,
-          userInfoId: socket.data.userInfoId,
+          userInfoId: socket.data.userInfoId
         });
 
         // Room conversation:{id} là room chung của tất cả member trong cuộc chat này.
@@ -122,30 +115,22 @@ module.exports = function setupChatSocket(io) {
           conversationId: payload.conversationId,
           senderUserInfoId: socket.data.userInfoId,
           content: payload.content,
-          type: payload.type,
+          type: payload.type
         });
 
         // Phát event cho toàn bộ room của conversation để mọi client đang mở chat nhận tin nhắn mới.
-        io.to(`conversation:${String(payload.conversationId)}`).emit(
-          "message:new",
-          {
-            conversationId: String(payload.conversationId),
-            message,
-            clientMessageId: payload.clientMessageId ?? null,
-          },
-        );
+        io.to(`conversation:${String(payload.conversationId)}`).emit("message:new", {
+          conversationId: String(payload.conversationId),
+          message,
+          clientMessageId: payload.clientMessageId ?? null
+        });
 
         // Phát thêm theo từng member để đảm bảo mọi thiết bị của cùng user đều nhận được update.
-        await emitConversationEventToMembers(
-          io,
-          payload.conversationId,
-          "message:new",
-          {
-            conversationId: String(payload.conversationId),
-            message,
-            clientMessageId: payload.clientMessageId ?? null,
-          },
-        );
+        await emitConversationEventToMembers(io, payload.conversationId, "message:new", {
+          conversationId: String(payload.conversationId),
+          message,
+          clientMessageId: payload.clientMessageId ?? null
+        });
 
         // Push notification là lớp bổ sung cho user offline hoặc đang ở tab khác.
         await sendChatMessageNotification({
@@ -153,7 +138,7 @@ module.exports = function setupChatSocket(io) {
           conversationId: payload.conversationId,
           senderUserInfoId: socket.data.userInfoId,
           senderName: socket.data.userInfo?.full_name,
-          message,
+          message
         });
 
         ack(callback, { ok: true, data: message });
@@ -171,27 +156,19 @@ module.exports = function setupChatSocket(io) {
         // Đánh dấu toàn bộ message chưa đọc trong conversation là đã xem bởi user này.
         const result = await markConversationSeen({
           conversationId: payload.conversationId,
-          userInfoId: socket.data.userInfoId,
+          userInfoId: socket.data.userInfoId
         });
 
         // Báo ngược lại cho cả room conversation để các client cập nhật trạng thái seen.
-        io.to(`conversation:${String(payload.conversationId)}`).emit(
-          "message:seen",
-          {
-            conversationId: String(payload.conversationId),
-            userInfoId: String(socket.data.userInfoId),
-          },
-        );
+        io.to(`conversation:${String(payload.conversationId)}`).emit("message:seen", {
+          conversationId: String(payload.conversationId),
+          userInfoId: String(socket.data.userInfoId)
+        });
 
-        await emitConversationEventToMembers(
-          io,
-          payload.conversationId,
-          "message:seen",
-          {
-            conversationId: String(payload.conversationId),
-            userInfoId: String(socket.data.userInfoId),
-          },
-        );
+        await emitConversationEventToMembers(io, payload.conversationId, "message:seen", {
+          conversationId: String(payload.conversationId),
+          userInfoId: String(socket.data.userInfoId)
+        });
 
         ack(callback, { ok: true, data: result });
       } catch (error) {
@@ -212,29 +189,21 @@ module.exports = function setupChatSocket(io) {
 
         const conversation = await getConversationDetail({
           conversationId,
-          userInfoId: socket.data.userInfoId,
+          userInfoId: socket.data.userInfoId
         });
 
         const result = await deleteConversation({
           conversationId,
-          userInfoId: socket.data.userInfoId,
+          userInfoId: socket.data.userInfoId
         });
 
-        io.to(`conversation:${String(conversationId)}`).emit(
-          "conversation:deleted",
-          {
-            conversationId: String(conversationId),
-          },
-        );
+        io.to(`conversation:${String(conversationId)}`).emit("conversation:deleted", {
+          conversationId: String(conversationId)
+        });
 
-        await emitConversationEventToMembers(
-          io,
-          conversationId,
-          "conversation:deleted",
-          {
-            conversationId: String(conversationId),
-          },
-        );
+        await emitConversationEventToMembers(io, conversationId, "conversation:deleted", {
+          conversationId: String(conversationId)
+        });
 
         ack(callback, { ok: true, data: result, conversation });
       } catch (error) {
@@ -255,33 +224,25 @@ module.exports = function setupChatSocket(io) {
           throw new ChatError("Thiếu conversationId hoặc messageId", 400);
         }
 
-        const result = await deleteMessage({
+        const result = await recallMessage({
           conversationId,
           messageId,
-          userInfoId: socket.data.userInfoId,
+          userInfoId: socket.data.userInfoId
         });
 
-        io.to(`conversation:${String(conversationId)}`).emit(
-          "message:deleted",
-          {
-            conversationId: String(conversationId),
-            messageId: String(messageId),
-          },
-        );
+        io.to(`conversation:${String(conversationId)}`).emit("message:recalled", {
+          conversationId: String(conversationId),
+          message: result
+        });
 
         const conversation = await getConversationDetail({
           conversationId,
-          userInfoId: socket.data.userInfoId,
+          userInfoId: socket.data.userInfoId
         });
 
-        await emitConversationEventToMembers(
-          io,
-          conversationId,
-          "conversation:upserted",
-          {
-            conversation,
-          },
-        );
+        await emitConversationEventToMembers(io, conversationId, "conversation:upserted", {
+          conversation
+        });
 
         ack(callback, { ok: true, data: result });
       } catch (error) {

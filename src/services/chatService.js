@@ -14,11 +14,7 @@ class ChatError extends Error {
 function normalizeObjectIds(values) {
   if (!Array.isArray(values)) return [];
 
-  return [
-    ...new Set(
-      values.map((value) => String(value || "").trim()).filter(Boolean),
-    ),
-  ];
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
 function toPlainObject(doc) {
@@ -38,19 +34,17 @@ function formatConversation(conversation, currentUserInfoId) {
     return {
       ...plainConversation,
       display_name: plainConversation.name || "Nhóm chat",
-      avatar: plainConversation.avatar || null,
+      avatar: plainConversation.avatar || null
     };
   }
 
   // Private chat thì hiển thị tên/ảnh của người còn lại trong conversation.
-  const otherMember =
-    members.find((member) => String(member?._id || member) !== myId) || null;
+  const otherMember = members.find((member) => String(member?._id || member) !== myId) || null;
 
   return {
     ...plainConversation,
-    display_name:
-      otherMember?.full_name || plainConversation.name || "Tin nhắn",
-    avatar: otherMember?.avatar ?? plainConversation.avatar ?? null,
+    display_name: otherMember?.full_name || plainConversation.name || "Tin nhắn",
+    avatar: otherMember?.avatar ?? plainConversation.avatar ?? null
   };
 }
 
@@ -58,7 +52,7 @@ async function getCurrentUserInfo(accountId) {
   // Socket/controller thường đi từ account._id -> user_info để làm việc với chat.
   const userInfo = await UserInfoModel.findOne({
     id_account: accountId,
-    isDeleted: false,
+    isDeleted: false
   })
     .select("full_name avatar ma_nv id_account")
     .lean();
@@ -70,16 +64,12 @@ async function getCurrentUserInfo(accountId) {
   return userInfo;
 }
 
-async function loadConversationById(
-  conversationId,
-  currentUserInfoId,
-  session,
-) {
+async function loadConversationById(conversationId, currentUserInfoId, session) {
   // Chỉ load conversation nếu user hiện tại là thành viên của conversation đó.
   const query = ConversationModel.findOne({
     _id: conversationId,
     members: currentUserInfoId,
-    isDeleted: false,
+    isDeleted: false
   });
 
   if (session) {
@@ -95,16 +85,13 @@ async function loadConversationById(
       match: { isDeleted: false },
       populate: {
         path: "senderId",
-        select: "full_name avatar ma_nv id_account",
-      },
+        select: "full_name avatar ma_nv id_account"
+      }
     })
     .lean();
 
   if (!conversation) {
-    throw new ChatError(
-      "Conversation không tồn tại hoặc bạn không có quyền truy cập",
-      404,
-    );
+    throw new ChatError("Conversation không tồn tại hoặc bạn không có quyền truy cập", 404);
   }
 
   return formatConversation(conversation, currentUserInfoId);
@@ -114,23 +101,17 @@ async function ensureConversationAccess(conversationId, userInfoId) {
   const conversation = await ConversationModel.findOne({
     _id: conversationId,
     members: userInfoId,
-    isDeleted: false,
+    isDeleted: false
   }).lean();
 
   if (!conversation) {
-    throw new ChatError(
-      "Conversation không tồn tại hoặc bạn không có quyền truy cập",
-      404,
-    );
+    throw new ChatError("Conversation không tồn tại hoặc bạn không có quyền truy cập", 404);
   }
 
   return conversation;
 }
 
-async function createPrivateConversation({
-  currentUserInfoId,
-  receiverUserInfoId,
-}) {
+async function createPrivateConversation({ currentUserInfoId, receiverUserInfoId }) {
   const receiverId = String(receiverUserInfoId || "").trim();
   if (!receiverId) {
     throw new ChatError("Thiếu receiver_id", 400);
@@ -145,7 +126,7 @@ async function createPrivateConversation({
   // Service thử tìm theo user_info trước, sau đó mới fallback sang account id.
   let receiver = await UserInfoModel.findOne({
     _id: receiverId,
-    isDeleted: false,
+    isDeleted: false
   })
     .select("full_name avatar ma_nv id_account")
     .lean();
@@ -153,7 +134,7 @@ async function createPrivateConversation({
   if (!receiver) {
     receiver = await UserInfoModel.findOne({
       id_account: receiverId,
-      isDeleted: false,
+      isDeleted: false
     })
       .select("full_name avatar ma_nv id_account")
       .lean();
@@ -168,8 +149,8 @@ async function createPrivateConversation({
     isDeleted: false,
     members: {
       $all: [currentUserInfoId, receiver._id],
-      $size: 2,
-    },
+      $size: 2
+    }
   })
     .populate("members", "full_name avatar ma_nv id_account")
     .populate({
@@ -177,8 +158,8 @@ async function createPrivateConversation({
       match: { isDeleted: false },
       populate: {
         path: "senderId",
-        select: "full_name avatar ma_nv id_account",
-      },
+        select: "full_name avatar ma_nv id_account"
+      }
     })
     .lean();
 
@@ -191,7 +172,7 @@ async function createPrivateConversation({
   const conversation = await ConversationModel.create({
     type: "private",
     members: [currentUserInfoId, receiver._id],
-    createdBy: currentUserInfoId,
+    createdBy: currentUserInfoId
   });
 
   return loadConversationById(conversation._id, currentUserInfoId);
@@ -203,7 +184,7 @@ async function createMessageDocument({
   content,
   type = "text",
   seenBy = [],
-  session,
+  session
 }) {
   // Tách riêng việc tạo message để dùng lại cho cả private/group/system message.
   const payload = {
@@ -211,7 +192,7 @@ async function createMessageDocument({
     senderId: senderUserInfoId,
     type,
     content: content || "",
-    seenBy,
+    seenBy
   };
 
   const createdMessages = session
@@ -221,12 +202,7 @@ async function createMessageDocument({
   return Array.isArray(createdMessages) ? createdMessages[0] : createdMessages;
 }
 
-async function createGroupConversation({
-  name,
-  memberIds,
-  creatorUserInfoId,
-  session,
-}) {
+async function createGroupConversation({ name, memberIds, creatorUserInfoId, session }) {
   const groupName = String(name || "").trim();
   if (!groupName) {
     throw new ChatError("Thiếu name", 400);
@@ -243,7 +219,7 @@ async function createGroupConversation({
   // Tìm toàn bộ user tương ứng để xác thực member tồn tại và lấy user_info._id chuẩn.
   const users = await UserInfoModel.find({
     isDeleted: false,
-    $or: [{ _id: { $in: withCreator } }, { id_account: { $in: withCreator } }],
+    $or: [{ _id: { $in: withCreator } }, { id_account: { $in: withCreator } }]
   })
     .select("full_name avatar ma_nv id_account")
     .lean();
@@ -261,10 +237,10 @@ async function createGroupConversation({
         name: groupName,
         members: resolvedMemberIds,
         admins: [creatorUserInfoId],
-        createdBy: creatorUserInfoId,
-      },
+        createdBy: creatorUserInfoId
+      }
     ],
-    { session },
+    { session }
   );
 
   const conversation = Array.isArray(createdConversation)
@@ -277,7 +253,7 @@ async function createGroupConversation({
     content: "Nhóm đã được tạo",
     type: "system",
     seenBy: [creatorUserInfoId],
-    session,
+    session
   });
 
   await ConversationModel.updateOne(
@@ -285,19 +261,15 @@ async function createGroupConversation({
     {
       $set: {
         lastMessage: systemMessage._id,
-        updatedAt: new Date(),
-      },
+        updatedAt: new Date()
+      }
     },
-    { session },
+    { session }
   );
   return loadConversationById(conversation._id, creatorUserInfoId, session);
 }
 
-async function updateGroupConversationName({
-  conversationId,
-  userInfoId,
-  name,
-}) {
+async function updateGroupConversationName({ conversationId, userInfoId, name }) {
   const groupName = String(name || "").trim();
   if (!groupName) {
     throw new ChatError("Thiếu name", 400);
@@ -307,7 +279,7 @@ async function updateGroupConversationName({
     _id: conversationId,
     members: userInfoId,
     type: "group",
-    isDeleted: false,
+    isDeleted: false
   })
     .populate("members", "full_name avatar ma_nv id_account")
     .populate("admins", "full_name avatar ma_nv id_account")
@@ -317,16 +289,13 @@ async function updateGroupConversationName({
       match: { isDeleted: false },
       populate: {
         path: "senderId",
-        select: "full_name avatar ma_nv id_account",
-      },
+        select: "full_name avatar ma_nv id_account"
+      }
     })
     .lean();
 
   if (!conversation) {
-    throw new ChatError(
-      "Conversation không tồn tại hoặc bạn không có quyền truy cập",
-      404,
-    );
+    throw new ChatError("Conversation không tồn tại hoặc bạn không có quyền truy cập", 404);
   }
 
   await ConversationModel.updateOne(
@@ -334,9 +303,9 @@ async function updateGroupConversationName({
     {
       $set: {
         name: groupName,
-        updatedAt: new Date(),
-      },
-    },
+        updatedAt: new Date()
+      }
+    }
   );
 
   return loadConversationById(conversationId, userInfoId);
@@ -346,7 +315,7 @@ async function listConversations(userInfoId, search = "") {
   const conversations = await ConversationModel.find({
     members: userInfoId,
     isDeleted: false,
-    deletedFor: { $ne: userInfoId },
+    deletedFor: { $ne: userInfoId }
   })
     .populate("members", "full_name avatar ma_nv id_account")
     .populate("admins", "full_name avatar ma_nv id_account")
@@ -356,8 +325,8 @@ async function listConversations(userInfoId, search = "") {
       match: { isDeleted: false },
       populate: {
         path: "senderId",
-        select: "full_name avatar ma_nv id_account",
-      },
+        select: "full_name avatar ma_nv id_account"
+      }
     })
     .sort({ updatedAt: -1 })
     .lean();
@@ -367,7 +336,7 @@ async function listConversations(userInfoId, search = "") {
     .toLowerCase();
 
   const formattedConversations = conversations.map((conversation) =>
-    formatConversation(conversation, userInfoId),
+    formatConversation(conversation, userInfoId)
   );
 
   if (!keyword) {
@@ -379,9 +348,7 @@ async function listConversations(userInfoId, search = "") {
       .map((member) => String(member?.full_name || "").toLowerCase())
       .join(" ");
 
-    const lastMessageContent = String(
-      conversation.lastMessage?.content || "",
-    ).toLowerCase();
+    const lastMessageContent = String(conversation.lastMessage?.content || "").toLowerCase();
     const displayName = String(conversation.display_name || "").toLowerCase();
     const groupName = String(conversation.name || "").toLowerCase();
 
@@ -398,19 +365,14 @@ async function getConversationDetail({ conversationId, userInfoId }) {
   return loadConversationById(conversationId, userInfoId);
 }
 
-async function getConversationMessages({
-  conversationId,
-  userInfoId,
-  page = 1,
-  limit = 30,
-}) {
+async function getConversationMessages({ conversationId, userInfoId, page = 1, limit = 30 }) {
   // Chỉ thành viên trong conversation mới được đọc message.
   await ensureConversationAccess(conversationId, userInfoId);
 
   const filter = {
     conversationId,
     isDeleted: false,
-    deletedFor: { $ne: userInfoId },
+    deletedFor: { $ne: userInfoId }
   };
 
   const total = await MessageModel.countDocuments(filter);
@@ -429,18 +391,12 @@ async function getConversationMessages({
       total,
       page,
       limit,
-      total_pages: Math.ceil(total / limit),
-    },
+      total_pages: Math.ceil(total / limit)
+    }
   };
 }
 
-async function sendMessage({
-  conversationId,
-  senderUserInfoId,
-  content,
-  type = "text",
-  session,
-}) {
+async function sendMessage({ conversationId, senderUserInfoId, content, type = "text", session }) {
   // Validate membership trước, sau đó mới ghi message và update lastMessage của conversation.
   await ensureConversationAccess(conversationId, senderUserInfoId);
 
@@ -460,7 +416,7 @@ async function sendMessage({
     content: normalizedContent,
     type,
     seenBy: [senderUserInfoId],
-    session,
+    session
   });
 
   await ConversationModel.updateOne(
@@ -469,10 +425,10 @@ async function sendMessage({
       $set: {
         lastMessage: message._id,
         updatedAt: new Date(),
-        deletedFor: [],
-      },
+        deletedFor: []
+      }
     },
-    { session },
+    { session }
   );
 
   const populatedMessage = await MessageModel.findById(message._id)
@@ -491,18 +447,18 @@ async function markConversationSeen({ conversationId, userInfoId }) {
       conversationId,
       senderId: { $ne: userInfoId },
       seenBy: { $ne: userInfoId },
-      isDeleted: false,
+      isDeleted: false
     },
     {
       $addToSet: {
-        seenBy: userInfoId,
-      },
-    },
+        seenBy: userInfoId
+      }
+    }
   );
 
   return {
     matchedCount: result.matchedCount ?? 0,
-    modifiedCount: result.modifiedCount ?? 0,
+    modifiedCount: result.modifiedCount ?? 0
   };
 }
 
@@ -510,25 +466,19 @@ async function deleteConversation({ conversationId, userInfoId }) {
   const conversation = await ConversationModel.findOne({
     _id: conversationId,
     members: userInfoId,
-    isDeleted: false,
+    isDeleted: false
   });
 
   if (!conversation) {
-    throw new ChatError(
-      "Conversation không tồn tại hoặc bạn không có quyền truy cập",
-      404,
-    );
+    throw new ChatError("Conversation không tồn tại hoặc bạn không có quyền truy cập", 404);
   }
 
   await Promise.all([
-    ConversationModel.updateOne(
-      { _id: conversationId },
-      { $addToSet: { deletedFor: userInfoId } },
-    ),
+    ConversationModel.updateOne({ _id: conversationId }, { $addToSet: { deletedFor: userInfoId } }),
     MessageModel.updateMany(
       { conversationId, isDeleted: false },
-      { $addToSet: { deletedFor: userInfoId } },
-    ),
+      { $addToSet: { deletedFor: userInfoId } }
+    )
   ]);
 
   return { conversationId: String(conversationId) };
@@ -541,11 +491,16 @@ async function recallMessage({ conversationId, messageId, userInfoId }) {
     _id: messageId,
     conversationId,
     isDeleted: false,
-    "recalled.at": null,
+    "recalled.at": null
   });
 
   if (!message) {
     throw new ChatError("Tin nhắn không tồn tại hoặc đã bị thu hồi", 404);
+  }
+
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  if (message.createdAt < oneDayAgo) {
+    throw new ChatError("Chỉ có thể thu hồi tin nhắn trong vòng 24 giờ", 400);
   }
 
   if (String(message.senderId) !== String(userInfoId)) {
@@ -555,7 +510,7 @@ async function recallMessage({ conversationId, messageId, userInfoId }) {
   const recalled = await MessageModel.findByIdAndUpdate(
     messageId,
     { $set: { recalled: { at: new Date(), by: userInfoId }, content: "" } },
-    { new: true },
+    { new: true }
   ).populate("senderId", "full_name avatar ma_nv id_account");
 
   return recalled;
@@ -568,27 +523,27 @@ async function deleteMessageForSelf({ conversationId, messageId, userInfoId }) {
     _id: messageId,
     conversationId,
     isDeleted: false,
-    deletedFor: { $ne: userInfoId },
+    deletedFor: { $ne: userInfoId }
   });
 
   if (!message) {
     throw new ChatError("Tin nhắn không tồn tại", 404);
   }
 
-  await MessageModel.updateOne(
-    { _id: messageId },
-    { $addToSet: { deletedFor: userInfoId } },
-  );
+  await MessageModel.updateOne({ _id: messageId }, { $addToSet: { deletedFor: userInfoId } });
 
   return {
     conversationId: String(conversationId),
-    messageId: String(messageId),
+    messageId: String(messageId)
   };
 }
 
 async function addMembers({ conversationId, userInfoId, newMemberIds }) {
   const conversation = await ConversationModel.findOne({
-    _id: conversationId, type: "group", members: userInfoId, isDeleted: false,
+    _id: conversationId,
+    type: "group",
+    members: userInfoId,
+    isDeleted: false
   });
   if (!conversation) throw new ChatError("Không tìm thấy nhóm", 404);
 
@@ -600,12 +555,13 @@ async function addMembers({ conversationId, userInfoId, newMemberIds }) {
   if (!toAdd.length) throw new ChatError("Tất cả thành viên đã có trong nhóm", 400);
 
   const found = await UserInfoModel.find({ _id: { $in: toAdd }, isDeleted: false })
-    .select("_id").lean();
+    .select("_id")
+    .lean();
   if (found.length !== toAdd.length) throw new ChatError("Một số thành viên không tồn tại", 404);
 
   await ConversationModel.updateOne(
     { _id: conversationId },
-    { $addToSet: { members: { $each: toAdd } } },
+    { $addToSet: { members: { $each: toAdd } } }
   );
 
   return loadConversationById(conversationId, userInfoId);
@@ -613,7 +569,10 @@ async function addMembers({ conversationId, userInfoId, newMemberIds }) {
 
 async function kickMember({ conversationId, adminUserInfoId, targetUserInfoId }) {
   const conversation = await ConversationModel.findOne({
-    _id: conversationId, type: "group", members: adminUserInfoId, isDeleted: false,
+    _id: conversationId,
+    type: "group",
+    members: adminUserInfoId,
+    isDeleted: false
   });
   if (!conversation) throw new ChatError("Không tìm thấy nhóm", 404);
 
@@ -628,7 +587,7 @@ async function kickMember({ conversationId, adminUserInfoId, targetUserInfoId })
 
   await ConversationModel.updateOne(
     { _id: conversationId },
-    { $pull: { members: targetUserInfoId, admins: targetUserInfoId } },
+    { $pull: { members: targetUserInfoId, admins: targetUserInfoId } }
   );
 
   return loadConversationById(conversationId, adminUserInfoId);
@@ -636,7 +595,10 @@ async function kickMember({ conversationId, adminUserInfoId, targetUserInfoId })
 
 async function promoteMember({ conversationId, adminUserInfoId, targetUserInfoId }) {
   const conversation = await ConversationModel.findOne({
-    _id: conversationId, type: "group", members: adminUserInfoId, isDeleted: false,
+    _id: conversationId,
+    type: "group",
+    members: adminUserInfoId,
+    isDeleted: false
   });
   if (!conversation) throw new ChatError("Không tìm thấy nhóm", 404);
 
@@ -648,7 +610,7 @@ async function promoteMember({ conversationId, adminUserInfoId, targetUserInfoId
 
   await ConversationModel.updateOne(
     { _id: conversationId },
-    { $addToSet: { admins: targetUserInfoId } },
+    { $addToSet: { admins: targetUserInfoId } }
   );
 
   return loadConversationById(conversationId, adminUserInfoId);
@@ -656,34 +618,30 @@ async function promoteMember({ conversationId, adminUserInfoId, targetUserInfoId
 
 async function leaveGroup({ conversationId, userInfoId }) {
   const conversation = await ConversationModel.findOne({
-    _id: conversationId, type: "group", members: userInfoId, isDeleted: false,
+    _id: conversationId,
+    type: "group",
+    members: userInfoId,
+    isDeleted: false
   });
   if (!conversation) throw new ChatError("Không tìm thấy nhóm hoặc bạn không phải thành viên", 404);
 
-  const remainingMembers = conversation.members
-    .map(String)
-    .filter((m) => m !== String(userInfoId));
+  const remainingMembers = conversation.members.map(String).filter((m) => m !== String(userInfoId));
 
   if (remainingMembers.length === 0) {
     await ConversationModel.updateOne({ _id: conversationId }, { isDeleted: true });
     return { conversationId: String(conversationId), disbanded: true, conversation: null };
   }
 
-  const remainingAdmins = conversation.admins
-    .map(String)
-    .filter((a) => a !== String(userInfoId));
+  const remainingAdmins = conversation.admins.map(String).filter((a) => a !== String(userInfoId));
 
   await ConversationModel.updateOne(
     { _id: conversationId },
-    { $pull: { members: userInfoId, admins: userInfoId } },
+    { $pull: { members: userInfoId, admins: userInfoId } }
   );
 
   if (remainingAdmins.length === 0) {
     const newAdmin = remainingMembers[Math.floor(Math.random() * remainingMembers.length)];
-    await ConversationModel.updateOne(
-      { _id: conversationId },
-      { $addToSet: { admins: newAdmin } },
-    );
+    await ConversationModel.updateOne({ _id: conversationId }, { $addToSet: { admins: newAdmin } });
   }
 
   const updatedConv = await loadConversationById(conversationId, remainingMembers[0]);
@@ -710,5 +668,5 @@ module.exports = {
   leaveGroup,
   ensureConversationAccess,
   createMessageDocument,
-  formatConversation,
+  formatConversation
 };

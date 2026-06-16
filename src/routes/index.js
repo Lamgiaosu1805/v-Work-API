@@ -23,6 +23,7 @@ const holidayRouter = require('./holiday')
 const employmentStatusRouter = require('./employmentStatus')
 const attendanceMappingRouter = require('./attendanceMapping')
 const penaltyTierRouter = require('./penaltyTier')
+const transactionManagementRouter = require('./transactionManagement')
 
 const route = (app) => {
     app.use(`/posts`, postRouter)
@@ -50,6 +51,7 @@ const route = (app) => {
     app.use(`/attendance-mapping`, attendanceMappingRouter)
     app.use(`/penalty-tier`, penaltyTierRouter)
     app.use(`/ai`, aiRouter)
+    app.use(`/transaction-management`, transactionManagementRouter)
 }
 
 module.exports = route;

@@ -287,6 +287,7 @@ const ChatController = {
       return res.status(201).json({
         message: "Gửi tin nhắn thành công",
         data: message,
+        clientMessageId: req.body.clientMessageId ?? null,
       });
     } catch (error) {
       // Chỉ dọn file trên đĩa khi DB ghi thất bại thật (transaction chưa commit).

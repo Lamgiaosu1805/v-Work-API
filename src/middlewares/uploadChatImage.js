@@ -5,8 +5,13 @@ const sharp = require("sharp");
 const heicConvert = require("heic-convert");
 
 const ALLOWED_MIMETYPES = [
-  "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp",
-  "image/heic", "image/heif",
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/heic",
+  "image/heif"
 ];
 
 const HEIC_TYPES = new Set(["image/heic", "image/heif"]);
@@ -30,7 +35,7 @@ const storage = multer.diskStorage({
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     const ext = GIF_TYPES.has(file.mimetype) ? ".gif" : ".webp";
     cb(null, uniqueSuffix + ext);
-  },
+  }
 });
 
 const fileFilter = (req, file, cb) => {
@@ -67,10 +72,10 @@ async function processChatImage(req, res, next) {
 
     const resized = sharp(inputBuffer).resize(1920, 1920, {
       fit: "inside",
-      withoutEnlargement: true,
+      withoutEnlargement: true
     });
     const { data: fullBuffer, info } = await resized.webp({ quality: 80 }).toBuffer({
-      resolveWithObject: true,
+      resolveWithObject: true
     });
     fs.writeFileSync(file.path, fullBuffer);
     file.mimetype = "image/webp";
@@ -80,6 +85,9 @@ async function processChatImage(req, res, next) {
 
     return next();
   } catch (err) {
+    if (file?.path && fs.existsSync(file.path)) {
+      fs.unlinkSync(file.path);
+    }
     return next(new Error(`Không thể xử lý ảnh: ${err.message}`));
   }
 }
@@ -88,8 +96,8 @@ const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024,
-  },
+    fileSize: 10 * 1024 * 1024
+  }
 });
 
 module.exports = { upload, processChatImage, getChatDir };

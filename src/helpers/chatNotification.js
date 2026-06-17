@@ -47,7 +47,7 @@ function buildNotificationContent({ conversation, senderName, message }) {
     title: isGroupChat
       ? conversationName || "Nhóm chat"
       : senderName || conversationName || "Tin nhắn mới",
-    body: isGroupChat ? `${senderName || "Có người"}: ${text}` : text,
+    body: isGroupChat ? `${senderName || "Có người"}: ${text}` : text
   };
 }
 
@@ -57,7 +57,7 @@ async function sendChatMessageNotification({
   senderUserInfoId,
   senderName,
   message,
-  conversation: providedConversation,
+  conversation: providedConversation
 }) {
   if (!conversationId || !senderUserInfoId || !message) {
     return { successCount: 0, failureCount: 0, invalidTokens: [], tokens: [] };
@@ -68,22 +68,20 @@ async function sendChatMessageNotification({
       providedConversation ||
       (await getConversationDetail({
         conversationId,
-        userInfoId: senderUserInfoId,
+        userInfoId: senderUserInfoId
       }));
 
     const members = getConversationMembers(conversation);
     const recipientTargets = members
-      .filter(
-        (member) => resolveMemberId(member) !== normalizeId(senderUserInfoId),
-      )
+      .filter((member) => resolveMemberId(member) !== normalizeId(senderUserInfoId))
       .map((member) => ({
         userInfoId: resolveMemberId(member),
-        accountId: resolveAccountId(member),
+        accountId: resolveAccountId(member)
       }))
       .filter((target) => target.accountId);
 
     const notificationTargets = recipientTargets.filter(
-      (target) => !isUserInConversationRoom(io, conversationId, target.userInfoId),
+      (target) => !isUserInConversationRoom(io, conversationId, target.userInfoId)
     );
 
     if (!notificationTargets.length) {
@@ -91,14 +89,14 @@ async function sendChatMessageNotification({
         successCount: 0,
         failureCount: 0,
         invalidTokens: [],
-        tokens: [],
+        tokens: []
       };
     }
 
     const { title, body } = buildNotificationContent({
       conversation,
       senderName,
-      message,
+      message
     });
 
     const data = {
@@ -106,7 +104,7 @@ async function sendChatMessageNotification({
       screen: "ChatRoomScreen",
       conversationId: String(conversationId),
       messageId: String(message?._id || message?.clientMessageId || ""),
-      senderUserInfoId: String(senderUserInfoId),
+      senderUserInfoId: String(senderUserInfoId)
     };
 
     const results = await Promise.all(
@@ -115,32 +113,26 @@ async function sendChatMessageNotification({
           account_id: target.accountId,
           title,
           body,
-          data,
-        }),
-      ),
+          data
+        })
+      )
     );
 
     return results.reduce(
       (accumulator, result) => ({
         successCount: accumulator.successCount + (result?.successCount || 0),
         failureCount: accumulator.failureCount + (result?.failureCount || 0),
-        invalidTokens: [
-          ...accumulator.invalidTokens,
-          ...(result?.invalidTokens || []),
-        ],
-        tokens: [...accumulator.tokens, ...(result?.tokens || [])],
+        invalidTokens: [...accumulator.invalidTokens, ...(result?.invalidTokens || [])],
+        tokens: [...accumulator.tokens, ...(result?.tokens || [])]
       }),
-      { successCount: 0, failureCount: 0, invalidTokens: [], tokens: [] },
+      { successCount: 0, failureCount: 0, invalidTokens: [], tokens: [] }
     );
   } catch (error) {
-    console.error(
-      "sendChatMessageNotification error:",
-      error?.message || error,
-    );
+    console.error("sendChatMessageNotification error:", error?.message || error);
     return { successCount: 0, failureCount: 0, invalidTokens: [], tokens: [] };
   }
 }
 
 module.exports = {
-  sendChatMessageNotification,
+  sendChatMessageNotification
 };

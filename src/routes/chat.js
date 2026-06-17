@@ -27,11 +27,7 @@ router.get(
   authenticate,
   ChatController.getMessageImage
 );
-router.patch(
-  "/conversations/:conversationId/seen",
-  authenticate,
-  ChatController.markConversationSeen
-);
+
 router.patch(
   "/conversations/:conversationId/group-name",
   authenticate,

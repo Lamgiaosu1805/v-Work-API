@@ -4,6 +4,7 @@ const path = require("path");
 const ConversationModel = require("../models/ConversationModel");
 const MessageModel = require("../models/MessageModel");
 const UserInfoModel = require("../models/UserInfoModel");
+const { ChatError } = require("../helpers/socketHandler");
 
 function removeAttachmentFiles(attachment) {
   if (!attachment) return;
@@ -21,14 +22,6 @@ function removeAttachmentFiles(attachment) {
       console.error("removeAttachmentFiles error:", error?.message || error);
     }
   });
-}
-
-class ChatError extends Error {
-  constructor(message, statusCode = 400) {
-    super(message);
-    this.name = "ChatError";
-    this.statusCode = statusCode;
-  }
 }
 
 function normalizeObjectIds(values) {
@@ -49,7 +42,6 @@ function formatConversation(conversation, currentUserInfoId) {
   const members = plainConversation.members || [];
   const myId = String(currentUserInfoId);
 
-  // Group chat thì hiển thị tên/ảnh của chính group.
   if (plainConversation.type === "group") {
     return {
       ...plainConversation,
@@ -58,7 +50,6 @@ function formatConversation(conversation, currentUserInfoId) {
     };
   }
 
-  // Private chat thì hiển thị tên/ảnh của người còn lại trong conversation.
   const otherMember = members.find((member) => String(member?._id || member) !== myId) || null;
 
   return {
@@ -69,7 +60,6 @@ function formatConversation(conversation, currentUserInfoId) {
 }
 
 async function getCurrentUserInfo(accountId) {
-  // Socket/controller thường đi từ account._id -> user_info để làm việc với chat.
   const userInfo = await UserInfoModel.findOne({
     id_account: accountId,
     isDeleted: false
@@ -85,7 +75,6 @@ async function getCurrentUserInfo(accountId) {
 }
 
 async function loadConversationById(conversationId, currentUserInfoId, session) {
-  // Chỉ load conversation nếu user hiện tại là thành viên của conversation đó.
   const query = ConversationModel.findOne({
     _id: conversationId,
     members: currentUserInfoId,
@@ -142,8 +131,6 @@ async function createPrivateConversation({ currentUserInfoId, receiverUserInfoId
     throw new ChatError("Không thể chat với chính mình", 400);
   }
 
-  // Receiver có thể được truyền vào bằng user_info._id hoặc account id.
-  // Service thử tìm theo user_info trước, sau đó mới fallback sang account id.
   let receiver = await UserInfoModel.findOne({
     _id: receiverId,
     isDeleted: false
@@ -167,12 +154,8 @@ async function createPrivateConversation({ currentUserInfoId, receiverUserInfoId
   const pairKey = [String(currentUserInfoId), String(receiver._id)].sort().join("_");
 
   const existingConversation = await ConversationModel.findOne({
-    type: "private",
-    isDeleted: false,
-    members: {
-      $all: [currentUserInfoId, receiver._id],
-      $size: 2
-    }
+    pairKey,
+    isDeleted: false
   });
 
   if (existingConversation) {
@@ -211,7 +194,6 @@ async function createMessageDocument({
   seenBy = [],
   session
 }) {
-  // Tách riêng việc tạo message để dùng lại cho cả private/group/system message.
   const payload = {
     conversationId,
     senderId: senderUserInfoId,
@@ -237,15 +219,12 @@ async function createGroupConversation({ name, memberIds, creatorUserInfoId, ses
     throw new ChatError("Thiếu name", 400);
   }
 
-  // memberIds có thể là user_info._id hoặc account id, nên normalize trước rồi resolve.
   const candidateIds = normalizeObjectIds(memberIds || []);
-  // Luôn thêm creator vào group để đảm bảo người tạo là thành viên.
   const withCreator = normalizeObjectIds([...candidateIds, creatorUserInfoId]);
   if (withCreator.length < 2) {
     throw new ChatError("Group phải có ít nhất 2 thành viên", 400);
   }
 
-  // Tìm toàn bộ user tương ứng để xác thực member tồn tại và lấy user_info._id chuẩn.
   const users = await UserInfoModel.find({
     isDeleted: false,
     $or: [{ _id: { $in: withCreator } }, { id_account: { $in: withCreator } }]
@@ -304,26 +283,14 @@ async function updateGroupConversationName({ conversationId, userInfoId, name })
     throw new ChatError("Thiếu name", 400);
   }
 
-  const conversation = await ConversationModel.findOne({
+  const exists = await ConversationModel.exists({
     _id: conversationId,
     members: userInfoId,
     type: "group",
     isDeleted: false
-  })
-    .populate("members", "full_name avatar ma_nv id_account")
-    .populate("admins", "full_name avatar ma_nv id_account")
-    .populate("createdBy", "full_name avatar ma_nv id_account")
-    .populate({
-      path: "lastMessage",
-      match: { isDeleted: false },
-      populate: {
-        path: "senderId",
-        select: "full_name avatar ma_nv id_account"
-      }
-    })
-    .lean();
+  });
 
-  if (!conversation) {
+  if (!exists) {
     throw new ChatError("Conversation không tồn tại hoặc bạn không có quyền truy cập", 404);
   }
 
@@ -340,7 +307,6 @@ async function updateGroupConversationName({ conversationId, userInfoId, name })
   return loadConversationById(conversationId, userInfoId);
 }
 async function listConversations(userInfoId, search = "") {
-  // Lấy toàn bộ conversation mà user là member, sau đó format lại cho UI.
   const conversations = await ConversationModel.find({
     members: userInfoId,
     isDeleted: false,
@@ -395,7 +361,6 @@ async function getConversationDetail({ conversationId, userInfoId }) {
 }
 
 async function getConversationMessages({ conversationId, userInfoId, page = 1, limit = 30 }) {
-  // Chỉ thành viên trong conversation mới được đọc message.
   await ensureConversationAccess(conversationId, userInfoId);
 
   const filter = {
@@ -433,7 +398,9 @@ async function sendMessage({
   attachment = null,
   session
 }) {
-  // Validate membership trước, sau đó mới ghi message và update lastMessage của conversation.
+  if (!session) {
+    throw new ChatError("sendMessage phải chạy trong transaction (thiếu session)", 500);
+  }
   await ensureConversationAccess(conversationId, senderUserInfoId);
 
   const allowedTypes = ["text", "image", "audio"];
@@ -484,7 +451,6 @@ async function sendMessage({
 }
 
 async function markConversationSeen({ conversationId, userInfoId }) {
-  // Đánh dấu seen cho tất cả message trong conversation mà user này chưa đọc.
   await ensureConversationAccess(conversationId, userInfoId);
 
   const result = await MessageModel.updateMany(
@@ -533,7 +499,7 @@ async function deleteConversation({ conversationId, userInfoId }) {
     );
     await session.commitTransaction();
   } catch (error) {
-    await session.abortTransaction();
+    if (session.inTransaction()) await session.abortTransaction();
     throw error;
   } finally {
     session.endSession();
@@ -565,10 +531,6 @@ async function recallMessage({ conversationId, messageId, userInfoId }) {
     throw new ChatError("Bạn không có quyền thu hồi tin nhắn này", 403);
   }
 
-  if (message.type === "image") {
-    removeAttachmentFiles(message.attachment);
-  }
-
   const recalled = await MessageModel.findByIdAndUpdate(
     messageId,
     {
@@ -577,6 +539,10 @@ async function recallMessage({ conversationId, messageId, userInfoId }) {
     },
     { new: true }
   ).populate("senderId", "full_name avatar ma_nv id_account");
+
+  if (message.type === "image") {
+    setImmediate(() => removeAttachmentFiles(message.attachment));
+  }
 
   return recalled;
 }
@@ -697,24 +663,31 @@ async function leaveGroup({ conversationId, userInfoId }) {
     return { conversationId: String(conversationId), disbanded: true, conversation: null };
   }
 
-  const remainingAdmins = conversation.admins.map(String).filter((a) => a !== String(userInfoId));
-
   await ConversationModel.updateOne(
     { _id: conversationId },
     { $pull: { members: userInfoId, admins: userInfoId } }
   );
 
-  if (remainingAdmins.length === 0) {
-    const newAdmin = remainingMembers[Math.floor(Math.random() * remainingMembers.length)];
-    await ConversationModel.updateOne({ _id: conversationId }, { $addToSet: { admins: newAdmin } });
+  const updated = await ConversationModel.findOne({ _id: conversationId })
+    .select("admins members")
+    .lean();
+
+  if (updated.admins.length === 0 && updated.members.length > 0) {
+    const newAdmin = updated.members[0];
+    await ConversationModel.updateOne(
+      { _id: conversationId, admins: { $size: 0 } },
+      { $addToSet: { admins: newAdmin } }
+    );
   }
 
-  const updatedConv = await loadConversationById(conversationId, remainingMembers[0]);
+  const updatedConv = await loadConversationById(
+    conversationId,
+    updated.members[0] ?? remainingMembers[0]
+  );
   return { conversationId: String(conversationId), disbanded: false, conversation: updatedConv };
 }
 
 module.exports = {
-  ChatError,
   getCurrentUserInfo,
   createPrivateConversation,
   createGroupConversation,

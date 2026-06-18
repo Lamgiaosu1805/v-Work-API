@@ -336,13 +336,18 @@ const ChatController = {
   searchUsers: async (req, res) => {
     try {
       const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const currentUserInfo = await UserInfoModel.findOne({
+        id_account: req.account._id,
+        isDeleted: false
+      })
+        .select("_id")
+        .lean();
       const search = String(req.query.search ?? "").trim();
       const safe = escapeRegex(search);
       const limit = Math.min(20, Math.max(1, parseInt(req.query.limit, 10) || 10));
 
       const filter = {
-        _id: { $ne: currentUserInfo._id },
+        ...(currentUserInfo && { _id: { $ne: currentUserInfo._id } }),
         isDeleted: false,
         ...(search && {
           $or: [

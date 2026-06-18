@@ -935,7 +935,10 @@ const UserController = {
         return res.status(400).json({ message: "ID không hợp lệ" });
       }
 
-      const userInfo = await UserInfoModel.findOne({ id_account: targetId, isDeleted: false });
+      const userInfo = await UserInfoModel.findOne({
+        $or: [{ id_account: targetId }, { _id: targetId }],
+        isDeleted: false,
+      });
       if (!userInfo) return res.status(404).json({ message: "Không tìm thấy người dùng" });
 
       const departments = await UserDepartmentPositionModel.find({ user: userInfo._id })
@@ -943,7 +946,7 @@ const UserController = {
         .populate("position", "position_name")
         .lean();
 
-      const isSelf = String(req.account._id) === String(targetId);
+      const isSelf = String(req.account._id) === String(userInfo.id_account);
 
       return res.status(200).json({
         account_id: targetId,

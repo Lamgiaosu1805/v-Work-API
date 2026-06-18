@@ -431,19 +431,15 @@ const UserController = {
         from_date,
         to_date,
         module, // lọc theo module_access (vd: "crm")
-        isFull
       } = req.query;
 
       const skip = (Number(page) - 1) * Number(limit);
 
       const filter = { isDeleted: false };
 
-      const reqIsFullAccess = String(isFull || "false").toLowerCase() === "true";
-
+      // Admin hoặc có module hrm → xem tất cả; còn lại chỉ xem phòng ban của mình
       const isFullAccess =
-        req.account.role === "admin" ||
-        req.account.module_access?.includes("hrm") ||
-        reqIsFullAccess;
+        req.account.role === "admin" || req.account.module_access?.includes("hrm");
 
       if (!isFullAccess) {
         const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });

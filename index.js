@@ -10,6 +10,7 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const db = require('./src/config/connectDB');
 const route = require('./src/routes');
+const setupChatSocket = require('./src/sockets/chatSocket');
 
 const app = express();
 const httpServer = createServer(app);
@@ -31,6 +32,7 @@ io.on('connection', (socket) => {
 });
 
 app.set('io', io);
+setupChatSocket(io);
 
 // Tin tưởng 1 lớp proxy (Traefik) để rate-limit đọc đúng IP thật từ X-Forwarded-For
 app.set('trust proxy', 1);

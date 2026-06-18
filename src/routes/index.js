@@ -18,6 +18,7 @@ const branchRouter = require('./branch')
 const printRouter = require('./print')
 const customerClaimRequestRouter = require('./customerClaimRequest')
 const aiRouter = require('./ai')
+const chatRouter = require("./chat");
 const requestRouter = require('./request')
 const holidayRouter = require('./holiday')
 const employmentStatusRouter = require('./employmentStatus')
@@ -51,6 +52,7 @@ const route = (app) => {
     // app.use(`/attendance-mapping`, attendanceMappingRouter)
     // app.use(`/penalty-tier`, penaltyTierRouter)
     app.use(`/ai`, aiRouter)
+    app.use(`/chat`, chatRouter)
     app.use(`/transaction-management`, transactionManagementRouter)
 }
 

@@ -4,6 +4,7 @@ const path = require("path");
 const { sendChatMessageNotification } = require("../helpers/chatNotification");
 const UserInfoModel = require("../models/UserInfoModel");
 const MessageModel = require("../models/MessageModel");
+const ConversationModel = require("../models/ConversationModel");
 const { getChatDir } = require("../middlewares/uploadChatImage");
 
 const { handleChatError } = require("../helpers/socketHandler");
@@ -67,6 +68,33 @@ async function broadcastNewMessage({ req, currentUserInfo, message, clientMessag
   emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
 
   return { conversation };
+}
+
+async function createAndBroadcastSystemMessage({ io, conversationId, actorUserInfoId, content }) {
+  const message = await MessageModel.create({
+    conversationId,
+    senderId: actorUserInfoId,
+    type: "system",
+    content,
+    seenBy: [actorUserInfoId]
+  });
+
+  await ConversationModel.updateOne(
+    { _id: conversationId },
+    { $set: { lastMessage: message._id, updatedAt: new Date() } }
+  );
+
+  const populated = await MessageModel.findById(message._id)
+    .populate("senderId", "full_name avatar ma_nv id_account")
+    .lean();
+
+  if (io) {
+    io.to(`conversation:${String(conversationId)}`).emit("message:new", {
+      conversationId: String(conversationId),
+      message: populated,
+      clientMessageId: null
+    });
+  }
 }
 
 const ChatController = {
@@ -136,10 +164,15 @@ const ChatController = {
 
       const io = req.app.get("io");
       if (io) {
-        emitConversationEvent(io, "conversation:upserted", conversation, {
-          conversation
-        });
+        emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
       }
+
+      await createAndBroadcastSystemMessage({
+        io,
+        conversationId: req.params.conversationId,
+        actorUserInfoId: currentUserInfo._id,
+        content: `${currentUserInfo.full_name} đã đổi tên nhóm thành "${req.body.name}"`
+      });
 
       return res.status(200).json({
         message: "Cập nhật tên nhóm thành công",
@@ -405,15 +438,36 @@ const ChatController = {
   addMembers: async (req, res) => {
     try {
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const newMemberIds = req.body.member_ids ?? [];
+
+      const newMembers = await UserInfoModel.find({
+        _id: { $in: newMemberIds },
+        isDeleted: false
+      })
+        .select("full_name")
+        .lean();
+
       const conversation = await addMembers({
         conversationId: req.params.conversationId,
         userInfoId: currentUserInfo._id,
-        newMemberIds: req.body.member_ids
+        newMemberIds
       });
+
       const io = req.app.get("io");
       if (io) {
         emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
       }
+
+      if (newMembers.length > 0) {
+        const names = newMembers.map((u) => u.full_name).join(", ");
+        await createAndBroadcastSystemMessage({
+          io,
+          conversationId: req.params.conversationId,
+          actorUserInfoId: currentUserInfo._id,
+          content: `${currentUserInfo.full_name} đã thêm ${names} vào nhóm`
+        });
+      }
+
       return res.status(200).json({ message: "Thêm thành viên thành công", data: conversation });
     } catch (error) {
       return handleChatError(res, error);
@@ -467,6 +521,16 @@ const ChatController = {
         userInfoId: currentUserInfo._id
       });
       const io = req.app.get("io");
+
+      if (!result.disbanded) {
+        await createAndBroadcastSystemMessage({
+          io,
+          conversationId: req.params.conversationId,
+          actorUserInfoId: currentUserInfo._id,
+          content: `${currentUserInfo.full_name} đã rời khỏi nhóm`
+        });
+      }
+
       if (io) {
         if (!result.disbanded && result.conversation) {
           emitConversationEvent(io, "conversation:upserted", result.conversation, {

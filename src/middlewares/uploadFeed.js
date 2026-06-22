@@ -5,18 +5,23 @@ const sharp = require("sharp");
 const heicConvert = require("heic-convert");
 
 const ALLOWED_MIMETYPES = [
-  "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp",
-  "image/heic", "image/heif",
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/heic",
+  "image/heif"
 ];
 
 const HEIC_TYPES = new Set(["image/heic", "image/heif"]);
-const GIF_TYPES  = new Set(["image/gif"]);
+const GIF_TYPES = new Set(["image/gif"]);
 
 const getFeedDir = () => {
   const baseDir =
     process.env.NODE_ENV === "production"
-      ? process.env.UPLOAD_DIR_PROD
-      : process.env.UPLOAD_DIR_DEV;
+      ? process.env.UPLOAD_DIR_PUBLIC_PROD
+      : process.env.UPLOAD_DIR_PUBLIC_DEV;
   return path.resolve(baseDir, "feed");
 };
 
@@ -27,11 +32,10 @@ const storage = multer.diskStorage({
     cb(null, feedDir);
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    // GIF giữ nguyên, tất cả còn lại → WebP
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     const ext = GIF_TYPES.has(file.mimetype) ? ".gif" : ".webp";
     cb(null, uniqueSuffix + ext);
-  },
+  }
 });
 
 const fileFilter = (req, file, cb) => {
@@ -63,15 +67,15 @@ async function processImages(req, _res, next) {
         await sharp(inputBuffer)
           .resize(1920, 1920, { fit: "inside", withoutEnlargement: true })
           .webp({ quality: 80 })
-          .toFile(file.path + ".tmp");
+          .toFile(`${file.path}.tmp`);
 
-        fs.renameSync(file.path + ".tmp", file.path);
+        fs.renameSync(`${file.path}.tmp`, file.path);
         file.mimetype = "image/webp";
       })
     );
     next();
   } catch (err) {
-    next(new Error("Không thể xử lý ảnh: " + err.message));
+    next(new Error(`Không thể xử lý ảnh: ${err.message}`));
   }
 }
 
@@ -80,8 +84,8 @@ const upload = multer({
   fileFilter,
   limits: {
     fileSize: 30 * 1024 * 1024,
-    files: 20,
-  },
+    files: 20
+  }
 });
 
 module.exports = { upload, processImages };

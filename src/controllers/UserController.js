@@ -1,28 +1,45 @@
+const path = require("path");
+const fs = require("fs");
 const mongoose = require("mongoose");
+const bcrypt = require("bcrypt");
+const QRCode = require("qrcode");
+const heicConvert = require("heic-convert");
 const AccountModel = require("../models/AccountModel");
 const EmploymentStatusModel = require("../models/EmploymentStatusModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
-
-// Multer decode originalname bằng latin1 — cần re-encode sang UTF-8 để giữ tiếng Việt
-const decodeFilename = (name) => Buffer.from(name, 'latin1').toString('utf8');
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
-const bcrypt = require('bcrypt');
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const { LEAF_TYPES } = require("../models/DepartmentModel");
 const DepartmentModel = require("../models/DepartmentModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
-const QRCode = require("qrcode");
-const path = require("path");
-const fs = require("fs");
-const heicConvert = require("heic-convert");
+
+const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 
 const uploadDir =
+  process.env.NODE_ENV === "production" ? process.env.UPLOAD_DIR_PROD : process.env.UPLOAD_DIR_DEV;
+
+const AVATAR_PREFIX = "avatar";
+const avatarDir = path.resolve(
   process.env.NODE_ENV === "production"
-    ? process.env.UPLOAD_DIR_PROD
-    : process.env.UPLOAD_DIR_DEV;
+    ? process.env.UPLOAD_DIR_PUBLIC_PROD
+    : process.env.UPLOAD_DIR_PUBLIC_DEV,
+  AVATAR_PREFIX
+);
+
+const removePublicImage = (stored) => {
+  if (!stored) return;
+  const base = path.basename(stored);
+  const candidates = [path.join(avatarDir, base), path.join(uploadDir, base)];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      fs.unlinkSync(p);
+      return;
+    }
+  }
+};
 
 const UserController = {
   createUser: async (req, res) => {
@@ -40,7 +57,7 @@ const UserController = {
         tinh_trang_hon_nhan,
         employment_type,
         branch_id,
-        employment_status,
+        employment_status
       } = req.body;
 
       let { userDepartments = [], schedules = [] } = req.body;
@@ -86,7 +103,7 @@ const UserController = {
             session.endSession();
             return res.status(400).json({
               message:
-                "Mỗi schedules phải có dayOfWeek (number) và shifts (array chứa ít nhất 1 ca)",
+                "Mỗi schedules phải có dayOfWeek (number) và shifts (array chứa ít nhất 1 ca)"
             });
           }
           totalShifts += item.shifts.length;
@@ -96,7 +113,7 @@ const UserController = {
           await session.abortTransaction();
           session.endSession();
           return res.status(400).json({
-            message: "Parttime phải đăng ký ít nhất 6 buổi/tuần",
+            message: "Parttime phải đăng ký ít nhất 6 buổi/tuần"
           });
         }
       }
@@ -124,10 +141,9 @@ const UserController = {
       const hashedPassword = await bcrypt.hash(password, salt);
 
       // Tạo tài khoản
-      const [account] = await AccountModel.create(
-        [{ username, password: hashedPassword }],
-        { session }
-      );
+      const [account] = await AccountModel.create([{ username, password: hashedPassword }], {
+        session
+      });
 
       // Tạo thông tin người dùng
       const [userInfo] = await UserInfoModel.create(
@@ -145,8 +161,8 @@ const UserController = {
             employment_type,
             branch_id: branch_id || null,
             employment_status: employment_status || null,
-            leave_balance: { annual: 0 },
-          },
+            leave_balance: { annual: 0 }
+          }
         ],
         { session }
       );
@@ -161,16 +177,13 @@ const UserController = {
           file_url: f.path,
           uploaded_at: new Date(),
           uploaded_by: req.account?._id || null,
-          allowed_users: [userInfo._id],
+          allowed_users: [userInfo._id]
         }));
         documents.push({ type_id, attachments });
       }
 
       if (documents.length > 0) {
-        await UserDocumentModel.create(
-          [{ user_id: userInfo._id, documents }],
-          { session }
-        );
+        await UserDocumentModel.create([{ user_id: userInfo._id, documents }], { session });
       }
 
       // Lưu danh sách phòng ban – vị trí
@@ -183,24 +196,28 @@ const UserController = {
           await session.abortTransaction();
           session.endSession();
           return res.status(400).json({
-            message: "Vui lòng chọn vị trí phòng ban",
+            message: "Vui lòng chọn vị trí phòng ban"
           });
         }
 
         // Chỉ cho phép gán vào node lá (department/branch)
         const deptIds = userDepartments.map((i) => i.department_id);
-        const depts = await DepartmentModel.find({ _id: { $in: deptIds }, isDeleted: false }).select("type").session(session);
+        const depts = await DepartmentModel.find({ _id: { $in: deptIds }, isDeleted: false })
+          .select("type")
+          .session(session);
         const nonLeaf = depts.find((d) => !LEAF_TYPES.includes(d.type));
         if (nonLeaf) {
           await session.abortTransaction();
           session.endSession();
-          return res.status(400).json({ message: "Chỉ được gán nhân viên vào phòng ban hoặc chi nhánh (không phải khối/ban)" });
+          return res.status(400).json({
+            message: "Chỉ được gán nhân viên vào phòng ban hoặc chi nhánh (không phải khối/ban)"
+          });
         }
 
         const udpDocs = userDepartments.map((item) => ({
           user: userInfo._id,
           department: item.department_id,
-          position: item.position_id,
+          position: item.position_id
         }));
 
         await UserDepartmentPositionModel.insertMany(udpDocs, { session });
@@ -211,7 +228,7 @@ const UserController = {
         const scheduleDocs = schedules.map((item) => ({
           userId: userInfo._id,
           dayOfWeek: item.dayOfWeek,
-          shifts: item.shifts,
+          shifts: item.shifts
         }));
         await WorkScheduleModel.insertMany(scheduleDocs, { session });
       }
@@ -223,7 +240,7 @@ const UserController = {
         message: "Tạo user, userInfo, documents, mapping và WorkSchedule thành công",
         account,
         firstPassword: password,
-        userInfo,
+        userInfo
       });
     } catch (err) {
       await session.abortTransaction();
@@ -231,85 +248,81 @@ const UserController = {
       console.error("Error in createUser:", err);
       return res.status(500).json({
         message: "Internal server error",
-        error: err.message,
+        error: err.message
       });
     }
   },
 
   getBirthdayThisMonth: async (req, res) => {
-  try {
-    const now = new Date();
-    const currentMonth = now.getMonth() + 1;
+    try {
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
 
-    const users = await UserInfoModel.aggregate([
-      {
-        $match: {
-          isDeleted: false,
-          date_of_birth: { $exists: true, $ne: null },
+      const users = await UserInfoModel.aggregate([
+        {
+          $match: {
+            isDeleted: false,
+            date_of_birth: { $exists: true, $ne: null }
+          }
         },
-      },
-      {
-        $addFields: {
-          birth_month: { $month: "$date_of_birth" },
+        {
+          $addFields: {
+            birth_month: { $month: "$date_of_birth" }
+          }
         },
-      },
-      {
-        $match: {
-          birth_month: currentMonth,
+        {
+          $match: {
+            birth_month: currentMonth
+          }
         },
-      },
-      {
-        $project: {
-          full_name: 1,
-          ma_nv: 1,
-          date_of_birth: 1,
-          age : { 
-            $subtract: [
-              { $year: new Date() },
-              { $year: "$date_of_birth" }
-            ]
+        {
+          $project: {
+            full_name: 1,
+            ma_nv: 1,
+            date_of_birth: 1,
+            age: {
+              $subtract: [{ $year: new Date() }, { $year: "$date_of_birth" }]
+            }
+          }
         },
-        },
-      },
-      { $sort: { date_of_birth: 1 } },
-    ]);
+        { $sort: { date_of_birth: 1 } }
+      ]);
 
-    
-    const userIds = users.map((u) => u._id);
-    const udpList = await UserDepartmentPositionModel.find({
-      user: { $in: userIds },
-      isDeleted: false,
-    })
-      .populate("department", "department_name department_code")
-      .populate("position", "position_name")
-      .lean();
+      const userIds = users.map((u) => u._id);
+      const udpList = await UserDepartmentPositionModel.find({
+        user: { $in: userIds },
+        isDeleted: false
+      })
+        .populate("department", "department_name department_code")
+        .populate("position", "position_name")
+        .lean();
 
-    const udpMap = {};
-    for (const item of udpList) {
-      const uid = item.user.toString();
-      if (!udpMap[uid]) udpMap[uid] = [];
-      udpMap[uid].push({ department: item.department, position: item.position });
+      const udpMap = {};
+      for (const item of udpList) {
+        const uid = item.user.toString();
+        if (!udpMap[uid]) udpMap[uid] = [];
+        udpMap[uid].push({ department: item.department, position: item.position });
+      }
+
+      const data = users.map((u) => ({
+        ...u,
+        departments: udpMap[u._id.toString()] || []
+      }));
+
+      return res.status(200).json({
+        message: `Danh sách nhân viên sinh nhật tháng ${currentMonth}`,
+        month: currentMonth,
+        total: data.length,
+        data
+      });
+    } catch (error) {
+      console.error("Error in getBirthdayThisMonth:", error);
+      res.status(500).json({
+        message: "Internal server error",
+        error: error.message
+      });
     }
-
-    const data = users.map((u) => ({
-      ...u,
-      departments: udpMap[u._id.toString()] || [],
-    }));
-
-    return res.status(200).json({
-      message: `Danh sách nhân viên sinh nhật tháng ${currentMonth}`,
-      month: currentMonth,
-      total: data.length,
-      data,
-    });
-  } catch (error) {
-    console.error("Error in getBirthdayThisMonth:", error);
-    res.status(500).json({
-      message: "Internal server error",
-      error: error.message,
-    });
-  }
-},
+  },
 
   createAdmin: async (req, res) => {
     try {
@@ -326,14 +339,14 @@ const UserController = {
         username,
         password: hashedPassword,
         role: "admin",
-        isFirstLogin: false,
+        isFirstLogin: false
       });
 
       await newAdmin.save();
 
       res.status(201).json({
         message: "Admin created successfully",
-        admin: newAdmin,
+        admin: newAdmin
       });
     } catch (error) {
       console.log(error);
@@ -343,7 +356,7 @@ const UserController = {
 
   getUserInfo: async (req, res) => {
     try {
-      const account = req.account;
+      const { account } = req;
 
       const user = await UserInfoModel.findOne({ id_account: account._id });
 
@@ -359,7 +372,7 @@ const UserController = {
           ma_nv: null,
           departments: [],
           documents: [],
-          laborContracts: [],
+          laborContracts: []
         });
       }
 
@@ -370,9 +383,7 @@ const UserController = {
         UserDocumentModel.findOne({ user_id: user._id })
           .populate("documents.type_id", "name required")
           .populate("documents.attachments.uploaded_by", "username"),
-        LaborContractModel.find({ id_user_info: user._id })
-          .select("-__v")
-          .lean(),
+        LaborContractModel.find({ id_user_info: user._id }).select("-__v").lean()
       ]);
 
       return res.status(200).json({
@@ -384,28 +395,28 @@ const UserController = {
         ...user.toObject(),
         departments: userDepartments.map((item) => ({
           department: item.department,
-          position: item.position,
+          position: item.position
         })),
         documents: userDocuments
           ? userDocuments.documents.map((doc) => ({
-            type: doc.type_id,
-            note: doc.note,
-            attachments: doc.attachments.map((a) => ({
-              _id: a._id,
-              file_name: a.file_name,
-              file_url: a.file_url,
-              uploaded_at: a.uploaded_at,
-              uploaded_by: a.uploaded_by,
-            })),
-          }))
+              type: doc.type_id,
+              note: doc.note,
+              attachments: doc.attachments.map((a) => ({
+                _id: a._id,
+                file_name: a.file_name,
+                file_url: a.file_url,
+                uploaded_at: a.uploaded_at,
+                uploaded_by: a.uploaded_by
+              }))
+            }))
           : [],
-        laborContracts,
+        laborContracts
       });
     } catch (error) {
       console.error("Error in getUserInfo:", error);
       res.status(500).json({
         message: "Internal server error",
-        error: error.message,
+        error: error.message
       });
     }
   },
@@ -435,10 +446,12 @@ const UserController = {
         if (!myInfo) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
 
         const myDeptIds = await UserDepartmentPositionModel.distinct("department", {
-          user: myInfo._id, isDeleted: false,
+          user: myInfo._id,
+          isDeleted: false
         });
         const deptUserIds = await UserDepartmentPositionModel.distinct("user", {
-          department: { $in: myDeptIds }, isDeleted: false,
+          department: { $in: myDeptIds },
+          isDeleted: false
         });
         filter._id = { $in: deptUserIds };
       }
@@ -446,11 +459,8 @@ const UserController = {
       // Lọc theo module_access: tìm account có module đó rồi map sang user_info
       if (module) {
         const accountIds = await AccountModel.find({
-          $or: [
-            { role: "admin" },
-            { module_access: module },
-          ],
-          isDeleted: false,
+          $or: [{ role: "admin" }, { module_access: module }],
+          isDeleted: false
         }).distinct("_id");
         filter.id_account = { $in: accountIds };
       }
@@ -468,14 +478,14 @@ const UserController = {
           { full_name: { $regex: search, $options: "i" } },
           { ma_nv: { $regex: search, $options: "i" } },
           { phone_number: { $regex: search, $options: "i" } },
-          { cccd: { $regex: search, $options: "i" } },
+          { cccd: { $regex: search, $options: "i" } }
         ];
       }
 
       if (department_id) {
         const udpIds = await UserDepartmentPositionModel.find({
           department: department_id,
-          isDeleted: false,
+          isDeleted: false
         }).distinct("user");
 
         if (filter._id) {
@@ -495,13 +505,13 @@ const UserController = {
           .skip(skip)
           .limit(Number(limit))
           .lean(),
-        UserInfoModel.countDocuments(filter),
+        UserInfoModel.countDocuments(filter)
       ]);
 
       const userIds = users.map((u) => u._id);
       const udpList = await UserDepartmentPositionModel.find({
         user: { $in: userIds },
-        isDeleted: false,
+        isDeleted: false
       })
         .populate("department", "department_name department_code")
         .populate("position", "position_name")
@@ -516,7 +526,7 @@ const UserController = {
 
       const data = users.map((u) => ({
         ...u,
-        departments: udpMap[u._id.toString()] || [],
+        departments: udpMap[u._id.toString()] || []
       }));
 
       return res.status(200).json({
@@ -526,8 +536,8 @@ const UserController = {
           total,
           page: Number(page),
           limit: Number(limit),
-          total_pages: Math.ceil(total / Number(limit)),
-        },
+          total_pages: Math.ceil(total / Number(limit))
+        }
       });
     } catch (error) {
       console.error("Error in getUsers:", error);
@@ -543,11 +553,11 @@ const UserController = {
         return res.status(404).json({ message: "User not found" });
       }
 
-      const ma_nv = userInfo.ma_nv;
-      const phone_number = userInfo.phone_number;
+      const { ma_nv } = userInfo;
+      const { phone_number } = userInfo;
 
       const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-      const landingUrl = `${BASE_URL}/refer?ref=${phone_number + "-" + ma_nv}&type=sale`;
+      const landingUrl = `${BASE_URL}/refer?ref=${`${phone_number}-${ma_nv}`}&type=sale`;
 
       const qrImageBase64 = await QRCode.toDataURL(landingUrl, {
         errorCorrectionLevel: "H",
@@ -555,15 +565,15 @@ const UserController = {
         width: 400,
         color: {
           dark: "#000000",
-          light: "#FFFFFF",
-        },
+          light: "#FFFFFF"
+        }
       });
 
       return res.status(200).json({
         sale_name: userInfo.full_name,
         ma_nv,
         landing_url: landingUrl,
-        qr_image: qrImageBase64,
+        qr_image: qrImageBase64
       });
     } catch (error) {
       console.error("Error in generateMyQR:", error);
@@ -593,10 +603,12 @@ const UserController = {
           // Xem hồ sơ chính mình — luôn cho phép
         } else {
           const myDeptIds = await UserDepartmentPositionModel.distinct("department", {
-            user: myInfo?._id, isDeleted: false,
+            user: myInfo?._id,
+            isDeleted: false
           });
           const targetDeptIds = await UserDepartmentPositionModel.distinct("department", {
-            user: user._id, isDeleted: false,
+            user: user._id,
+            isDeleted: false
           });
           const sameDept = myDeptIds.some((d) => targetDeptIds.some((t) => t.equals(d)));
           if (!sameDept) {
@@ -613,30 +625,30 @@ const UserController = {
           .populate("documents.type_id", "name required")
           .populate("documents.attachments.uploaded_by", "username"),
         LaborContractModel.find({ id_user_info: user._id }).select("-__v").lean(),
-        WorkScheduleModel.find({ userId: user._id }).select("dayOfWeek shifts").lean(),
+        WorkScheduleModel.find({ userId: user._id }).select("dayOfWeek shifts").lean()
       ]);
 
       return res.status(200).json({
         ...user.toObject(),
         departments: userDepartments.map((item) => ({
           department: item.department,
-          position: item.position,
+          position: item.position
         })),
         documents: userDocuments
           ? userDocuments.documents.map((doc) => ({
-            type: doc.type_id,
-            note: doc.note,
-            attachments: doc.attachments.map((a) => ({
-              _id: a._id,
-              file_name: a.file_name,
-              file_url: a.file_url,
-              uploaded_at: a.uploaded_at,
-              uploaded_by: a.uploaded_by,
-            })),
-          }))
+              type: doc.type_id,
+              note: doc.note,
+              attachments: doc.attachments.map((a) => ({
+                _id: a._id,
+                file_name: a.file_name,
+                file_url: a.file_url,
+                uploaded_at: a.uploaded_at,
+                uploaded_by: a.uploaded_by
+              }))
+            }))
           : [],
         laborContracts,
-        schedules: workSchedules.map((s) => ({ dayOfWeek: s.dayOfWeek, shifts: s.shifts })),
+        schedules: workSchedules.map((s) => ({ dayOfWeek: s.dayOfWeek, shifts: s.shifts }))
       });
     } catch (error) {
       console.error("Error in getUserById:", error);
@@ -675,7 +687,7 @@ const UserController = {
         "branch_id",
         "start_date",
         "probation_end_date",
-        "resignation_date",
+        "resignation_date"
       ];
 
       const updates = {};
@@ -687,7 +699,7 @@ const UserController = {
 
       if (req.body.leave_balance_annual !== undefined) {
         const val = Number(req.body.leave_balance_annual);
-        if (isNaN(val) || val < 0) {
+        if (Number.isNaN(val) || val < 0) {
           await session.abortTransaction();
           session.endSession();
           return res.status(400).json({ message: "leave_balance_annual không hợp lệ" });
@@ -700,14 +712,23 @@ const UserController = {
       const hasSchedules = req.body.schedules !== undefined;
       const hasDeletedAttachments = req.body.deletedAttachments !== undefined;
 
-      if (Object.keys(updates).length === 0 && !hasFiles && !hasDepartments && !hasSchedules && !hasDeletedAttachments) {
+      if (
+        Object.keys(updates).length === 0 &&
+        !hasFiles &&
+        !hasDepartments &&
+        !hasSchedules &&
+        !hasDeletedAttachments
+      ) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({ message: "Không có trường nào được cập nhật" });
       }
 
       if (updates.cccd && updates.cccd !== user.cccd) {
-        const existed = await UserInfoModel.findOne({ cccd: updates.cccd, _id: { $ne: id } }).session(session);
+        const existed = await UserInfoModel.findOne({
+          cccd: updates.cccd,
+          _id: { $ne: id }
+        }).session(session);
         if (existed) {
           await session.abortTransaction();
           session.endSession();
@@ -717,35 +738,49 @@ const UserController = {
 
       let updated = user;
       if (Object.keys(updates).length > 0) {
-        updated = await UserInfoModel.findByIdAndUpdate(id, updates, { new: true, session }).select("-id_account -__v");
+        updated = await UserInfoModel.findByIdAndUpdate(id, updates, { new: true, session }).select(
+          "-id_account -__v"
+        );
       }
       // Update departments
       if (hasDepartments) {
         let userDepartmentsData = req.body.userDepartments;
         if (typeof userDepartmentsData === "string") {
-          try { userDepartmentsData = JSON.parse(userDepartmentsData); }
-          catch {
-            await session.abortTransaction(); session.endSession();
+          try {
+            userDepartmentsData = JSON.parse(userDepartmentsData);
+          } catch {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ message: "Sai định dạng userDepartments" });
           }
         }
         if (Array.isArray(userDepartmentsData) && userDepartmentsData.length > 0) {
           const invalid = userDepartmentsData.find((i) => !i.department_id || !i.position_id);
           if (invalid) {
-            await session.abortTransaction(); session.endSession();
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ message: "Vui lòng chọn vị trí phòng ban" });
           }
           // Chỉ cho phép gán vào node lá
           const deptIds = userDepartmentsData.map((i) => i.department_id);
-          const depts = await DepartmentModel.find({ _id: { $in: deptIds }, isDeleted: false }).select("type").session(session);
+          const depts = await DepartmentModel.find({ _id: { $in: deptIds }, isDeleted: false })
+            .select("type")
+            .session(session);
           const nonLeaf = depts.find((d) => !LEAF_TYPES.includes(d.type));
           if (nonLeaf) {
-            await session.abortTransaction(); session.endSession();
-            return res.status(400).json({ message: "Chỉ được gán nhân viên vào phòng ban hoặc chi nhánh (không phải khối/ban)" });
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+              message: "Chỉ được gán nhân viên vào phòng ban hoặc chi nhánh (không phải khối/ban)"
+            });
           }
           await UserDepartmentPositionModel.deleteMany({ user: id }).session(session);
           await UserDepartmentPositionModel.insertMany(
-            userDepartmentsData.map((i) => ({ user: id, department: i.department_id, position: i.position_id })),
+            userDepartmentsData.map((i) => ({
+              user: id,
+              department: i.department_id,
+              position: i.position_id
+            })),
             { session }
           );
         }
@@ -755,15 +790,21 @@ const UserController = {
       if (hasSchedules) {
         let schedulesData = req.body.schedules;
         if (typeof schedulesData === "string") {
-          try { schedulesData = JSON.parse(schedulesData); }
-          catch {
-            await session.abortTransaction(); session.endSession();
+          try {
+            schedulesData = JSON.parse(schedulesData);
+          } catch {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ message: "Sai định dạng schedules" });
           }
         }
         const effectiveType = updates.employment_type || user.employment_type;
         await WorkScheduleModel.deleteMany({ userId: id }).session(session);
-        if (effectiveType === "parttime" && Array.isArray(schedulesData) && schedulesData.length > 0) {
+        if (
+          effectiveType === "parttime" &&
+          Array.isArray(schedulesData) &&
+          schedulesData.length > 0
+        ) {
           await WorkScheduleModel.insertMany(
             schedulesData.map((s) => ({ userId: id, dayOfWeek: s.dayOfWeek, shifts: s.shifts })),
             { session }
@@ -774,9 +815,10 @@ const UserController = {
       let deletedAttachments = [];
       if (hasDeletedAttachments) {
         try {
-          deletedAttachments = typeof req.body.deletedAttachments === "string"
-            ? JSON.parse(req.body.deletedAttachments)
-            : req.body.deletedAttachments;
+          deletedAttachments =
+            typeof req.body.deletedAttachments === "string"
+              ? JSON.parse(req.body.deletedAttachments)
+              : req.body.deletedAttachments;
         } catch {
           await session.abortTransaction();
           session.endSession();
@@ -806,9 +848,10 @@ const UserController = {
 
           if (!existingDoc) continue;
 
-          const attachmentIndex = existingDoc.attachments.findIndex((attachment) => (
-            attachment._id?.toString() === attachmentId || attachment.file_url === attachmentId
-          ));
+          const attachmentIndex = existingDoc.attachments.findIndex(
+            (attachment) =>
+              attachment._id?.toString() === attachmentId || attachment.file_url === attachmentId
+          );
 
           if (attachmentIndex === -1) continue;
 
@@ -823,7 +866,7 @@ const UserController = {
             file_url: f.path ?? f.originalname,
             uploaded_at: new Date(),
             uploaded_by: req.account._id,
-            allowed_users: [id],
+            allowed_users: [id]
           }));
 
           const existingDoc = userDocument.documents.find(
@@ -845,7 +888,7 @@ const UserController = {
 
       return res.status(200).json({
         message: "Cập nhật thông tin user thành công",
-        data: updated,
+        data: updated
       });
     } catch (error) {
       await session.abortTransaction();
@@ -868,24 +911,26 @@ const UserController = {
         return res.status(400).json({ message: "Không có file được upload" });
       }
 
-      if (userInfo.avatar) {
-        const oldPath = path.join(uploadDir, userInfo.avatar);
-        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-      }
+      if (userInfo.avatar) removePublicImage(userInfo.avatar);
 
       let fileName = req.file.filename ?? req.file.originalname;
       if (/\.(heic|heif)$/i.test(fileName)) {
-        const srcPath = path.join(uploadDir, fileName);
+        const srcPath = path.join(avatarDir, fileName);
         const inputBuffer = fs.readFileSync(srcPath);
-        const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 0.9 });
+        const outputBuffer = await heicConvert({
+          buffer: inputBuffer,
+          format: "JPEG",
+          quality: 0.9
+        });
         const jpegName = fileName.replace(/\.(heic|heif)$/i, ".jpg");
-        fs.writeFileSync(path.join(uploadDir, jpegName), Buffer.from(outputBuffer));
+        fs.writeFileSync(path.join(avatarDir, jpegName), Buffer.from(outputBuffer));
         fs.unlinkSync(srcPath);
         fileName = jpegName;
       }
-      await UserInfoModel.findByIdAndUpdate(userInfo._id, { avatar: fileName });
+      const storedAvatar = `${AVATAR_PREFIX}/${fileName}`;
+      await UserInfoModel.findByIdAndUpdate(userInfo._id, { avatar: storedAvatar });
 
-      return res.status(200).json({ message: "Upload avatar thành công", avatar: fileName });
+      return res.status(200).json({ message: "Upload avatar thành công", avatar: storedAvatar });
     } catch (error) {
       console.error("Error in uploadAvatar:", error);
       return res.status(500).json({ message: "Internal server error", error: error.message });
@@ -900,24 +945,28 @@ const UserController = {
       if (!userInfo) return res.status(404).json({ message: "User not found" });
       if (!req.file) return res.status(400).json({ message: "Không có file được upload" });
 
-      if (userInfo.cover_photo) {
-        const oldPath = path.join(uploadDir, userInfo.cover_photo);
-        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-      }
+      if (userInfo.cover_photo) removePublicImage(userInfo.cover_photo);
 
       let fileName = req.file.filename ?? req.file.originalname;
       if (/\.(heic|heif)$/i.test(fileName)) {
-        const srcPath = path.join(uploadDir, fileName);
+        const srcPath = path.join(avatarDir, fileName);
         const inputBuffer = fs.readFileSync(srcPath);
-        const outputBuffer = await heicConvert({ buffer: inputBuffer, format: "JPEG", quality: 0.9 });
+        const outputBuffer = await heicConvert({
+          buffer: inputBuffer,
+          format: "JPEG",
+          quality: 0.9
+        });
         const jpegName = fileName.replace(/\.(heic|heif)$/i, ".jpg");
-        fs.writeFileSync(path.join(uploadDir, jpegName), Buffer.from(outputBuffer));
+        fs.writeFileSync(path.join(avatarDir, jpegName), Buffer.from(outputBuffer));
         fs.unlinkSync(srcPath);
         fileName = jpegName;
       }
-      await UserInfoModel.findByIdAndUpdate(userInfo._id, { cover_photo: fileName });
+      const storedCover = `${AVATAR_PREFIX}/${fileName}`;
+      await UserInfoModel.findByIdAndUpdate(userInfo._id, { cover_photo: storedCover });
 
-      return res.status(200).json({ message: "Upload ảnh bìa thành công", cover_photo: fileName });
+      return res
+        .status(200)
+        .json({ message: "Upload ảnh bìa thành công", cover_photo: storedCover });
     } catch (error) {
       return res.status(500).json({ message: "Internal server error", error: error.message });
     }
@@ -935,7 +984,7 @@ const UserController = {
 
       const userInfo = await UserInfoModel.findOne({
         $or: [{ id_account: targetId }, { _id: targetId }],
-        isDeleted: false,
+        isDeleted: false
       });
       if (!userInfo) return res.status(404).json({ message: "Không tìm thấy người dùng" });
 
@@ -958,14 +1007,14 @@ const UserController = {
         // Thông tin nhạy cảm chỉ trả cho chính mình
         ...(isSelf && {
           phone_number: userInfo.phone_number,
-          address: userInfo.address,
+          address: userInfo.address
         }),
         departments: departments.map((d) => ({
           department_name: d.department?.department_name ?? null,
           department_code: d.department?.department_code ?? null,
-          position_name: d.position?.position_name ?? null,
+          position_name: d.position?.position_name ?? null
         })),
-        createdAt: userInfo.createdAt,
+        createdAt: userInfo.createdAt
       });
     } catch (error) {
       return res.status(500).json({ message: "Internal server error", error: error.message });
@@ -979,11 +1028,13 @@ const UserController = {
       const { employment_status_id, effective_date } = req.body;
 
       if (!employment_status_id || !effective_date)
-        return res.status(400).json({ message: "employment_status_id và effective_date là bắt buộc" });
+        return res
+          .status(400)
+          .json({ message: "employment_status_id và effective_date là bắt buộc" });
 
       const [userInfo, newStatus] = await Promise.all([
         UserInfoModel.findOne({ _id: id, isDeleted: false }).session(session),
-        EmploymentStatusModel.findOne({ _id: employment_status_id, isDeleted: false }),
+        EmploymentStatusModel.findOne({ _id: employment_status_id, isDeleted: false })
       ]);
 
       if (!userInfo) return res.status(404).json({ message: "Không tìm thấy nhân viên" });
@@ -995,12 +1046,12 @@ const UserController = {
         const startMoment = new Date(userInfo.start_date);
         const months = Math.floor(
           (effectiveMoment.getFullYear() - startMoment.getFullYear()) * 12 +
-          (effectiveMoment.getMonth() - startMoment.getMonth())
+            (effectiveMoment.getMonth() - startMoment.getMonth())
         );
         if (months > 0) {
           userInfo.leave_balance = {
             ...userInfo.leave_balance,
-            annual: (userInfo.leave_balance?.annual ?? 0) + months * MONTHLY_ACCRUAL,
+            annual: (userInfo.leave_balance?.annual ?? 0) + months * MONTHLY_ACCRUAL
           };
         }
       }
@@ -1017,7 +1068,7 @@ const UserController = {
       session.endSession();
       res.status(500).json({ message: "Lỗi server", error: err.message });
     }
-  },
+  }
 };
 
 module.exports = UserController;

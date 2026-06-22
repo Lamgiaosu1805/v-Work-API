@@ -1,103 +1,94 @@
-process.env.TZ = 'Asia/Ho_Chi_Minh';
-require('dotenv').config();
-const express = require('express');
-const { createServer } = require('http');
-const { Server } = require('socket.io');
-const morgan = require('morgan');
-const cors = require('cors');
-const compression = require('compression');
-const rateLimit = require('express-rate-limit');
-const path = require('path');
-const db = require('./src/config/connectDB');
-const route = require('./src/routes');
-const setupChatSocket = require('./src/sockets/chatSocket');
+process.env.TZ = "Asia/Ho_Chi_Minh";
+require("dotenv").config();
+const express = require("express");
+const { createServer } = require("http");
+const { Server } = require("socket.io");
+const morgan = require("morgan");
+const cors = require("cors");
+const compression = require("compression");
+const rateLimit = require("express-rate-limit");
+const path = require("path");
+const mongoose = require("mongoose");
+const db = require("./src/config/connectDB");
+const route = require("./src/routes");
+const setupChatSocket = require("./src/sockets/chatSocket");
+const { startCronJobs } = require("./src/jobs");
+const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
 
 const app = express();
 const httpServer = createServer(app);
 
-const ALLOWED_ORIGINS = process.env.BASE_URL
-  ? [process.env.BASE_URL]
-  : ['*'];
+const ALLOWED_ORIGINS = process.env.BASE_URL ? [process.env.BASE_URL] : ["*"];
 
 const io = new Server(httpServer, {
   cors: { origin: ALLOWED_ORIGINS, credentials: true },
-  transports: ['websocket', 'polling'],
+  transports: ["websocket", "polling"]
 });
 
-io.on('connection', (socket) => {
-  socket.on('join_feed', () => socket.join('feed'));
-  socket.on('leave_feed', () => socket.leave('feed'));
-  socket.on('join_post', (postId) => socket.join(`post:${postId}`));
-  socket.on('leave_post', (postId) => socket.leave(`post:${postId}`));
+io.on("connection", (socket) => {
+  socket.on("join_feed", () => socket.join("feed"));
+  socket.on("leave_feed", () => socket.leave("feed"));
+  socket.on("join_post", (postId) => socket.join(`post:${postId}`));
+  socket.on("leave_post", (postId) => socket.leave(`post:${postId}`));
 });
 
-app.set('io', io);
+app.set("io", io);
 setupChatSocket(io);
 
-// Tin tưởng 1 lớp proxy (Traefik) để rate-limit đọc đúng IP thật từ X-Forwarded-For
-app.set('trust proxy', 1);
+app.set("trust proxy", 1);
 
-// Nén response — tiết kiệm băng thông đáng kể với JSON payload lớn
 app.use(compression());
 
-// Middlewares
 app.use(cors());
-app.use(morgan('dev'));
-app.use(express.json({ limit: '500kb' }));
-app.use(express.urlencoded({ limit: '500kb', extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(morgan("dev"));
+app.use(express.json({ limit: "500kb" }));
+app.use(express.urlencoded({ limit: "500kb", extended: true }));
+app.use(express.static(path.join(__dirname, "public")));
 
-// Rate limiting — bảo vệ khỏi brute-force và request storm
+const PUBLIC_UPLOAD_DIR =
+  process.env.NODE_ENV === "production"
+    ? process.env.UPLOAD_DIR_PUBLIC_PROD
+    : process.env.UPLOAD_DIR_PUBLIC_DEV;
+app.use("/static", express.static(PUBLIC_UPLOAD_DIR, { maxAge: "7d", index: false }));
+
 const globalLimiter = rateLimit({
-  windowMs: 60 * 1000,       // 1 phút
-  max: 300,                  // 300 req/phút/IP — đủ cho 100 người dùng bình thường
+  windowMs: 60 * 1000,
+  max: 300,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { message: 'Quá nhiều yêu cầu, vui lòng thử lại sau' },
+  message: { message: "Quá nhiều yêu cầu, vui lòng thử lại sau" }
 });
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,  // 15 phút
-  max: 20,                   // 20 lần đăng nhập/15 phút/IP
+  windowMs: 15 * 60 * 1000,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { message: 'Quá nhiều lần thử đăng nhập, vui lòng thử lại sau 15 phút' },
+  message: { message: "Quá nhiều lần thử đăng nhập, vui lòng thử lại sau 15 phút" }
 });
 app.use(globalLimiter);
-app.use('/auth/login', authLimiter);
-app.use('/auth/refreshToken', authLimiter);
+app.use("/auth/login", authLimiter);
+app.use("/auth/refreshToken", authLimiter);
 
-// Request timeout — ngắt kết nối treo sau 30s để giải phóng slot
 app.use((req, res, next) => {
   res.setTimeout(30000, () => {
-    if (!res.headersSent) res.status(503).json({ message: 'Request timeout' });
+    if (!res.headersSent) res.status(503).json({ message: "Request timeout" });
   });
   next();
 });
 
-// Request & Response logging middleware
-app.use(require('./src/middlewares/loggingMiddleware'));
+app.use(require("./src/middlewares/loggingMiddleware"));
 
-// Route refer — phải đặt TRƯỚC route(app)
-app.get('/refer', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'refer.html'));
+app.get("/refer", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "refer.html"));
 });
 
-// Routing
 route(app);
 
-// Connect to MongoDB và start server
 (async () => {
   try {
     await db.connect();
 
-    // require('./src/jobs/genWorkSheet');
-    // require('./src/jobs/finalizeWorkDay');
-    require('./src/jobs/cleanupDeviceTokens');
-    require('./src/jobs/weeklyReportJob');
-    // require('./src/jobs/accrueMonthlyLeave');
-    // require('./src/jobs/autoRejectLeaveRequests');
-    require('./src/jobs/churnDetectionJob')();
-    const { ensureAllDeptFolders } = require('./src/jobs/ensureDeptFolders');
+    startCronJobs();
     await ensureAllDeptFolders();
 
     const port = process.env.PORT || 3000;
@@ -105,24 +96,23 @@ route(app);
       console.log(`App listening on port ${port}`);
     });
 
-    // Graceful shutdown — cho phép request đang xử lý hoàn thành trước khi tắt
     const shutdown = (signal) => {
       console.log(`${signal} received — shutting down gracefully`);
       httpServer.close(async () => {
         try {
-          await require('mongoose').disconnect();
-          console.log('MongoDB disconnected');
-        } catch { /* ignore */ }
+          await mongoose.disconnect();
+          console.log("MongoDB disconnected");
+        } catch {
+          /* ignore */
+        }
         process.exit(0);
       });
-      // Force exit sau 15s nếu vẫn còn request treo
       setTimeout(() => process.exit(1), 15000).unref();
     };
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT',  () => shutdown('SIGINT'));
-
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => shutdown("SIGINT"));
   } catch (err) {
-    console.error('MongoDB connection error:', err);
+    console.error("MongoDB connection error:", err);
     process.exit(1);
   }
 })();

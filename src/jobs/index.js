@@ -7,12 +7,12 @@ const { registerAutoRejectLeaveRequestsJob } = require("./autoRejectLeaveRequest
 const { registerChurnDetectionJob } = require("./churnDetectionJob");
 
 function startCronJobs() {
-  // registerGenWorkSheetJob();
-  // registerFinalizeWorkDayJob();
+  registerGenWorkSheetJob();
+  registerFinalizeWorkDayJob();
   registerCleanupDeviceTokensJob();
   registerWeeklyReportJobs();
-  // registerAccrueMonthlyLeaveJob();
-  // registerAutoRejectLeaveRequestsJob();
+  registerAccrueMonthlyLeaveJob();
+  registerAutoRejectLeaveRequestsJob();
   registerChurnDetectionJob();
 }
 

@@ -1,22 +1,22 @@
+const path = require("path");
+const fs = require("fs");
 const mongoose = require("mongoose");
+const bcrypt = require("bcrypt");
+const QRCode = require("qrcode");
+const heicConvert = require("heic-convert");
 const AccountModel = require("../models/AccountModel");
 const EmploymentStatusModel = require("../models/EmploymentStatusModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
-
-const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
-const bcrypt = require("bcrypt");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const { LEAF_TYPES } = require("../models/DepartmentModel");
 const DepartmentModel = require("../models/DepartmentModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
-const QRCode = require("qrcode");
-const path = require("path");
-const fs = require("fs");
-const heicConvert = require("heic-convert");
+
+const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 
 const uploadDir =
   process.env.NODE_ENV === "production" ? process.env.UPLOAD_DIR_PROD : process.env.UPLOAD_DIR_DEV;
@@ -699,7 +699,7 @@ const UserController = {
 
       if (req.body.leave_balance_annual !== undefined) {
         const val = Number(req.body.leave_balance_annual);
-        if (isNaN(val) || val < 0) {
+        if (Number.isNaN(val) || val < 0) {
           await session.abortTransaction();
           session.endSession();
           return res.status(400).json({ message: "leave_balance_annual không hợp lệ" });

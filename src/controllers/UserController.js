@@ -7,9 +7,12 @@ const heicConvert = require("heic-convert");
 const AccountModel = require("../models/AccountModel");
 const EmploymentStatusModel = require("../models/EmploymentStatusModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
+
+const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
+const bcrypt = require("bcrypt");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const { LEAF_TYPES } = require("../models/DepartmentModel");
 const DepartmentModel = require("../models/DepartmentModel");

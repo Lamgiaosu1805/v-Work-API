@@ -10,6 +10,8 @@ const cleanupDeviceTokens = async () => {
   }
 };
 
-cron.schedule("30 3 * * *", cleanupDeviceTokens);
+function registerCleanupDeviceTokensJob() {
+  cron.schedule("30 3 * * *", cleanupDeviceTokens);
+}
 
-module.exports = cleanupDeviceTokens;
+module.exports = { cleanupDeviceTokens, registerCleanupDeviceTokensJob };

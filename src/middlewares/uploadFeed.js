@@ -13,10 +13,11 @@ const HEIC_TYPES = new Set(["image/heic", "image/heif"]);
 const GIF_TYPES  = new Set(["image/gif"]);
 
 const getFeedDir = () => {
+  // Ảnh feed là file công khai → lưu vào thư mục public, serve qua /static.
   const baseDir =
     process.env.NODE_ENV === "production"
-      ? process.env.UPLOAD_DIR_PROD
-      : process.env.UPLOAD_DIR_DEV;
+      ? process.env.UPLOAD_DIR_PUBLIC_PROD
+      : process.env.UPLOAD_DIR_PUBLIC_DEV;
   return path.resolve(baseDir, "feed");
 };
 

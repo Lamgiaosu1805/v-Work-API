@@ -13,31 +13,50 @@ async function finalizeWorkDay() {
     console.log(`[Cron] finalizeWorkDay: ${moment.tz(today, TZ).format("DD/MM/YYYY")}`);
 
     const fullSheets = await WorkSheetModel.find(
-      { date: { $gte: today, $lt: tomorrow }, check_in: { $ne: null }, check_out: { $ne: null }, isDeleted: false },
-      "_id",
+      {
+        date: { $gte: today, $lt: tomorrow },
+        check_in: { $ne: null },
+        check_out: { $ne: null },
+        isDeleted: false
+      },
+      "_id"
     );
     if (fullSheets.length > 0) {
       await WorkDayStatusModel.updateMany(
-        { date: { $gte: today, $lt: tomorrow }, status: "pending", worksheet_id: { $in: fullSheets.map((w) => w._id) }, isDeleted: false },
-        { status: "present" },
+        {
+          date: { $gte: today, $lt: tomorrow },
+          status: "pending",
+          worksheet_id: { $in: fullSheets.map((w) => w._id) },
+          isDeleted: false
+        },
+        { status: "present" }
       );
     }
 
     const missedOutSheets = await WorkSheetModel.find(
-      { date: { $gte: today, $lt: tomorrow }, check_in: { $ne: null }, check_out: null, isDeleted: false },
-      "_id",
+      {
+        date: { $gte: today, $lt: tomorrow },
+        check_in: { $ne: null },
+        check_out: null,
+        isDeleted: false
+      },
+      "_id"
     );
     if (missedOutSheets.length > 0) {
       await WorkDayStatusModel.updateMany(
-        { date: { $gte: today, $lt: tomorrow }, status: "pending", worksheet_id: { $in: missedOutSheets.map((w) => w._id) }, isDeleted: false },
-        { status: "missed_clock" },
+        {
+          date: { $gte: today, $lt: tomorrow },
+          status: "pending",
+          worksheet_id: { $in: missedOutSheets.map((w) => w._id) },
+          isDeleted: false
+        },
+        { status: "missed_clock" }
       );
     }
 
-
     await WorkDayStatusModel.updateMany(
       { date: { $gte: today, $lt: tomorrow }, status: "pending", isDeleted: false },
-      { status: "absent" },
+      { status: "absent" }
     );
 
     console.log("[Cron] finalizeWorkDay hoàn tất.");
@@ -46,9 +65,15 @@ async function finalizeWorkDay() {
   }
 }
 
-cron.schedule("0 23 * * *", async () => {
-  console.log("[Cron] Bắt đầu chạy finalizeWorkDay");
-  await finalizeWorkDay();
-}, { timezone: TZ });
+function registerFinalizeWorkDayJob() {
+  cron.schedule(
+    "0 23 * * *",
+    async () => {
+      console.log("[Cron] Bắt đầu chạy finalizeWorkDay");
+      await finalizeWorkDay();
+    },
+    { timezone: TZ }
+  );
+}
 
-module.exports = finalizeWorkDay;
+module.exports = { finalizeWorkDay, registerFinalizeWorkDayJob };

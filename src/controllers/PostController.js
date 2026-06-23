@@ -4,6 +4,7 @@ const UserInfoModel = require("../models/UserInfoModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const DepartmentModel = require("../models/DepartmentModel");
 const pushNotification = require("../helpers/pushNotification");
+const { serializePost, serializeComment, signReactions } = require("../helpers/staticUrl");
 
 async function getAuthorInfo(accountId) {
   const userInfo = await UserInfoModel.findOne({ id_account: accountId });
@@ -79,7 +80,7 @@ const PostController = {
 
       return res.status(200).json({
         message: "Thành công",
-        data: posts,
+        data: posts.map(serializePost),
         pagination: {
           total,
           page,
@@ -126,10 +127,11 @@ const PostController = {
         dept_id: dept_id || null,
       });
 
+      const signedPost = serializePost(post);
       const io = req.app.get("io");
-      if (io) io.to("feed").emit("new_post", { post });
+      if (io) io.to("feed").emit("new_post", { post: signedPost });
 
-      return res.status(200).json({ message: "Đăng bài thành công", data: post });
+      return res.status(200).json({ message: "Đăng bài thành công", data: signedPost });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
@@ -163,16 +165,17 @@ const PostController = {
       }
       await post.save();
 
+      const signedReactions = signReactions(post.reactions);
       const io = req.app.get("io");
       if (io) {
-        const payload = { post_id: id, reactions: post.reactions };
+        const payload = { post_id: id, reactions: signedReactions };
         io.to("feed").emit("reaction_updated", payload);
         io.to(`post:${id}`).emit("reaction_updated", payload);
       }
 
       return res.status(200).json({
         message: "Thành công",
-        data: { reactions: post.reactions },
+        data: { reactions: signedReactions },
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -249,7 +252,7 @@ const PostController = {
 
       return res.status(200).json({
         message: "Thành công",
-        data: comments,
+        data: comments.map(serializeComment),
         pagination: {
           total,
           page,
@@ -288,9 +291,10 @@ const PostController = {
       post.comments_count = (post.comments_count || 0) + 1;
       await post.save();
 
+      const signedComment = serializeComment(comment);
       const io = req.app.get("io");
       if (io) {
-        io.to(`post:${postId}`).emit("new_comment", { comment });
+        io.to(`post:${postId}`).emit("new_comment", { comment: signedComment });
         io.to("feed").emit("comment_count_updated", { post_id: postId, comments_count: post.comments_count });
       }
 
@@ -306,7 +310,7 @@ const PostController = {
           .catch(() => {});
       }
 
-      return res.status(200).json({ message: "Bình luận thành công", data: comment });
+      return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }

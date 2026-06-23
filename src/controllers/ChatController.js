@@ -8,6 +8,7 @@ const ConversationModel = require("../models/ConversationModel");
 const { getChatDir } = require("../middlewares/uploadChatImage");
 
 const { handleChatError } = require("../helpers/socketHandler");
+const { signAvatarsDeep } = require("../helpers/staticUrl");
 const {
   getCurrentUserInfo,
   createPrivateConversation,
@@ -42,8 +43,9 @@ function emitConversationEvent(io, eventName, conversation, payload) {
     .map((member) => String(member?._id || member))
     .filter(Boolean);
 
+  const signedPayload = signAvatarsDeep(payload);
   memberIds.forEach((memberId) => {
-    io.to(`user:${memberId}`).emit(eventName, payload);
+    io.to(`user:${memberId}`).emit(eventName, signedPayload);
   });
 }
 
@@ -54,7 +56,7 @@ async function broadcastNewMessage({ req, currentUserInfo, message, clientMessag
 
   const payload = {
     conversationId: String(message.conversationId),
-    message,
+    message: signAvatarsDeep(message),
     clientMessageId: clientMessageId ?? null
   };
 
@@ -91,7 +93,7 @@ async function createAndBroadcastSystemMessage({ io, conversationId, actorUserIn
   if (io) {
     io.to(`conversation:${String(conversationId)}`).emit("message:new", {
       conversationId: String(conversationId),
-      message: populated,
+      message: signAvatarsDeep(populated),
       clientMessageId: null
     });
   }
@@ -112,7 +114,7 @@ const ChatController = {
 
       return res.status(201).json({
         message: "Tạo private chat thành công",
-        data: conversation
+        data: signAvatarsDeep(conversation)
       });
     } catch (error) {
       return handleChatError(res, error);
@@ -141,7 +143,7 @@ const ChatController = {
 
       return res.status(201).json({
         message: "Tạo group chat thành công",
-        data: conversation
+        data: signAvatarsDeep(conversation)
       });
     } catch (error) {
       if (session.inTransaction()) {
@@ -176,7 +178,7 @@ const ChatController = {
 
       return res.status(200).json({
         message: "Cập nhật tên nhóm thành công",
-        data: conversation
+        data: signAvatarsDeep(conversation)
       });
     } catch (error) {
       return handleChatError(res, error);
@@ -190,7 +192,7 @@ const ChatController = {
 
       return res.status(200).json({
         message: "Lấy danh sách conversation thành công",
-        data: conversations
+        data: signAvatarsDeep(conversations)
       });
     } catch (error) {
       return handleChatError(res, error);
@@ -207,7 +209,7 @@ const ChatController = {
 
       return res.status(200).json({
         message: "Lấy chi tiết conversation thành công",
-        data: conversation
+        data: signAvatarsDeep(conversation)
       });
     } catch (error) {
       return handleChatError(res, error);
@@ -229,7 +231,7 @@ const ChatController = {
 
       return res.status(200).json({
         message: "Lấy danh sách tin nhắn thành công",
-        ...result
+        ...signAvatarsDeep(result)
       });
     } catch (error) {
       return handleChatError(res, error);
@@ -265,7 +267,7 @@ const ChatController = {
 
       res.status(201).json({
         message: "Gửi tin nhắn thành công",
-        data: message,
+        data: signAvatarsDeep(message),
         clientMessageId: req.body.clientMessageId ?? null
       });
 
@@ -395,7 +397,7 @@ const ChatController = {
         .limit(limit)
         .lean();
 
-      return res.status(200).json({ message: "Tìm kiếm thành công", data: users });
+      return res.status(200).json({ message: "Tìm kiếm thành công", data: signAvatarsDeep(users) });
     } catch (error) {
       return handleChatError(res, error);
     }
@@ -467,7 +469,9 @@ const ChatController = {
         });
       }
 
-      return res.status(200).json({ message: "Thêm thành viên thành công", data: conversation });
+      return res
+        .status(200)
+        .json({ message: "Thêm thành viên thành công", data: signAvatarsDeep(conversation) });
     } catch (error) {
       return handleChatError(res, error);
     }
@@ -499,7 +503,9 @@ const ChatController = {
           content: `${currentUserInfo.full_name} đã xóa ${targetUserInfo.full_name} khỏi nhóm`
         });
       }
-      return res.status(200).json({ message: "Xóa thành viên thành công", data: conversation });
+      return res
+        .status(200)
+        .json({ message: "Xóa thành viên thành công", data: signAvatarsDeep(conversation) });
     } catch (error) {
       return handleChatError(res, error);
     }
@@ -528,7 +534,9 @@ const ChatController = {
           content: `${currentUserInfo.full_name} đã thăng ${targetUserInfo.full_name} lên trưởng nhóm`
         });
       }
-      return res.status(200).json({ message: "Thăng chức thành công", data: conversation });
+      return res
+        .status(200)
+        .json({ message: "Thăng chức thành công", data: signAvatarsDeep(conversation) });
     } catch (error) {
       return handleChatError(res, error);
     }

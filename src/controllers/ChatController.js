@@ -6,7 +6,7 @@ const UserInfoModel = require("../models/UserInfoModel");
 const MessageModel = require("../models/MessageModel");
 const ConversationModel = require("../models/ConversationModel");
 const { getChatDir } = require("../middlewares/uploadChatImage");
-
+const ConversationModel = require("../models/ConversationModel");
 const { handleChatError } = require("../helpers/socketHandler");
 const { signAvatarsDeep } = require("../helpers/staticUrl");
 const {

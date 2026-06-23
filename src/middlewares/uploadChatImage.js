@@ -70,7 +70,7 @@ async function processChatImage(req, res, next) {
       return next();
     }
 
-    const resized = sharp(inputBuffer).resize(1920, 1920, {
+    const resized = sharp(inputBuffer).rotate().resize(1920, 1920, {
       fit: "inside",
       withoutEnlargement: true
     });

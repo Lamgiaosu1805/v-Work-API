@@ -536,18 +536,17 @@ const ChatController = {
         emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
       }
 
-      for (const member of newMembers) {
+      if (newMembers.length > 0) {
+        const names = newMembers.map((u) => u.full_name).join(", ");
         await createAndBroadcastSystemMessage({
           io,
           conversationId: req.params.conversationId,
           actorUserInfoId: currentUserInfo._id,
-          content: `${currentUserInfo.full_name} đã thêm ${member.full_name} vào nhóm`
+          content: `${currentUserInfo.full_name} đã thêm ${names} vào nhóm`
         });
       }
 
-      return res
-        .status(200)
-        .json({ message: "Thêm thành viên thành công", data: signAvatarsDeep(conversation) });
+      return res.status(200).json({ message: "Thêm thành viên thành công", data: conversation });
     } catch (error) {
       return handleChatError(res, error);
     }

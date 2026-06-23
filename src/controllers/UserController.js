@@ -18,6 +18,7 @@ const { LEAF_TYPES } = require("../models/DepartmentModel");
 const DepartmentModel = require("../models/DepartmentModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
+const { sign, serializeUser } = require("../helpers/staticUrl");
 
 const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 
@@ -308,7 +309,7 @@ const UserController = {
       }
 
       const data = users.map((u) => ({
-        ...u,
+        ...serializeUser(u),
         departments: udpMap[u._id.toString()] || []
       }));
 
@@ -396,6 +397,8 @@ const UserController = {
         module_access: account.module_access || [],
         dept_scope: account.dept_scope,
         ...user.toObject(),
+        avatar: sign(user.avatar),
+        cover_photo: sign(user.cover_photo),
         departments: userDepartments.map((item) => ({
           department: item.department,
           position: item.position
@@ -433,7 +436,7 @@ const UserController = {
         department_id,
         from_date,
         to_date,
-        module, // lọc theo module_access (vd: "crm")
+        module
       } = req.query;
 
       const skip = (Number(page) - 1) * Number(limit);
@@ -528,7 +531,7 @@ const UserController = {
       }
 
       const data = users.map((u) => ({
-        ...u,
+        ...serializeUser(u),
         departments: udpMap[u._id.toString()] || []
       }));
 
@@ -633,6 +636,8 @@ const UserController = {
 
       return res.status(200).json({
         ...user.toObject(),
+        avatar: sign(user.avatar),
+        cover_photo: sign(user.cover_photo),
         departments: userDepartments.map((item) => ({
           department: item.department,
           position: item.position
@@ -933,7 +938,9 @@ const UserController = {
       const storedAvatar = `${AVATAR_PREFIX}/${fileName}`;
       await UserInfoModel.findByIdAndUpdate(userInfo._id, { avatar: storedAvatar });
 
-      return res.status(200).json({ message: "Upload avatar thành công", avatar: storedAvatar });
+      return res
+        .status(200)
+        .json({ message: "Upload avatar thành công", avatar: sign(storedAvatar) });
     } catch (error) {
       console.error("Error in uploadAvatar:", error);
       return res.status(500).json({ message: "Internal server error", error: error.message });
@@ -969,7 +976,7 @@ const UserController = {
 
       return res
         .status(200)
-        .json({ message: "Upload ảnh bìa thành công", cover_photo: storedCover });
+        .json({ message: "Upload ảnh bìa thành công", cover_photo: sign(storedCover) });
     } catch (error) {
       return res.status(500).json({ message: "Internal server error", error: error.message });
     }
@@ -1002,8 +1009,8 @@ const UserController = {
         account_id: targetId,
         full_name: userInfo.full_name,
         ma_nv: userInfo.ma_nv,
-        avatar: userInfo.avatar ?? null,
-        cover_photo: userInfo.cover_photo ?? null,
+        avatar: sign(userInfo.avatar),
+        cover_photo: sign(userInfo.cover_photo),
         employment_type: userInfo.employment_type,
         sex: userInfo.sex,
         date_of_birth: userInfo.date_of_birth ?? null,

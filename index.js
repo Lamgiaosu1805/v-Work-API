@@ -14,6 +14,7 @@ const route = require("./src/routes");
 const setupChatSocket = require("./src/sockets/chatSocket");
 const { startCronJobs } = require("./src/jobs");
 const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
+const { serveEncryptedFile } = require("./src/middlewares/serveEncryptedFile");
 
 const app = express();
 const httpServer = createServer(app);
@@ -49,6 +50,9 @@ const PUBLIC_UPLOAD_DIR =
   process.env.NODE_ENV === "production"
     ? process.env.UPLOAD_DIR_PUBLIC_PROD
     : process.env.UPLOAD_DIR_PUBLIC_DEV;
+
+app.get("/f/:token", serveEncryptedFile);
+
 app.use("/static", express.static(PUBLIC_UPLOAD_DIR, { maxAge: "7d", index: false }));
 
 const globalLimiter = rateLimit({

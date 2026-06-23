@@ -455,13 +455,12 @@ const ChatController = {
         emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
       }
 
-      if (newMembers.length > 0) {
-        const names = newMembers.map((u) => u.full_name).join(", ");
+      for (const member of newMembers) {
         await createAndBroadcastSystemMessage({
           io,
           conversationId: req.params.conversationId,
           actorUserInfoId: currentUserInfo._id,
-          content: `${currentUserInfo.full_name} đã thêm ${names} vào nhóm`
+          content: `${currentUserInfo.full_name} đã thêm ${member.full_name} vào nhóm`
         });
       }
 
@@ -474,6 +473,9 @@ const ChatController = {
   kickMember: async (req, res) => {
     try {
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const targetUserInfo = await UserInfoModel.findById(req.params.memberId)
+        .select("full_name")
+        .lean();
       const conversation = await kickMember({
         conversationId: req.params.conversationId,
         adminUserInfoId: currentUserInfo._id,
@@ -505,6 +507,9 @@ const ChatController = {
   promoteMember: async (req, res) => {
     try {
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const targetUserInfo = await UserInfoModel.findById(req.params.memberId)
+        .select("full_name")
+        .lean();
       const conversation = await promoteMember({
         conversationId: req.params.conversationId,
         adminUserInfoId: currentUserInfo._id,

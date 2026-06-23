@@ -62,6 +62,7 @@ const globalLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: "Quá nhiều yêu cầu, vui lòng thử lại sau" }
 });
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,

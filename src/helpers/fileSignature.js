@@ -13,22 +13,18 @@ function getKey() {
   return cachedKey;
 }
 
-const REFRESH_WINDOW = 24 * 60 * 60;
-
 function normalizePath(relativePath) {
   return String(relativePath).replace(/^\/+/, "");
 }
 
-function deriveIv(payload) {
-  return crypto.createHmac("sha256", getKey()).update(`iv:${payload}`).digest().subarray(0, 12);
-}
-
 function encryptFilePath(relativePath, ttlSeconds = DEFAULT_TTL_SECONDS) {
   if (!relativePath) return null;
-  const exp = Math.floor(Date.now() / 1000 / REFRESH_WINDOW) * REFRESH_WINDOW + ttlSeconds;
-  const payload = JSON.stringify({ p: normalizePath(relativePath), e: exp });
+  const payload = JSON.stringify({
+    p: normalizePath(relativePath),
+    e: Math.floor(Date.now() / 1000) + ttlSeconds
+  });
 
-  const iv = deriveIv(payload);
+  const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", getKey(), iv);
   const ct = Buffer.concat([cipher.update(payload, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();

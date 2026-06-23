@@ -545,7 +545,9 @@ const ChatController = {
         });
       }
 
-      return res.status(200).json({ message: "Thêm thành viên thành công", data: conversation });
+      return res
+        .status(200)
+        .json({ message: "Thêm thành viên thành công", data: signAvatarsDeep(conversation) });
     } catch (error) {
       return handleChatError(res, error);
     }

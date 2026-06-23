@@ -24,7 +24,7 @@ function serializePost(post) {
   if (!post) return post;
   const p = toPlain(post);
   p.author_avatar = sign(p.author_avatar);
-  if (Array.isArray(p.images)) p.images = p.images.map((img) => sign(img));
+  if (Array.isArray(p.images)) p.images = p.images.map(sign);
   if (Array.isArray(p.reactions)) p.reactions = signReactions(p.reactions);
   return p;
 }

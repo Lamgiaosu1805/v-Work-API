@@ -4,8 +4,8 @@ const path = require("path");
 const { sendChatMessageNotification } = require("../helpers/chatNotification");
 const UserInfoModel = require("../models/UserInfoModel");
 const MessageModel = require("../models/MessageModel");
-const { getChatDir } = require("../middlewares/uploadChatImage");
 const ConversationModel = require("../models/ConversationModel");
+const { getChatDir } = require("../middlewares/uploadChatImage");
 const { handleChatError } = require("../helpers/socketHandler");
 const { signAvatarsDeep } = require("../helpers/staticUrl");
 const {
@@ -165,10 +165,15 @@ const ChatController = {
 
       const io = req.app.get("io");
       if (io) {
-        emitConversationEvent(io, "conversation:upserted", conversation, {
-          conversation
-        });
+        emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
       }
+
+      await createAndBroadcastSystemMessage({
+        io,
+        conversationId: req.params.conversationId,
+        actorUserInfoId: currentUserInfo._id,
+        content: `${currentUserInfo.full_name} đã đổi tên nhóm thành "${req.body.name}"`
+      });
 
       return res.status(200).json({
         message: "Cập nhật tên nhóm thành công",
@@ -429,11 +434,21 @@ const ChatController = {
   addMembers: async (req, res) => {
     try {
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const newMemberIds = req.body.member_ids ?? [];
+
+      const newMembers = await UserInfoModel.find({
+        _id: { $in: newMemberIds },
+        isDeleted: false
+      })
+        .select("full_name")
+        .lean();
+
       const conversation = await addMembers({
         conversationId: req.params.conversationId,
         userInfoId: currentUserInfo._id,
-        newMemberIds: req.body.member_ids
+        newMemberIds
       });
+
       const io = req.app.get("io");
       if (io) {
         emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
@@ -448,9 +463,7 @@ const ChatController = {
         });
       }
 
-      return res
-        .status(200)
-        .json({ message: "Thêm thành viên thành công", data: signAvatarsDeep(conversation) });
+      return res.status(200).json({ message: "Thêm thành viên thành công", data: conversation });
     } catch (error) {
       return handleChatError(res, error);
     }
@@ -459,6 +472,9 @@ const ChatController = {
   kickMember: async (req, res) => {
     try {
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const targetUserInfo = await UserInfoModel.findById(req.params.memberId)
+        .select("full_name")
+        .lean();
       const conversation = await kickMember({
         conversationId: req.params.conversationId,
         adminUserInfoId: currentUserInfo._id,
@@ -490,6 +506,9 @@ const ChatController = {
   promoteMember: async (req, res) => {
     try {
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const targetUserInfo = await UserInfoModel.findById(req.params.memberId)
+        .select("full_name")
+        .lean();
       const conversation = await promoteMember({
         conversationId: req.params.conversationId,
         adminUserInfoId: currentUserInfo._id,
@@ -523,6 +542,16 @@ const ChatController = {
         userInfoId: currentUserInfo._id
       });
       const io = req.app.get("io");
+
+      if (!result.disbanded) {
+        await createAndBroadcastSystemMessage({
+          io,
+          conversationId: req.params.conversationId,
+          actorUserInfoId: currentUserInfo._id,
+          content: `${currentUserInfo.full_name} đã rời khỏi nhóm`
+        });
+      }
+
       if (io) {
         if (!result.disbanded && result.conversation) {
           emitConversationEvent(io, "conversation:upserted", result.conversation, {

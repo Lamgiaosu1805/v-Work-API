@@ -5,8 +5,9 @@ const { sendChatMessageNotification } = require("../helpers/chatNotification");
 const UserInfoModel = require("../models/UserInfoModel");
 const MessageModel = require("../models/MessageModel");
 const { getChatDir } = require("../middlewares/uploadChatImage");
-
+const ConversationModel = require("../models/ConversationModel");
 const { handleChatError } = require("../helpers/socketHandler");
+const { signAvatarsDeep } = require("../helpers/staticUrl");
 const {
   getCurrentUserInfo,
   createPrivateConversation,
@@ -41,8 +42,9 @@ function emitConversationEvent(io, eventName, conversation, payload) {
     .map((member) => String(member?._id || member))
     .filter(Boolean);
 
+  const signedPayload = signAvatarsDeep(payload);
   memberIds.forEach((memberId) => {
-    io.to(`user:${memberId}`).emit(eventName, payload);
+    io.to(`user:${memberId}`).emit(eventName, signedPayload);
   });
 }
 
@@ -53,7 +55,7 @@ async function broadcastNewMessage({ req, currentUserInfo, message, clientMessag
 
   const payload = {
     conversationId: String(message.conversationId),
-    message,
+    message: signAvatarsDeep(message),
     clientMessageId: clientMessageId ?? null
   };
 
@@ -67,6 +69,33 @@ async function broadcastNewMessage({ req, currentUserInfo, message, clientMessag
   emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
 
   return { conversation };
+}
+
+async function createAndBroadcastSystemMessage({ io, conversationId, actorUserInfoId, content }) {
+  const message = await MessageModel.create({
+    conversationId,
+    senderId: actorUserInfoId,
+    type: "system",
+    content,
+    seenBy: [actorUserInfoId]
+  });
+
+  await ConversationModel.updateOne(
+    { _id: conversationId },
+    { $set: { lastMessage: message._id, updatedAt: new Date() } }
+  );
+
+  const populated = await MessageModel.findById(message._id)
+    .populate("senderId", "full_name avatar ma_nv id_account")
+    .lean();
+
+  if (io) {
+    io.to(`conversation:${String(conversationId)}`).emit("message:new", {
+      conversationId: String(conversationId),
+      message: signAvatarsDeep(populated),
+      clientMessageId: null
+    });
+  }
 }
 
 const ChatController = {
@@ -84,7 +113,7 @@ const ChatController = {
 
       return res.status(201).json({
         message: "Tạo private chat thành công",
-        data: conversation
+        data: signAvatarsDeep(conversation)
       });
     } catch (error) {
       return handleChatError(res, error);
@@ -113,7 +142,7 @@ const ChatController = {
 
       return res.status(201).json({
         message: "Tạo group chat thành công",
-        data: conversation
+        data: signAvatarsDeep(conversation)
       });
     } catch (error) {
       if (session.inTransaction()) {
@@ -143,7 +172,7 @@ const ChatController = {
 
       return res.status(200).json({
         message: "Cập nhật tên nhóm thành công",
-        data: conversation
+        data: signAvatarsDeep(conversation)
       });
     } catch (error) {
       return handleChatError(res, error);
@@ -157,7 +186,7 @@ const ChatController = {
 
       return res.status(200).json({
         message: "Lấy danh sách conversation thành công",
-        data: conversations
+        data: signAvatarsDeep(conversations)
       });
     } catch (error) {
       return handleChatError(res, error);
@@ -174,7 +203,7 @@ const ChatController = {
 
       return res.status(200).json({
         message: "Lấy chi tiết conversation thành công",
-        data: conversation
+        data: signAvatarsDeep(conversation)
       });
     } catch (error) {
       return handleChatError(res, error);
@@ -196,7 +225,7 @@ const ChatController = {
 
       return res.status(200).json({
         message: "Lấy danh sách tin nhắn thành công",
-        ...result
+        ...signAvatarsDeep(result)
       });
     } catch (error) {
       return handleChatError(res, error);
@@ -232,7 +261,7 @@ const ChatController = {
 
       res.status(201).json({
         message: "Gửi tin nhắn thành công",
-        data: message,
+        data: signAvatarsDeep(message),
         clientMessageId: req.body.clientMessageId ?? null
       });
 
@@ -357,7 +386,7 @@ const ChatController = {
         .limit(limit)
         .lean();
 
-      return res.status(200).json({ message: "Tìm kiếm thành công", data: users });
+      return res.status(200).json({ message: "Tìm kiếm thành công", data: signAvatarsDeep(users) });
     } catch (error) {
       return handleChatError(res, error);
     }
@@ -409,7 +438,19 @@ const ChatController = {
       if (io) {
         emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
       }
-      return res.status(200).json({ message: "Thêm thành viên thành công", data: conversation });
+
+      for (const member of newMembers) {
+        await createAndBroadcastSystemMessage({
+          io,
+          conversationId: req.params.conversationId,
+          actorUserInfoId: currentUserInfo._id,
+          content: `${currentUserInfo.full_name} đã thêm ${member.full_name} vào nhóm`
+        });
+      }
+
+      return res
+        .status(200)
+        .json({ message: "Thêm thành viên thành công", data: signAvatarsDeep(conversation) });
     } catch (error) {
       return handleChatError(res, error);
     }
@@ -430,7 +471,17 @@ const ChatController = {
           conversationId: String(req.params.conversationId)
         });
       }
-      return res.status(200).json({ message: "Xóa thành viên thành công", data: conversation });
+      if (targetUserInfo) {
+        await createAndBroadcastSystemMessage({
+          io,
+          conversationId: req.params.conversationId,
+          actorUserInfoId: currentUserInfo._id,
+          content: `${currentUserInfo.full_name} đã xóa ${targetUserInfo.full_name} khỏi nhóm`
+        });
+      }
+      return res
+        .status(200)
+        .json({ message: "Xóa thành viên thành công", data: signAvatarsDeep(conversation) });
     } catch (error) {
       return handleChatError(res, error);
     }
@@ -448,7 +499,17 @@ const ChatController = {
       if (io) {
         emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
       }
-      return res.status(200).json({ message: "Thăng chức thành công", data: conversation });
+      if (targetUserInfo) {
+        await createAndBroadcastSystemMessage({
+          io,
+          conversationId: req.params.conversationId,
+          actorUserInfoId: currentUserInfo._id,
+          content: `${currentUserInfo.full_name} đã thăng ${targetUserInfo.full_name} lên trưởng nhóm`
+        });
+      }
+      return res
+        .status(200)
+        .json({ message: "Thăng chức thành công", data: signAvatarsDeep(conversation) });
     } catch (error) {
       return handleChatError(res, error);
     }

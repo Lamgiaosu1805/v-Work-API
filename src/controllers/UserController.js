@@ -440,12 +440,8 @@ const UserController = {
 
       const filter = { isDeleted: false };
 
-      const reqIsFullAccess = String(isFull || "false").toLowerCase() === "true";
-
       const isFullAccess =
-        req.account.role === "admin" ||
-        req.account.module_access?.includes("hrm") ||
-        reqIsFullAccess;
+        req.account.role === "admin" || req.account.module_access?.includes("hrm");
 
       if (!isFullAccess) {
         const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });

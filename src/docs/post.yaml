@@ -1,0 +1,115 @@
+paths:
+  /posts:
+    get:
+      tags: [Post]
+      summary: Danh sách bài đăng (feed)
+      parameters:
+        - { in: query, name: dept_id, schema: { type: string } }
+        - { in: query, name: type, schema: { type: string } }
+        - { in: query, name: author_id, schema: { type: string } }
+      responses:
+        "200": { description: Danh sách bài đăng }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Post]
+      summary: Tạo bài đăng (kèm tối đa 20 ảnh)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+                type: { type: string, default: post }
+                visibility: { type: string, default: all }
+                dept_id: { type: string }
+                images:
+                  type: array
+                  items: { type: string, format: binary }
+      responses:
+        "201": { description: Tạo bài đăng thành công }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /posts/{id}/react:
+    post:
+      tags: [Post]
+      summary: Thả cảm xúc bài đăng
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type: { type: string, default: like }
+      responses:
+        "200": { description: Đã cập nhật cảm xúc }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /posts/{id}:
+    delete:
+      tags: [Post]
+      summary: Xóa bài đăng
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Xóa thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /posts/{id}/pin:
+    patch:
+      tags: [Post]
+      summary: Ghim / bỏ ghim bài đăng (manager workplace)
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Đã cập nhật ghim }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /posts/{id}/comments:
+    get:
+      tags: [Post]
+      summary: Danh sách bình luận
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Danh sách bình luận }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Post]
+      summary: Tạo bình luận
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+      responses:
+        "201": { description: Tạo bình luận thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /posts/{id}/comments/{commentId}:
+    delete:
+      tags: [Post]
+      summary: Xóa bình luận
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+        - { in: path, name: commentId, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Xóa thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }

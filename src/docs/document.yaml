@@ -1,0 +1,44 @@
+paths:
+  /document/getListDocument:
+    get:
+      tags: [Document]
+      summary: Danh sách loại tài liệu
+      responses:
+        "200": { description: Danh sách loại tài liệu }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /document/getFile:
+    get:
+      tags: [Document]
+      summary: Xem / tải file hồ sơ
+      parameters:
+        - in: query
+          name: filename
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Nội dung file }
+        "400": { description: Thiếu tham số filename }
+        "404": { description: Không tìm thấy file }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /document/createTypeDocument:
+    post:
+      tags: [Document]
+      summary: Tạo loại tài liệu (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                required: { type: boolean }
+      responses:
+        "201": { description: Tạo thành công }
+        "400": { description: Tên loại tài liệu là bắt buộc }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

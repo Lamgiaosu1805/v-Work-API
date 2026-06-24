@@ -1,0 +1,192 @@
+paths:
+  /customer/my-customers:
+    get:
+      tags: [Customer]
+      summary: Khách hàng của tôi (CRM)
+      responses:
+        "200": { description: Danh sách khách hàng }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /customer/agent-customers:
+    get:
+      tags: [Customer]
+      summary: Khách hàng của đại lý (app nội bộ)
+      description: Xác thực qua API key + IP whitelist (verifyInternalRequest).
+      security: []
+      responses:
+        "200": { description: Danh sách khách hàng của đại lý }
+
+  /customer/my-info:
+    get:
+      tags: [Customer]
+      summary: Thông tin khách hàng của tài khoản hiện tại
+      responses:
+        "200": { description: Thông tin khách hàng }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /customer/all:
+    get:
+      tags: [Customer]
+      summary: Tất cả khách hàng (manager CRM)
+      responses:
+        "200": { description: Danh sách khách hàng }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /customer/detail-info-customer:
+    get:
+      tags: [Customer]
+      summary: Chi tiết khách hàng (manager CRM)
+      parameters:
+        - { in: query, name: external_id, schema: { type: string } }
+      responses:
+        "200": { description: Chi tiết khách hàng }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /customer/fluctuation:
+    get:
+      tags: [Customer]
+      summary: Biến động khách hàng (manager CRM)
+      responses:
+        "200": { description: Dữ liệu biến động }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /customer/view-image:
+    get:
+      tags: [Customer]
+      summary: Xem ảnh khách hàng (manager CRM)
+      parameters:
+        - { in: query, name: key_image, schema: { type: string } }
+      responses:
+        "200": { description: Ảnh khách hàng }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /customer/investment-holding:
+    get:
+      tags: [Customer]
+      summary: Danh mục đầu tư của khách (manager CRM)
+      responses:
+        "200": { description: Danh mục đầu tư }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /customer/staff-info:
+    get:
+      tags: [Customer]
+      summary: Thông tin nhân viên phụ trách khách (manager CRM)
+      parameters:
+        - { in: query, name: ma_nv, schema: { type: string } }
+      responses:
+        "200": { description: Thông tin nhân viên }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /customer/upsert:
+    post:
+      tags: [Customer]
+      summary: Tạo / cập nhật khách hàng (app nội bộ)
+      description: Xác thực qua API key + IP whitelist.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Upsert thành công }
+
+  /customer/apply-referral:
+    post:
+      tags: [Customer]
+      summary: Áp dụng giới thiệu cho khách (app nội bộ)
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Áp dụng thành công }
+
+  /customer/bulk-upsert:
+    post:
+      tags: [Customer]
+      summary: Upsert hàng loạt khách hàng (app nội bộ)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [app_code, customers]
+              properties:
+                app_code: { type: string }
+                customers: { type: array, items: { type: object } }
+      responses:
+        "200": { description: Upsert hàng loạt thành công }
+
+  /customer/{id}/assign:
+    post:
+      tags: [Customer]
+      summary: Gán khách cho sale (manager CRM)
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sale_user_info_id]
+              properties:
+                sale_user_info_id: { type: string }
+                confirm_sale_source: { type: boolean, default: false }
+      responses:
+        "200": { description: Gán thành công }
+        "400": { description: Thiếu sale_user_info_id / id không hợp lệ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /customer/{id}/reassign:
+    patch:
+      tags: [Customer]
+      summary: Chuyển khách sang sale khác (admin)
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sale_user_info_id, reason]
+              properties:
+                sale_user_info_id: { type: string }
+                reason: { type: string }
+      responses:
+        "200": { description: Chuyển thành công }
+        "400": { description: Thiếu sale_user_info_id hoặc reason }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /customer/{id}/unassign-sale:
+    patch:
+      tags: [Customer]
+      summary: Gỡ sale khỏi khách (admin)
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200": { description: Gỡ thành công }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

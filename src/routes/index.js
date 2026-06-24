@@ -1,59 +1,61 @@
-const postRouter = require('./post')
-const userRouter = require('./user')
-const documentRouter = require('./document')
-const authRouter = require('./auth')
-const departmentRouter = require('./department')
-const laborContractRouter = require('./laborContract')
-const attendanceRouter = require('./attendance')
-const referralRouter = require('./referral')
-const customerRouter = require('./customer')
-const appRouter = require('./app')
-const agentRouter = require('./agent')
-const investmentRouter = require('./investment')
-const claimPeriodRouter = require('./claimPeriod')
-const notificationRouter = require('./notification')
-const internalFileRouter = require('./internalFile')
-const weeklyReportRouter = require('./weeklyReport')
-const branchRouter = require('./branch')
-const printRouter = require('./print')
-const customerClaimRequestRouter = require('./customerClaimRequest')
-const aiRouter = require('./ai')
+const postRouter = require("./post");
+const userRouter = require("./user");
+const documentRouter = require("./document");
+const authRouter = require("./auth");
+const departmentRouter = require("./department");
+const laborContractRouter = require("./laborContract");
+const attendanceRouter = require("./attendance");
+const referralRouter = require("./referral");
+const customerRouter = require("./customer");
+const appRouter = require("./app");
+const agentRouter = require("./agent");
+const investmentRouter = require("./investment");
+const claimPeriodRouter = require("./claimPeriod");
+const notificationRouter = require("./notification");
+const internalFileRouter = require("./internalFile");
+const weeklyReportRouter = require("./weeklyReport");
+const branchRouter = require("./branch");
+const printRouter = require("./print");
+const customerClaimRequestRouter = require("./customerClaimRequest");
+const aiRouter = require("./ai");
 const chatRouter = require("./chat");
-const requestRouter = require('./request')
-const holidayRouter = require('./holiday')
-const employmentStatusRouter = require('./employmentStatus')
-const attendanceMappingRouter = require('./attendanceMapping')
-const penaltyTierRouter = require('./penaltyTier')
-const transactionManagementRouter = require('./transactionManagement')
+const requestRouter = require("./request");
+const holidayRouter = require("./holiday");
+const employmentStatusRouter = require("./employmentStatus");
+const attendanceMappingRouter = require("./attendanceMapping");
+const penaltyTierRouter = require("./penaltyTier");
+const transactionManagementRouter = require("./transactionManagement");
+const rbacRouter = require("./rbac");
 
 const route = (app) => {
-    app.use(`/posts`, postRouter)
-    app.use(`/user`, userRouter)
-    app.use(`/document`, documentRouter)
-    app.use(`/auth`, authRouter)
-    app.use(`/department`, departmentRouter)
-    app.use(`/laborContract`, laborContractRouter)
-    app.use(`/attendance`, attendanceRouter)
-    app.use(`/referral`, referralRouter)
-    app.use(`/customer`, customerRouter)
-    app.use(`/app`, appRouter)
-    app.use(`/agents`, agentRouter)
-    app.use(`/investments`, investmentRouter)
-    app.use(`/claim-period`, claimPeriodRouter)
-    app.use(`/notification`, notificationRouter)
-    app.use(`/internal-files`, internalFileRouter)
-    app.use(`/weekly-reports`, weeklyReportRouter)
-    app.use(`/branch`, branchRouter)
-    app.use(`/print`, printRouter)
-    app.use(`/customer-claim-request`, customerClaimRequestRouter)
-    // app.use(`/requests`, requestRouter)
-    // app.use(`/holidays`, holidayRouter)
-    // app.use(`/employment-status`, employmentStatusRouter)
-    // app.use(`/attendance-mapping`, attendanceMappingRouter)
-    // app.use(`/penalty-tier`, penaltyTierRouter)
-    app.use(`/ai`, aiRouter)
-    app.use(`/chat`, chatRouter)
-    app.use(`/transaction-management`, transactionManagementRouter)
-}
+  app.use(`/posts`, postRouter);
+  app.use(`/user`, userRouter);
+  app.use(`/document`, documentRouter);
+  app.use(`/auth`, authRouter);
+  app.use(`/department`, departmentRouter);
+  app.use(`/laborContract`, laborContractRouter);
+  app.use(`/attendance`, attendanceRouter);
+  app.use(`/referral`, referralRouter);
+  app.use(`/customer`, customerRouter);
+  app.use(`/app`, appRouter);
+  app.use(`/agents`, agentRouter);
+  app.use(`/investments`, investmentRouter);
+  app.use(`/claim-period`, claimPeriodRouter);
+  app.use(`/notification`, notificationRouter);
+  app.use(`/internal-files`, internalFileRouter);
+  app.use(`/weekly-reports`, weeklyReportRouter);
+  app.use(`/branch`, branchRouter);
+  app.use(`/print`, printRouter);
+  app.use(`/customer-claim-request`, customerClaimRequestRouter);
+  app.use(`/requests`, requestRouter);
+  app.use(`/holidays`, holidayRouter);
+  app.use(`/employment-status`, employmentStatusRouter);
+  app.use(`/attendance-mapping`, attendanceMappingRouter);
+  app.use(`/penalty-tier`, penaltyTierRouter);
+  app.use(`/ai`, aiRouter);
+  app.use(`/chat`, chatRouter);
+  app.use(`/transaction-management`, transactionManagementRouter);
+  app.use(`/rbac`, rbacRouter);
+};
 
 module.exports = route;

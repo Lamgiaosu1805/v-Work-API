@@ -440,7 +440,6 @@ const UserController = {
 
       const filter = { isDeleted: false };
 
-      // Admin hoặc có module hrm → xem tất cả; còn lại chỉ xem phòng ban của mình
       const isFullAccess =
         req.account.role === "admin" || req.account.module_access?.includes("hrm");
 

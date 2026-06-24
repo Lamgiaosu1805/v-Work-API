@@ -1,0 +1,252 @@
+paths:
+  /internal-files/departments:
+    get:
+      tags: [Internal Files]
+      summary: Phòng ban mà tôi có quyền truy cập ổ file
+      responses:
+        "200": { description: Danh sách phòng ban }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/{deptId}/folders:
+    get:
+      tags: [Internal Files]
+      summary: Danh sách folder trong phòng ban
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+        - { in: query, name: parent_id, schema: { type: string } }
+      responses:
+        "200": { description: Danh sách folder }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Internal Files]
+      summary: Tạo folder
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                parent_id: { type: string }
+      responses:
+        "201": { description: Tạo folder thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/{deptId}/folders/all:
+    get:
+      tags: [Internal Files]
+      summary: Toàn bộ folder (phẳng) của phòng ban
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Danh sách folder }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/{deptId}/folders/{folderId}/rename:
+    patch:
+      tags: [Internal Files]
+      summary: Đổi tên folder
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+        - { in: path, name: folderId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200": { description: Đổi tên thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/{deptId}/folders/{folderId}/move:
+    patch:
+      tags: [Internal Files]
+      summary: Di chuyển folder
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+        - { in: path, name: folderId, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parent_id: { type: string }
+      responses:
+        "200": { description: Di chuyển thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/{deptId}/folders/{folderId}:
+    delete:
+      tags: [Internal Files]
+      summary: Xóa folder
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+        - { in: path, name: folderId, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Xóa thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/{deptId}/files:
+    get:
+      tags: [Internal Files]
+      summary: Danh sách file trong phòng ban
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+        - { in: query, name: folder_id, schema: { type: string } }
+      responses:
+        "200": { description: Danh sách file }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/{deptId}/upload:
+    post:
+      tags: [Internal Files]
+      summary: Upload file (tối đa 20 file)
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  items: { type: string, format: binary }
+                folder_id: { type: string }
+      responses:
+        "200": { description: Upload thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/file/{fileId}/view:
+    get:
+      tags: [Internal Files]
+      summary: Xem file
+      parameters:
+        - { in: path, name: fileId, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Nội dung file }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/file/{fileId}/rename:
+    patch:
+      tags: [Internal Files]
+      summary: Đổi tên file
+      parameters:
+        - { in: path, name: fileId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200": { description: Đổi tên thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/file/{fileId}/move:
+    patch:
+      tags: [Internal Files]
+      summary: Di chuyển file
+      parameters:
+        - { in: path, name: fileId, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                folder_id: { type: string }
+      responses:
+        "200": { description: Di chuyển thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/file/{fileId}:
+    delete:
+      tags: [Internal Files]
+      summary: Xóa file
+      parameters:
+        - { in: path, name: fileId, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Xóa thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /internal-files/{deptId}/permissions:
+    get:
+      tags: [Internal Files]
+      summary: Xem cấu hình quyền folder phòng ban (admin)
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Cấu hình quyền }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /internal-files/{deptId}/grant:
+    post:
+      tags: [Internal Files]
+      summary: Cấp quyền xem ổ file phòng ban (admin)
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grantedUsers: { type: array, items: { type: string } }
+                grantedDepts: { type: array, items: { type: string } }
+      responses:
+        "200": { description: Cấp quyền thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /internal-files/{deptId}/revoke:
+    post:
+      tags: [Internal Files]
+      summary: Thu hồi quyền xem ổ file phòng ban (admin)
+      parameters:
+        - { in: path, name: deptId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grantedUsers: { type: array, items: { type: string } }
+                grantedDepts: { type: array, items: { type: string } }
+      responses:
+        "200": { description: Thu hồi thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

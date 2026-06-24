@@ -1,0 +1,149 @@
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Đăng nhập
+      description: >-
+        Trả về accessToken + refreshToken. Nếu là lần đầu đăng nhập, trả về
+        tempToken và isFirstLogin=true để đổi mật khẩu.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, example: admin }
+                password: { type: string, format: password, example: secret123 }
+      responses:
+        "200": { description: Đăng nhập thành công (hoặc yêu cầu đổi mật khẩu lần đầu) }
+        "400": { description: Sai tên đăng nhập hoặc mật khẩu }
+        "403": { description: Tài khoản đã bị khóa hoặc xóa }
+
+  /auth/changeFirstPassword:
+    post:
+      tags: [Auth]
+      summary: Đổi mật khẩu lần đầu
+      description: Dùng tempToken nhận từ /auth/login (header Authorization Bearer) để đặt mật khẩu mới.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPassword]
+              properties:
+                newPassword: { type: string, format: password }
+      responses:
+        "200": { description: Đổi mật khẩu thành công }
+        "400": { description: Token không hợp lệ cho đổi mật khẩu }
+        "401": { description: Thiếu token xác thực }
+
+  /auth/refreshToken:
+    post:
+      tags: [Auth]
+      summary: Cấp lại access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        "200": { description: Cấp token mới thành công }
+        "400": { description: Thiếu refresh token }
+        "401": { description: Refresh token không hợp lệ hoặc hết hạn }
+        "403": { description: Refresh token đã bị thu hồi }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Đăng xuất (thu hồi refresh token)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        "200": { description: Đăng xuất thành công }
+        "400": { description: Thiếu / không tồn tại refresh token }
+
+  /auth/resetPassword:
+    post:
+      tags: [Auth]
+      summary: Reset mật khẩu cho 1 account (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountId, newPassword]
+              properties:
+                accountId: { type: string, example: 507f1f77bcf86cd799439011 }
+                newPassword: { type: string, format: password }
+      responses:
+        "200": { description: Reset mật khẩu thành công }
+        "400": { description: Thiếu accountId hoặc newPassword }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /auth/changePassword:
+    post:
+      tags: [Auth]
+      summary: Tự đổi mật khẩu (đang đăng nhập)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, format: password }
+                newPassword: { type: string, format: password }
+      responses:
+        "200": { description: Đổi mật khẩu thành công }
+        "400": { description: Thiếu field / mật khẩu hiện tại sai / mật khẩu mới trùng cũ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /auth/set-permission/{accountId}:
+    patch:
+      tags: [Auth]
+      summary: Gán quyền cơ bản cho account (admin)
+      description: Cập nhật role / module_access / dept_scope. Tất cả field optional.
+      parameters:
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { type: string, enum: [admin, manager, user] }
+                module_access:
+                  type: array
+                  items: { type: string, enum: [hrm, workplace, crm] }
+                dept_scope: { type: string, enum: [all, own] }
+      responses:
+        "200": { description: Cập nhật quyền thành công }
+        "400": { description: Giá trị role / module_access / dept_scope không hợp lệ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }

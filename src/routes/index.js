@@ -26,6 +26,7 @@ const attendanceMappingRouter = require("./attendanceMapping");
 const penaltyTierRouter = require("./penaltyTier");
 const transactionManagementRouter = require("./transactionManagement");
 const rbacRouter = require("./rbac");
+const kpiMetricRouter = require("./kpiMetric");
 
 const route = (app) => {
   app.use(`/posts`, postRouter);
@@ -56,6 +57,7 @@ const route = (app) => {
   app.use(`/chat`, chatRouter);
   app.use(`/transaction-management`, transactionManagementRouter);
   app.use(`/rbac`, rbacRouter);
+  app.use(`/kpi/metrics`, kpiMetricRouter);
 };
 
 module.exports = route;

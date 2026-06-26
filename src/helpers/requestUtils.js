@@ -1,7 +1,7 @@
+const mongoose = require("mongoose");
 const moment = require("moment-timezone");
 const UserInfoModel = require("../models/UserInfoModel");
-const NotificationModel = require("../models/NotificationModel");
-const pushNotification = require("./pushNotification");
+const notificationService = require("../services/notificationService");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -9,12 +9,7 @@ function calcTotalDays(fromDate, fromPeriod, toDate, toPeriod) {
   const from = moment.tz(fromDate, TZ).startOf("day");
   const to = moment.tz(toDate, TZ).startOf("day");
   if (to.isBefore(from)) return null;
-  if (
-    from.isSame(to, "day") &&
-    fromPeriod === "afternoon" &&
-    toPeriod === "morning"
-  )
-    return null;
+  if (from.isSame(to, "day") && fromPeriod === "afternoon" && toPeriod === "morning") return null;
 
   let total = 0;
   const cursor = from.clone();
@@ -51,20 +46,14 @@ function buildWorkDatesWithStatus(request, fromMoment, toMoment) {
       const isFirst = cursor.isSame(fromMoment, "day");
       const isLast = cursor.isSame(toMoment, "day");
       const isSat = dow === 6;
-      let weight, period;
+      let weight;
+      let period;
       if (isSat) {
         weight = isFirst && request.from_period === "afternoon" ? 0 : 0.5;
         period = "full";
       } else if (isFirst && isLast) {
-        weight =
-          request.from_period === "morning" && request.to_period === "afternoon"
-            ? 1
-            : 0.5;
-        if (
-          request.from_period === "morning" &&
-          request.to_period === "afternoon"
-        )
-          period = "full";
+        weight = request.from_period === "morning" && request.to_period === "afternoon" ? 1 : 0.5;
+        if (request.from_period === "morning" && request.to_period === "afternoon") period = "full";
         else if (request.from_period === "morning") period = "morning";
         else period = "afternoon";
       } else if (isFirst) {
@@ -77,8 +66,7 @@ function buildWorkDatesWithStatus(request, fromMoment, toMoment) {
         weight = 1;
         period = "full";
       }
-      if (weight > 0)
-        workDates.push({ date: cursor.clone().toDate(), weight, period });
+      if (weight > 0) workDates.push({ date: cursor.clone().toDate(), weight, period });
     }
     cursor.add(1, "day");
   }
@@ -108,16 +96,16 @@ async function getEligibleReviewers(userInfoId) {
     {
       $match: {
         isDeleted: false,
-        _id: { $ne: userInfoId },
-      },
+        _id: { $ne: new mongoose.Types.ObjectId(String(userInfoId)) }
+      }
     },
     {
       $lookup: {
         from: "accounts",
         localField: "id_account",
         foreignField: "_id",
-        as: "account",
-      },
+        as: "account"
+      }
     },
     { $unwind: "$account" },
     {
@@ -125,42 +113,34 @@ async function getEligibleReviewers(userInfoId) {
         "account.role": "manager",
         // "account.module_access": "hrm",
         "account.isDeleted": false,
-        $or: [{ branch_id: branchId }, { "account.dept_scope": "all" }],
-      },
+        $or: [{ branch_id: branchId }, { "account.dept_scope": "all" }]
+      }
     },
-    { $project: { _id: 1, full_name: 1, account_id: "$account._id" } },
+    { $project: { _id: 1, full_name: 1, account_id: "$account._id" } }
   ]);
 
   return results.map((r) => ({
     userInfoId: r._id,
     accountId: r.account_id,
-    full_name: r.full_name,
+    full_name: r.full_name
   }));
 }
 
 async function notify(accountId, { title, body, type, ref_id, ref_type, uri }) {
-  await NotificationModel.create({
-    target: "individual",
+  await notificationService.createNotification({
     account_id: accountId,
     title,
     body,
     type,
     ref_id,
     ref_type,
-    uri,
+    uri
   });
-  pushNotification
-    .sendToAccount({
-      account_id: accountId,
-      title,
-      body,
-      data: { type, uri: uri || "" },
-    })
-    .catch(() => {});
 }
 
 function calcWorkUnit(shifts, minutesLate, minuteEarly) {
   const totalMinutes = shifts.reduce((sum, shift) => {
+    if (!shift.start_time || !shift.end_time) return sum;
     const [sh, sm] = shift.start_time.split(":").map(Number);
     const [eh, em] = shift.end_time.split(":").map(Number);
     return sum + (eh * 60 + em) - (sh * 60 + sm);
@@ -176,5 +156,5 @@ module.exports = {
   buildWorkDatesWithStatus,
   getEligibleReviewers,
   notify,
-  calcWorkUnit,
+  calcWorkUnit
 };

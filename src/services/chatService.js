@@ -4,6 +4,7 @@ const path = require("path");
 const ConversationModel = require("../models/ConversationModel");
 const MessageModel = require("../models/MessageModel");
 const UserInfoModel = require("../models/UserInfoModel");
+const AccountModel = require("../models/AccountModel");
 const { ChatError } = require("../helpers/socketHandler");
 
 function removeAttachmentFiles(attachment) {
@@ -67,11 +68,18 @@ async function getCurrentUserInfo(accountId) {
     .select("full_name avatar ma_nv id_account")
     .lean();
 
-  if (!userInfo) {
-    throw new ChatError("Không tìm thấy thông tin nhân viên", 404);
-  }
+  if (userInfo) return userInfo;
 
-  return userInfo;
+  const account = await AccountModel.findById(accountId).select("_id username").lean();
+  if (!account) throw new ChatError("Không tìm thấy thông tin người dùng", 404);
+
+  return {
+    _id: account._id,
+    full_name: account.username,
+    avatar: null,
+    ma_nv: null,
+    id_account: account._id
+  };
 }
 
 async function loadConversationById(conversationId, currentUserInfoId, session) {

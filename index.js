@@ -12,6 +12,7 @@ const mongoose = require("mongoose");
 const db = require("./src/config/connectDB");
 const route = require("./src/routes");
 const setupChatSocket = require("./src/sockets/chatSocket");
+const { setIO } = require("./src/sockets/ioRegistry");
 const { startCronJobs } = require("./src/jobs");
 const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
 const { serveEncryptedFile } = require("./src/middlewares/serveEncryptedFile");
@@ -34,6 +35,7 @@ io.on("connection", (socket) => {
 });
 
 app.set("io", io);
+setIO(io);
 setupChatSocket(io);
 
 app.set("trust proxy", 1);

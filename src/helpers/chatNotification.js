@@ -38,10 +38,16 @@ function isUserInConversationRoom(io, conversationId, userInfoId) {
   return false;
 }
 
+function resolveMessageText(message) {
+  if (message?.type === "image") return "Đã gửi một ảnh";
+  if (message?.type === "file") return "Đã gửi một file";
+  return message?.content || "Tin nhắn mới";
+}
+
 function buildNotificationContent({ conversation, senderName, message }) {
   const isGroupChat = conversation?.type === "group";
   const conversationName = conversation?.display_name || conversation?.name;
-  const text = message?.content || "Tin nhắn mới";
+  const text = resolveMessageText(message);
 
   return {
     title: isGroupChat
@@ -107,29 +113,16 @@ async function sendChatMessageNotification({
       senderUserInfoId: String(senderUserInfoId)
     };
 
-    const results = await Promise.all(
-      notificationTargets.map((target) =>
-        pushNotification.sendToAccount({
-          account_id: target.accountId,
-          title,
-          body,
-          data
-        })
-      )
-    );
+    for (const target of notificationTargets) {
+      pushNotification
+        .sendToAccount({ account_id: target.accountId, title, body, data })
+        .catch(() => {});
+    }
 
-    return results.reduce(
-      (accumulator, result) => ({
-        successCount: accumulator.successCount + (result?.successCount || 0),
-        failureCount: accumulator.failureCount + (result?.failureCount || 0),
-        invalidTokens: [...accumulator.invalidTokens, ...(result?.invalidTokens || [])],
-        tokens: [...accumulator.tokens, ...(result?.tokens || [])]
-      }),
-      { successCount: 0, failureCount: 0, invalidTokens: [], tokens: [] }
-    );
+    return { notified: notificationTargets.length };
   } catch (error) {
     console.error("sendChatMessageNotification error:", error?.message || error);
-    return { successCount: 0, failureCount: 0, invalidTokens: [], tokens: [] };
+    return { notified: 0 };
   }
 }
 

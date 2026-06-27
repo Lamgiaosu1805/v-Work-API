@@ -80,6 +80,9 @@ module.exports = function setupChatSocket(io) {
     if (socket.data.userInfoId) {
       socket.join(`user:${socket.data.userInfoId}`);
     }
+    if (socket.data.accountId) {
+      socket.join(`account:${socket.data.accountId}`);
+    }
 
     onAuthed(socket, "chat:join", async (payload) => {
       const conversation = await getConversationDetail({

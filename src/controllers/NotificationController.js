@@ -59,80 +59,93 @@ const NotificationController = {
     try {
       const { fcm_token, platform = "android", device_id = null } = req.body;
 
-      if (!fcm_token) return res.status(400).json({ message: "Thiếu fcm_token" });
-      if (!["ios", "android", "web"].includes(platform))
-        return res.status(400).json({ message: "platform không hợp lệ" });
-      if (!device_id) return res.status(400).json({ message: "Thiếu device_id" });
+      if (!fcm_token) {
+        return res.status(400).json({ message: "Thiếu fcm_token" });
+      }
 
-      const accountId = req.account._id;
+      if (!["ios", "android", "web"].includes(platform)) {
+        return res.status(400).json({ message: "platform không hợp lệ" });
+      }
+
+      if (!device_id) {
+        return res.status(400).json({ message: "Thiếu device_id" });
+      }
+
       const now = new Date();
 
       await DeviceTokenModel.updateMany(
-        { device_id, account_id: { $ne: accountId }, is_active: true, isDeleted: false },
-        { $set: { is_active: false, last_used_at: now } }
+        {
+          device_id,
+          account_id: { $ne: req.account._id },
+          is_active: true,
+          isDeleted: false
+        },
+        {
+          is_active: false,
+          last_used_at: now
+        }
       );
 
       const tokenOwner = await DeviceTokenModel.findOne({ fcm_token, isDeleted: false });
-      const tokenBelongsToOther =
+
+      const tokenOwnerIsCurrentDevice =
         tokenOwner &&
-        !(
-          String(tokenOwner.account_id) === String(accountId) && tokenOwner.device_id === device_id
-        );
+        String(tokenOwner.account_id) === String(req.account._id) &&
+        tokenOwner.device_id === device_id;
 
       let deviceToken;
 
-      if (tokenBelongsToOther) {
+      if (tokenOwner && !tokenOwnerIsCurrentDevice) {
         await DeviceTokenModel.updateMany(
-          { account_id: accountId, device_id, _id: { $ne: tokenOwner._id }, isDeleted: false },
-          { $set: { is_active: false, last_used_at: now } }
+          {
+            account_id: req.account._id,
+            device_id,
+            _id: { $ne: tokenOwner._id },
+            isDeleted: false
+          },
+          {
+            is_active: false,
+            last_used_at: now
+          }
         );
 
         deviceToken = await DeviceTokenModel.findByIdAndUpdate(
           tokenOwner._id,
           {
-            $set: {
-              account_id: accountId,
-              fcm_token,
-              platform,
-              device_id,
-              is_active: true,
-              isDeleted: false,
-              last_used_at: now
-            }
-          },
-          { new: true }
-        );
-      } else {
-        const existing = await DeviceTokenModel.findOne({ account_id: accountId, device_id });
-
-        if (existing) {
-          deviceToken = await DeviceTokenModel.findByIdAndUpdate(
-            existing._id,
-            {
-              $set: {
-                fcm_token,
-                platform,
-                is_active: true,
-                isDeleted: false,
-                last_used_at: now
-              }
-            },
-            { new: true }
-          );
-        } else {
-          deviceToken = await DeviceTokenModel.create({
-            account_id: accountId,
+            account_id: req.account._id,
             fcm_token,
             platform,
             device_id,
             is_active: true,
             isDeleted: false,
             last_used_at: now
-          });
-        }
+          },
+          { new: true, setDefaultsOnInsert: true }
+        );
+      } else {
+        deviceToken = await DeviceTokenModel.findOneAndUpdate(
+          {
+            account_id: req.account._id,
+            device_id,
+            isDeleted: false
+          },
+          {
+            account_id: req.account._id,
+            fcm_token,
+            platform,
+            device_id,
+            is_active: true,
+            isDeleted: false,
+            last_used_at: now
+          },
+          { new: true, upsert: true, setDefaultsOnInsert: true }
+        );
       }
 
-      return res.status(200).json({ message: "Lưu device token thành công", deviceToken });
+      return res.status(200).json({
+        message: "Lưu device token thành công",
+        deviceToken
+      });
     } catch (error) {
       console.error("Error in registerDeviceToken:", error);
       return res.status(500).json({ message: "Internal server error", error: error.message });

@@ -38,7 +38,6 @@ const CONTENT_TYPE_MAP = {
 
 const uploadDir =
   process.env.NODE_ENV === "production" ? process.env.UPLOAD_DIR_PROD : process.env.UPLOAD_DIR_DEV;
-
 const AVATAR_PREFIX = "group-avatar";
 const avatarDir = path.resolve(
   process.env.NODE_ENV === "production"

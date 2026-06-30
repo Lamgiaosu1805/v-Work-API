@@ -1,0 +1,122 @@
+paths:
+  /claim-period:
+    post:
+      tags: [Claim Period]
+      summary: Tạo kỳ claim hoa hồng (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [app_code, start_at, end_at]
+              properties:
+                app_code: { type: string }
+                start_at: { type: string, format: date-time }
+                end_at: { type: string, format: date-time }
+                note: { type: string }
+      responses:
+        "201": { description: Tạo thành công }
+        "400": { description: Thiếu field / start_at phải nhỏ hơn end_at }
+        "404": { description: App không tồn tại }
+        "409": { description: Kỳ claim bị trùng khoảng thời gian }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /claim-period/{id}/close:
+    patch:
+      tags: [Claim Period]
+      summary: Đóng kỳ claim (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Đã đóng kỳ claim }
+        "404": { description: Không tìm thấy claim period }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /claim-period/history:
+    get:
+      tags: [Claim Period]
+      summary: Lịch sử kỳ claim (manager CRM)
+      parameters:
+        - in: query
+          name: app_code
+          required: true
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+      responses:
+        "200": { description: Lịch sử kỳ claim }
+        "400": { description: Thiếu app_code }
+        "404": { description: App không tồn tại }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /claim-period/status:
+    get:
+      tags: [Claim Period]
+      summary: Trạng thái kỳ claim hiện tại (CRM)
+      parameters:
+        - in: query
+          name: app_code
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Trạng thái kỳ claim }
+        "400": { description: Thiếu app_code }
+        "404": { description: App không tồn tại }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /claim-period/unclaimed-customers:
+    get:
+      tags: [Claim Period]
+      summary: Khách hàng chưa được claim (CRM)
+      parameters:
+        - in: query
+          name: app_code
+          required: true
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+        - in: query
+          name: search
+          schema: { type: string }
+      responses:
+        "200": { description: Danh sách khách hàng chưa claim }
+        "400": { description: Thiếu app_code }
+        "403": { description: Không trong kỳ claim / không đủ quyền }
+        "404": { description: App không tồn tại }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /claim-period/claim:
+    post:
+      tags: [Claim Period]
+      summary: Claim 1 khách hàng (CRM)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [app_code, customer_id]
+              properties:
+                app_code: { type: string }
+                customer_id: { type: string }
+      responses:
+        "200": { description: Claim thành công }
+        "400": { description: Thiếu app_code hoặc customer_id }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

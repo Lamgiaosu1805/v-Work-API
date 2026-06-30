@@ -1,0 +1,84 @@
+paths:
+  /penalty-tier:
+    get:
+      tags: [Penalty Tier]
+      summary: Danh sách bậc phạt (admin)
+      parameters:
+        - in: query
+          name: type
+          schema: { type: string, example: late }
+          description: Loại phạt (vd "late")
+      responses:
+        "200": { description: Danh sách tier }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Penalty Tier]
+      summary: Tạo 1 thế hệ bậc phạt mới (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [effective_from, tiers]
+              properties:
+                type: { type: string, default: late }
+                effective_from: { type: string, format: date }
+                tiers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      from_minutes: { type: number }
+                      to_minutes: { type: number }
+                      penalty_kind: { type: string }
+                      penalty_value: { type: number }
+                      description: { type: string }
+      responses:
+        "201": { description: Tạo tier thành công }
+        "400": { description: effective_from và tiers là bắt buộc / dữ liệu không hợp lệ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /penalty-tier/{id}:
+    patch:
+      tags: [Penalty Tier]
+      summary: Cập nhật 1 tier (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from_minutes: { type: number }
+                to_minutes: { type: number }
+                penalty_kind: { type: string }
+                penalty_value: { type: number }
+                description: { type: string }
+                is_active: { type: boolean }
+                effective_from: { type: string, format: date }
+      responses:
+        "200": { description: Cập nhật thành công }
+        "400": { description: penalty_kind / effective_from không hợp lệ }
+        "404": { description: Không tìm thấy tier }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [Penalty Tier]
+      summary: Xóa 1 tier (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Xóa thành công }
+        "404": { description: Không tìm thấy tier }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

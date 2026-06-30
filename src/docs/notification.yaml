@@ -1,0 +1,59 @@
+paths:
+  /notification/device-token:
+    post:
+      tags: [Notification]
+      summary: Đăng ký FCM device token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fcm_token, device_id]
+              properties:
+                fcm_token: { type: string }
+                platform: { type: string, enum: [android, ios], default: android }
+                device_id: { type: string }
+      responses:
+        "200": { description: Đăng ký thành công }
+        "400": { description: Thiếu fcm_token / device_id / platform không hợp lệ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [Notification]
+      summary: Hủy đăng ký device token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, fcm_token]
+              properties:
+                device_id: { type: string }
+                fcm_token: { type: string }
+      responses:
+        "200": { description: Hủy thành công }
+        "400": { description: Thiếu device_id hoặc fcm_token }
+        "404": { description: Không tìm thấy device token }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /notification/test:
+    post:
+      tags: [Notification]
+      summary: Gửi thử push notification (debug)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_id, title, body]
+              properties:
+                account_id: { type: string }
+                title: { type: string }
+                body: { type: string }
+      responses:
+        "200": { description: Đã gửi }
+        "400": { description: Thiếu account_id / title / body / account_id không hợp lệ }
+        "404": { description: Account chưa có device token active }

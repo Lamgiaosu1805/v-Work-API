@@ -1,0 +1,70 @@
+paths:
+  /holidays:
+    get:
+      tags: [Holiday]
+      summary: Danh sách ngày lễ theo năm
+      parameters:
+        - in: query
+          name: year
+          schema: { type: integer }
+          description: Mặc định năm hiện tại
+      responses:
+        "200": { description: Danh sách ngày lễ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Holiday]
+      summary: Tạo ngày lễ (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, name]
+              properties:
+                date: { type: string, format: date, example: "2026-01-01" }
+                name: { type: string, example: "Tết Dương lịch" }
+      responses:
+        "201": { description: Tạo thành công }
+        "400": { description: date và name là bắt buộc / date không hợp lệ }
+        "409": { description: Ngày lễ này đã tồn tại }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /holidays/{id}:
+    patch:
+      tags: [Holiday]
+      summary: Cập nhật ngày lễ (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                date: { type: string, format: date }
+                name: { type: string }
+      responses:
+        "200": { description: Cập nhật thành công }
+        "400": { description: date không hợp lệ }
+        "404": { description: Không tìm thấy ngày lễ }
+        "409": { description: Ngày lễ này đã tồn tại }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [Holiday]
+      summary: Xóa ngày lễ (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Xóa thành công }
+        "404": { description: Không tìm thấy ngày lễ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

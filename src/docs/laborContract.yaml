@@ -1,0 +1,20 @@
+paths:
+  /laborContract/createLaborContract:
+    post:
+      tags: [Labor Contract]
+      summary: Tạo hợp đồng lao động (manager HRM)
+      description: Upload kèm 1 file PDF.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: "File hợp đồng (PDF)" }
+      responses:
+        "200": { description: Tạo hợp đồng thành công }
+        "400": { description: File không phải PDF / dữ liệu không hợp lệ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

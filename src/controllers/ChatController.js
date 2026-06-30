@@ -36,6 +36,29 @@ const CONTENT_TYPE_MAP = {
   ".png": "image/png"
 };
 
+const uploadDir =
+  process.env.NODE_ENV === "production" ? process.env.UPLOAD_DIR_PROD : process.env.UPLOAD_DIR_DEV;
+
+const AVATAR_PREFIX = "group-avatar";
+const avatarDir = path.resolve(
+  process.env.NODE_ENV === "production"
+    ? process.env.UPLOAD_DIR_PUBLIC_PROD
+    : process.env.UPLOAD_DIR_PUBLIC_DEV,
+  AVATAR_PREFIX
+);
+
+const removePublicImage = (stored) => {
+  if (!stored) return;
+  const base = path.basename(stored);
+  const candidates = [path.join(avatarDir, base), path.join(uploadDir, base)];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      fs.unlinkSync(p);
+      return;
+    }
+  }
+};
+
 function emitConversationEvent(io, eventName, conversation, payload) {
   if (!io || !conversation?.members) return;
 
@@ -207,12 +230,10 @@ const ChatController = {
       }
 
       if (existingConversation.avatar) {
-        const chatDir = getChatDir(req.params.conversationId);
-        const oldFilePath = path.join(chatDir, path.basename(existingConversation.avatar));
-        if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
+        removePublicImage(existingConversation.avatar);
       }
 
-      const imgPath = `chat/${req.params.conversationId}/${req.file.filename}`;
+      const imgPath = `${AVATAR_PREFIX}/${req.file.filename}`;
 
       const conversation = await updateGroupConversationAvatar({
         conversationId: req.params.conversationId,
@@ -237,11 +258,6 @@ const ChatController = {
         data: signAvatarsDeep(conversation)
       });
     } catch (error) {
-      if (req.file) {
-        const chatDir = getChatDir(req.params.conversationId);
-        const filePath = path.join(chatDir, req.file.filename);
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      }
       return handleChatError(res, error);
     }
   },

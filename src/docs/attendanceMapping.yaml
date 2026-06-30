@@ -1,0 +1,66 @@
+paths:
+  /attendance-mapping:
+    get:
+      tags: [Attendance Mapping]
+      summary: Danh sách mapping máy chấm công ↔ nhân viên (admin)
+      responses:
+        "200": { description: Danh sách mapping }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Attendance Mapping]
+      summary: Tạo mapping (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [machine_code, user_id]
+              properties:
+                machine_code: { type: string }
+                user_id: { type: string, description: "ObjectId của UserInfo" }
+      responses:
+        "201": { description: Tạo mapping thành công }
+        "400": { description: machine_code và user_id là bắt buộc }
+        "404": { description: Không tìm thấy nhân viên }
+        "409": { description: machine_code đã được mapping }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /attendance-mapping/{id}:
+    patch:
+      tags: [Attendance Mapping]
+      summary: Cập nhật mapping (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                machine_code: { type: string }
+                user_id: { type: string }
+      responses:
+        "200": { description: Cập nhật thành công }
+        "404": { description: Không tìm thấy mapping / nhân viên }
+        "409": { description: machine_code đã được mapping }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [Attendance Mapping]
+      summary: Xóa mapping (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Xóa thành công }
+        "404": { description: Không tìm thấy mapping }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

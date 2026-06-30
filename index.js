@@ -9,6 +9,7 @@ const compression = require("compression");
 const rateLimit = require("express-rate-limit");
 const path = require("path");
 const mongoose = require("mongoose");
+const swaggerUi = require("swagger-ui-express");
 const db = require("./src/config/connectDB");
 const route = require("./src/routes");
 const setupChatSocket = require("./src/sockets/chatSocket");
@@ -16,6 +17,7 @@ const { setIO } = require("./src/sockets/ioRegistry");
 const { startCronJobs } = require("./src/jobs");
 const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
 const { serveEncryptedFile } = require("./src/middlewares/serveEncryptedFile");
+const swaggerSpec = require("./src/config/swagger");
 
 const app = express();
 const httpServer = createServer(app);
@@ -88,6 +90,9 @@ app.use(require("./src/middlewares/loggingMiddleware"));
 app.get("/refer", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "refer.html"));
 });
+
+app.get("/api-docs.json", (req, res) => res.json(swaggerSpec));
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 route(app);
 

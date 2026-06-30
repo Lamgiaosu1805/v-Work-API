@@ -1,0 +1,208 @@
+paths:
+  /attendance/getWorkSheet:
+    get:
+      tags: [Attendance]
+      summary: Bảng công của tôi
+      responses:
+        "200": { description: Bảng công }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /attendance/standard-work-units:
+    get:
+      tags: [Attendance]
+      summary: Đơn vị công chuẩn
+      responses:
+        "200": { description: Danh sách đơn vị công }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /attendance/getLichCong:
+    get:
+      tags: [Attendance]
+      summary: Lịch công
+      responses:
+        "200": { description: Lịch công }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /attendance/getAllShifts:
+    get:
+      tags: [Attendance]
+      summary: Danh sách ca làm
+      responses:
+        "200": { description: Danh sách ca }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /attendance/stats:
+    get:
+      tags: [Attendance]
+      summary: Thống kê chấm công cá nhân
+      responses:
+        "200": { description: Thống kê }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /attendance/calendar:
+    get:
+      tags: [Attendance]
+      summary: Lịch chấm công
+      responses:
+        "200": { description: Dữ liệu lịch }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /attendance/getAllowedWifiLocations:
+    get:
+      tags: [Attendance]
+      summary: Danh sách wifi được phép chấm công (admin)
+      responses:
+        "200": { description: Danh sách wifi }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /attendance/getAllWorkSheets:
+    get:
+      tags: [Attendance]
+      summary: Bảng công tất cả nhân viên (HRM)
+      parameters:
+        - { in: query, name: department, schema: { type: string } }
+        - { in: query, name: q, schema: { type: string } }
+      responses:
+        "200": { description: Bảng công tất cả }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /attendance/payroll-stats-all:
+    get:
+      tags: [Attendance]
+      summary: Thống kê bảng lương tất cả (HRM)
+      parameters:
+        - { in: query, name: branch_id, schema: { type: string } }
+      responses:
+        "200": { description: Thống kê lương }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /attendance/payroll-stats/{userId}:
+    get:
+      tags: [Attendance]
+      summary: Thống kê bảng lương 1 nhân viên (HRM)
+      parameters:
+        - { in: path, name: userId, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Thống kê lương }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /attendance/createAllowedWifiLocation:
+    post:
+      tags: [Attendance]
+      summary: Thêm wifi cho phép chấm công (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ssid]
+              properties:
+                name: { type: string }
+                ssid: { type: string }
+                latitude: { type: number }
+                longitude: { type: number }
+                radius: { type: number }
+      responses:
+        "201": { description: Tạo thành công }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /attendance/checkIn:
+    post:
+      tags: [Attendance]
+      summary: Chấm công vào
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ssid: { type: string }
+                latitude: { type: number }
+                longitude: { type: number }
+      responses:
+        "200": { description: Chấm công vào thành công }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /attendance/checkOut:
+    post:
+      tags: [Attendance]
+      summary: Chấm công ra
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ssid: { type: string }
+                latitude: { type: number }
+                longitude: { type: number }
+      responses:
+        "200": { description: Chấm công ra thành công }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /attendance/createShift:
+    post:
+      tags: [Attendance]
+      summary: Tạo ca làm (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "201": { description: Tạo ca thành công }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /attendance/import-excel:
+    post:
+      tags: [Attendance]
+      summary: Import chấm công từ Excel (admin)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200": { description: Import thành công }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /attendance/admin/worksheet/{worksheetId}:
+    patch:
+      tags: [Attendance]
+      summary: Sửa worksheet (admin)
+      parameters:
+        - { in: path, name: worksheetId, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Cập nhật thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /attendance/deleteAllowedWifiLocation/{id}:
+    delete:
+      tags: [Attendance]
+      summary: Xóa wifi cho phép chấm công (admin)
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Xóa thành công }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

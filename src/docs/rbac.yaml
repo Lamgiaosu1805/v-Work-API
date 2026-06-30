@@ -1,0 +1,129 @@
+paths:
+  /rbac/permissions:
+    get:
+      tags: [RBAC]
+      summary: Danh mục permission
+      responses:
+        "200": { description: Danh sách permission }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /rbac/roles:
+    get:
+      tags: [RBAC]
+      summary: Danh sách role (kèm permission của từng role)
+      responses:
+        "200": { description: Danh sách role }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /rbac/users/{accountId}:
+    get:
+      tags: [RBAC]
+      summary: Xem quyền của 1 account
+      description: Trả về account, danh sách role được gán và effective_permissions (đã gộp role + override).
+      parameters:
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Thông tin quyền của account }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /rbac/users/{accountId}/roles:
+    post:
+      tags: [RBAC]
+      summary: Gán role cho account
+      parameters:
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roleCode]
+              properties:
+                roleCode:
+                  type: string
+                  enum: [kpi_sale, kpi_sale_manager, kpi_ttkd_director, bod]
+      responses:
+        "200": { description: "Đã gán role / Role đã được gán trước đó" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /rbac/users/{accountId}/roles/{roleCode}:
+    delete:
+      tags: [RBAC]
+      summary: Bỏ role khỏi account (soft delete)
+      parameters:
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: roleCode
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Đã bỏ role }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /rbac/users/{accountId}/permissions:
+    put:
+      tags: [RBAC]
+      summary: Set override quyền lẻ (allow / deny)
+      description: DENY thắng ALLOW, override user-level thắng role-level.
+      parameters:
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [permissionCode, effect]
+              properties:
+                permissionCode: { type: string, example: kpi.tier.config }
+                effect: { type: string, enum: [allow, deny] }
+      responses:
+        "200": { description: Đã set override }
+        "400": { description: effect không hợp lệ / id sai }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /rbac/users/{accountId}/permissions/{permissionCode}:
+    delete:
+      tags: [RBAC]
+      summary: Gỡ override quyền lẻ (soft delete)
+      parameters:
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: permissionCode
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Đã gỡ override }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }

@@ -743,5 +743,6 @@ module.exports = {
   leaveGroup,
   ensureConversationAccess,
   createMessageDocument,
-  formatConversation
+  formatConversation,
+  updateGroupConversationAvatar
 };

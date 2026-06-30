@@ -24,7 +24,8 @@ const {
   promoteMember,
   leaveGroup,
   addMembers,
-  ensureConversationAccess
+  ensureConversationAccess,
+  updateGroupConversationAvatar
 } = require("../services/chatService");
 
 const CONTENT_TYPE_MAP = {
@@ -199,6 +200,60 @@ const ChatController = {
 
       return res.status(200).json({
         message: "Cập nhật tên nhóm thành công",
+        data: signAvatarsDeep(conversation)
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  updateGroupConversationAvatar: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+
+      if (!req.file) {
+        return res.status(400).json({ message: "Không có file được upload" });
+      }
+
+      const existingConversation = await ConversationModel.findOne({
+        _id: req.params.conversationId,
+        members: currentUserInfo._id,
+        type: "group",
+        isDeleted: false
+      }).select("avatar");
+
+      if (!existingConversation) {
+        return res
+          .status(404)
+          .json({ message: "Conversation không tồn tại hoặc bạn không có quyền truy cập" });
+      }
+
+      if (existingConversation.avatar) {
+        removePublicImage(existingConversation.avatar);
+      }
+
+      const imgPath = `${AVATAR_PREFIX}/${req.file.filename}`;
+
+      const conversation = await updateGroupConversationAvatar({
+        conversationId: req.params.conversationId,
+        userInfoId: currentUserInfo._id,
+        imgPath
+      });
+
+      const io = req.app.get("io");
+      if (io) {
+        emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
+      }
+
+      await createAndBroadcastSystemMessage({
+        io,
+        conversationId: req.params.conversationId,
+        actorUserInfoId: currentUserInfo._id,
+        content: `${currentUserInfo.full_name} đã đổi ảnh nhóm`
+      });
+
+      return res.status(200).json({
+        message: "Cập nhật ảnh nhóm thành công",
         data: signAvatarsDeep(conversation)
       });
     } catch (error) {

@@ -33,6 +33,15 @@ router.patch(
   authenticate,
   ChatController.updateGroupConversationName
 );
+
+router.patch(
+  "/conversations/:conversationId/group-avatar",
+  authenticate,
+  uploadGroupAvatar.single("group-avatar"),
+  processChatImage,
+  ChatController.updateGroupConversationAvatar
+);
+
 router.delete("/conversations/:conversationId", authenticate, ChatController.deleteConversation);
 router.post("/conversations/:conversationId/members", authenticate, ChatController.addMembers);
 router.delete("/conversations/:conversationId/members/me", authenticate, ChatController.leaveGroup);

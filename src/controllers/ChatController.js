@@ -35,6 +35,28 @@ const CONTENT_TYPE_MAP = {
   ".png": "image/png"
 };
 
+const uploadDir =
+  process.env.NODE_ENV === "production" ? process.env.UPLOAD_DIR_PROD : process.env.UPLOAD_DIR_DEV;
+const AVATAR_PREFIX = "group-avatar";
+const avatarDir = path.resolve(
+  process.env.NODE_ENV === "production"
+    ? process.env.UPLOAD_DIR_PUBLIC_PROD
+    : process.env.UPLOAD_DIR_PUBLIC_DEV,
+  AVATAR_PREFIX
+);
+
+const removePublicImage = (stored) => {
+  if (!stored) return;
+  const base = path.basename(stored);
+  const candidates = [path.join(avatarDir, base), path.join(uploadDir, base)];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      fs.unlinkSync(p);
+      return;
+    }
+  }
+};
+
 function emitConversationEvent(io, eventName, conversation, payload) {
   if (!io || !conversation?.members) return;
 

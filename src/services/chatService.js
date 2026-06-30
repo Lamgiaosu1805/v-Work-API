@@ -326,7 +326,6 @@ async function updateGroupConversationAvatar({ conversationId, userInfoId, imgPa
     type: "group",
     isDeleted: false
   });
-
   if (!exists) {
     throw new ChatError("Conversation không tồn tại hoặc bạn không có quyền truy cập", 404);
   }

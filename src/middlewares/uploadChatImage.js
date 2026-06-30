@@ -100,4 +100,27 @@ const upload = multer({
   }
 });
 
-module.exports = { upload, processChatImage, getChatDir };
+const groupAvatarStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const baseDir =
+      process.env.NODE_ENV === "production"
+        ? process.env.UPLOAD_DIR_PUBLIC_PROD
+        : process.env.UPLOAD_DIR_PUBLIC_DEV;
+    const dir = path.resolve(baseDir, "group-avatar");
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const ext = GIF_TYPES.has(file.mimetype) ? ".gif" : ".webp";
+    cb(null, uniqueSuffix + ext);
+  }
+});
+
+const uploadGroupAvatar = multer({
+  storage: groupAvatarStorage,
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
+
+module.exports = { upload, uploadGroupAvatar, processChatImage, getChatDir };

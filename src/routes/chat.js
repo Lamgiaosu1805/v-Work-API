@@ -1,7 +1,7 @@
 const express = require("express");
 const { authenticate } = require("../middlewares/authMiddleware");
 const ChatController = require("../controllers/ChatController");
-const { upload, processChatImage } = require("../middlewares/uploadChatImage");
+const { upload, processChatImage, uploadGroupAvatar } = require("../middlewares/uploadChatImage");
 
 const router = express.Router();
 
@@ -32,6 +32,13 @@ router.patch(
   "/conversations/:conversationId/group-name",
   authenticate,
   ChatController.updateGroupConversationName
+);
+router.patch(
+  "/conversations/:conversationId/group-avatar",
+  authenticate,
+  uploadGroupAvatar.single("group-avatar"),
+  processChatImage,
+  ChatController.updateGroupConversationAvatar
 );
 router.delete("/conversations/:conversationId", authenticate, ChatController.deleteConversation);
 router.post("/conversations/:conversationId/members", authenticate, ChatController.addMembers);

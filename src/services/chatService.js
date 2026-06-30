@@ -314,6 +314,36 @@ async function updateGroupConversationName({ conversationId, userInfoId, name })
 
   return loadConversationById(conversationId, userInfoId);
 }
+
+async function updateGroupConversationAvatar({ conversationId, userInfoId, imgPath }) {
+  if (!imgPath) {
+    throw new ChatError("Thiếu imgPath", 400);
+  }
+
+  const exists = await ConversationModel.exists({
+    _id: conversationId,
+    members: userInfoId,
+    type: "group",
+    isDeleted: false
+  });
+
+  if (!exists) {
+    throw new ChatError("Conversation không tồn tại hoặc bạn không có quyền truy cập", 404);
+  }
+
+  await ConversationModel.updateOne(
+    { _id: conversationId },
+    {
+      $set: {
+        avatar: imgPath,
+        updatedAt: new Date()
+      }
+    }
+  );
+
+  return loadConversationById(conversationId, userInfoId);
+}
+
 async function listConversations(userInfoId, search = "") {
   const conversations = await ConversationModel.find({
     members: userInfoId,
@@ -714,5 +744,6 @@ module.exports = {
   leaveGroup,
   ensureConversationAccess,
   createMessageDocument,
-  formatConversation
+  formatConversation,
+  updateGroupConversationAvatar
 };

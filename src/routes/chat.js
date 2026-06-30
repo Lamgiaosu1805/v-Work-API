@@ -1,7 +1,7 @@
 const express = require("express");
 const { authenticate } = require("../middlewares/authMiddleware");
 const ChatController = require("../controllers/ChatController");
-const { upload, processChatImage } = require("../middlewares/uploadChatImage");
+const { upload, processChatImage, uploadGroupAvatar } = require("../middlewares/uploadChatImage");
 
 const router = express.Router();
 

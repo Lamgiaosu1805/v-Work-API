@@ -1,0 +1,302 @@
+components:
+  schemas:
+    # --- Sub-schemas ---
+
+    SourceBreakdown:
+      type: object
+      description: |
+        Phân rã actual theo nguồn khách hàng (PROVISIONAL — mapping chưa chốt chính thức, xem ADR liên quan Q3).
+        Tổng mkt + cbb + bld = actual. Chỉ có ý nghĩa với metric doanh số/dòng tiền,
+        các metric khác (CIF, eKYC...) để mặc định {mkt:0, cbb:0, bld:0}.
+      properties:
+        mkt:
+          type: number
+          example: 500000000
+          description: "Marketing — investment.commission.status = \"none\" (không hoa hồng)"
+        cbb:
+          type: number
+          example: 200000000
+          description: "Sale tự khai thác — investment.commission.receiver_type = \"sale\""
+        bld:
+          type: number
+          example: 100000000
+          description: "Ban lãnh đạo — bucket mặc định cho các trường hợp còn lại (tạm thời)"
+
+    # --- Response schema ---
+
+    KpiPeriodTarget:
+      type: object
+      description: |
+        Bảng tracking lõi: mục tiêu vs thực đạt của 1 metric, 1 scope (Sale hoặc TTKD),
+        tại 1 kỳ thời gian cụ thể. Dùng cho mọi dashboard KPI (5.1–5.4 trong BRD).
+        Đây là bảng read-heavy — actual được ghi bởi engine sync, KHÔNG nhập tay.
+      properties:
+        _id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9e4"
+        scope_type:
+          type: string
+          enum: [ttkd, sale]
+          example: "sale"
+          description: |
+            Polymorphic ref (ADR-10):
+            - "ttkd" → scope_id là department._id (KPI tổng của TTKD)
+            - "sale" → scope_id là user_info._id (KPI cá nhân Sale)
+        scope_id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9a1"
+          description: "ObjectId trỏ tới department hoặc user_info tùy scope_type. Không populate (raw ObjectId)."
+        metric_code:
+          type: string
+          example: "investment_revenue"
+          description: Ref → kpi_metric.code
+        period_type:
+          type: string
+          enum: [day, week, month, quarter, year]
+          example: "month"
+        period_key:
+          type: string
+          example: "2026-06"
+          description: |
+            Định dạng theo period_type:
+            - day: "2026-06-29"
+            - week: "2026-W26"
+            - month: "2026-06"
+            - quarter: "2026-Q2"
+            - year: "2026"
+        base_target:
+          type: number
+          example: 0
+          description: |
+            Chỉ tiêu gốc của kỳ này, sinh ra khi phân rã kpi_assignment/kpi_year_plan.
+            Engine sync KHÔNG ghi field này — chỉ ghi actual.
+        rollover_in:
+          type: number
+          example: 0
+          description: Nợ dồn từ kỳ trước (hụt chỉ tiêu ngày T-1 cộng sang ngày T). Do cron rollover 23:59 tính.
+        effective_target:
+          type: number
+          example: 0
+          description: "= base_target + rollover_in. Mục tiêu thực sự phải đạt trong kỳ."
+        actual:
+          type: number
+          example: 800000000
+          description: Số liệu thực đạt. Ghi bởi engine sync (auto-sync từ investments) hoặc tổng hợp từ kpi_daily_report.
+        achievement_pct:
+          type: number
+          example: 0
+          description: "= actual / effective_target × 100 (lưu sẵn). Bằng 0 nếu effective_target chưa được set (=0)."
+        source_breakdown:
+          $ref: "#/components/schemas/SourceBreakdown"
+        is_closed:
+          type: boolean
+          example: false
+          description: "true = kỳ đã được chốt, engine sync sẽ bỏ qua record này ở lần chạy sau."
+        closed_at:
+          type: string
+          format: date-time
+          nullable: true
+        closed_by:
+          type: object
+          nullable: true
+          description: "Populated từ account (nếu có populate ở tầng khác). Người thực hiện chốt kỳ."
+          properties:
+            _id:      { type: string }
+            username: { type: string }
+        isDeleted: { type: boolean, example: false }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    # --- Request DTO ---
+
+    KpiPeriodTargetSyncBody:
+      type: object
+      required: [year, month]
+      description: |
+        Kích hoạt engine đồng bộ actual từ investments cho 1 tháng.
+        Hiện tại chỉ hỗ trợ metric `investment_revenue`, period_type day + month.
+        Idempotent — chạy lại nhiều lần cho cùng tháng sẽ tính lại actual từ đầu
+        (ghi đè), trừ các record đã `is_closed=true`.
+      properties:
+        year:
+          type: integer
+          example: 2026
+        month:
+          type: integer
+          minimum: 1
+          maximum: 12
+          example: 6
+        ttkd_id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9b0"
+          description: |
+            department._id của TTKD. **Bắt buộc với non-admin** (chỉ sync TTKD của mình).
+            Admin bỏ trống = sync toàn bộ hệ thống (tất cả TTKD).
+
+    KpiPeriodTargetSyncSummary:
+      type: object
+      description: Kết quả sau khi chạy đồng bộ
+      properties:
+        metric:
+          type: string
+          example: "investment_revenue"
+        period:
+          type: string
+          example: "2026-06"
+        ttkd_id:
+          type: string
+          example: "all"
+          description: "ObjectId của TTKD được sync, hoặc \"all\" nếu sync toàn hệ thống"
+        investments_processed:
+          type: integer
+          example: 152
+          description: Số khoản đầu tư có sale_id đã được xử lý trong tháng
+        records_updated:
+          type: integer
+          example: 48
+          description: Số record kpi_period_target được tạo mới hoặc cập nhật
+
+paths:
+  /kpi/period-targets:
+    get:
+      tags: [KPI Period Target]
+      summary: Danh sách bản ghi tracking (dashboard)
+      description: |
+        Yêu cầu quyền `kpi.dashboard.view`.
+        **Non-admin:** tự động trả về cả 2 loại — KPI tổng của TTKD mình (`scope_type=ttkd`)
+        VÀ KPI từng Sale thuộc TTKD đó (`scope_type=sale`) — dùng để Trưởng phòng
+        xem tổng phòng + drill-down từng Sale trong 1 lần gọi.
+        **Admin:** thấy tất cả, có thể filter thêm bằng `scope_type`/`scope_id`.
+        Sort theo period_key giảm dần. Mặc định giới hạn 500 bản ghi/lần gọi.
+      parameters:
+        - in: query
+          name: metric_code
+          schema: { type: string }
+          example: "investment_revenue"
+        - in: query
+          name: period_type
+          schema: { type: string, enum: [day, week, month, quarter, year] }
+        - in: query
+          name: period_key
+          schema: { type: string }
+          example: "2026-06"
+        - in: query
+          name: scope_type
+          schema: { type: string, enum: [ttkd, sale] }
+          description: "Non-admin: lọc trong phạm vi đã tự scope sẵn. Admin: filter tự do."
+        - in: query
+          name: scope_id
+          schema: { type: string }
+          description: "Chỉ áp dụng cho admin — lọc theo 1 department._id hoặc user_info._id cụ thể."
+        - in: query
+          name: limit
+          schema: { type: integer, default: 500 }
+      responses:
+        "200":
+          description: Danh sách bản ghi tracking
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/KpiPeriodTarget" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /kpi/period-targets/{id}:
+    get:
+      tags: [KPI Period Target]
+      summary: Chi tiết 1 bản ghi tracking
+      description: |
+        Yêu cầu quyền `kpi.dashboard.view`. Ownership check theo scope_type/scope_id
+        của record (không phải theo field cố định như các resource khác).
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Chi tiết bản ghi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data: { $ref: "#/components/schemas/KpiPeriodTarget" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /kpi/period-targets/{id}/close:
+    post:
+      tags: [KPI Period Target]
+      summary: Chốt kỳ (khóa số liệu)
+      description: |
+        Yêu cầu quyền `kpi.monthend.close`.
+        Sau khi chốt, engine sync sẽ **bỏ qua** record này ở các lần chạy sau
+        (kể cả cron lẫn đồng bộ thủ công) — số liệu được "đóng băng" vĩnh viễn
+        trừ khi có thao tác khác trực tiếp trên DB.
+        Không chốt lại được record đã `is_closed=true`.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Đã chốt kỳ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã chốt kỳ" }
+                  data: { $ref: "#/components/schemas/KpiPeriodTarget" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền monthend.close hoặc không sở hữu bản ghi này" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Kỳ đã được chốt trước đó" }
+
+  /kpi/period-targets/sync:
+    post:
+      tags: [KPI Period Target]
+      summary: Đồng bộ thủ công (nút "Đồng bộ dữ liệu")
+      description: |
+        Yêu cầu quyền `kpi.monthend.close`.
+        Chạy lại engine `syncInvestmentRevenue` cho 1 tháng cụ thể — đọc toàn bộ
+        `investments` có `invested_at` trong tháng và `commission.sale_id != null`,
+        gom theo Sale + TTKD, ghi `actual`/`achievement_pct`/`source_breakdown`
+        vào `kpi_period_target` cho cả **period_type=day** và **period_type=month**.
+
+        Dùng khi cần đối chiếu lại số liệu sau khi sửa/xóa dữ liệu nguồn
+        (investments), thay vì chờ cron 23:30 hàng ngày.
+
+        **Giới hạn hiện tại:**
+        - Chỉ metric `investment_revenue` (các metric auto khác chưa hỗ trợ).
+        - Không ghi đè record đã `is_closed=true`.
+        - Không đụng `base_target` — chỉ cập nhật phần thực đạt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiPeriodTargetSyncBody" }
+      responses:
+        "200":
+          description: Đồng bộ hoàn tất
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đồng bộ hoàn tất" }
+                  data: { $ref: "#/components/schemas/KpiPeriodTargetSyncSummary" }
+        "400": { description: "Thiếu year/month, month ngoài 1-12, hoặc thiếu ttkd_id (non-admin)" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền monthend.close hoặc account không thuộc TTKD này" }

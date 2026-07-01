@@ -25,4 +25,30 @@ async function getAccountTtkdIds(accountId) {
   return ttkds.map((t) => t._id);
 }
 
-module.exports = { getAccountTtkdIds };
+async function getSaleInfoIdsInTtkds(ttkdIds) {
+  if (!ttkdIds || !ttkdIds.length) return [];
+  return UserDepartmentPositionModel.distinct("user", {
+    department: { $in: ttkdIds },
+    isDeleted: false
+  });
+}
+
+async function getSaleTtkdId(saleInfoId) {
+  const deptIds = await UserDepartmentPositionModel.distinct("department", {
+    user: saleInfoId,
+    isDeleted: false
+  });
+  if (!deptIds.length) return null;
+
+  const ttkd = await DepartmentModel.findOne({
+    _id: { $in: deptIds },
+    type: "branch",
+    isDeleted: false
+  })
+    .select("_id")
+    .lean();
+
+  return ttkd?._id ?? null;
+}
+
+module.exports = { getAccountTtkdIds, getSaleInfoIdsInTtkds, getSaleTtkdId };

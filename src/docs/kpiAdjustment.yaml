@@ -1,0 +1,252 @@
+components:
+  schemas:
+    # --- Response schema ---
+
+    KpiAdjustment:
+      type: object
+      description: |
+        1 bản ghi audit clawback — ghi nhận việc trừ actual của kpi_period_target
+        khi 1 khoản đầu tư bị tất toán/rút trước hạn.
+        1 lần clawback (1 investment) có thể sinh ra **nhiều** bản ghi — mỗi bản ghi
+        ứng với 1 period_type bị tác động (xem quy tắc ở KpiAdjustmentCreateBody).
+      properties:
+        _id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9f5"
+        investment_id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e900"
+          description: Ref → investment._id. Khoản đầu tư bị clawback. Mỗi investment chỉ được clawback 1 lần (unique theo nghiệp vụ).
+        sale_id:
+          type: object
+          description: "Populated từ user_info (full_name, code)"
+          properties:
+            _id:       { type: string }
+            full_name: { type: string, example: "Nguyễn Văn A" }
+            code:      { type: string, example: "NV0123" }
+        ttkd_id:
+          type: object
+          description: "Populated từ department (department_name, department_code)"
+          properties:
+            _id:             { type: string }
+            department_name: { type: string, example: "TTKD Hà Nội" }
+            department_code: { type: string, example: "TTKD-HN" }
+        metric_code:
+          type: string
+          example: "investment_revenue"
+          description: "Hardcode \"investment_revenue\" ở phase hiện tại — engine chưa hỗ trợ metric khác."
+        amount:
+          type: number
+          example: 50000000
+          description: |
+            Số tiền bị trừ (luôn dương). Engine trừ giá trị này khỏi `kpi_period_target.actual`
+            của CẢ scope=sale lẫn scope=ttkd tương ứng.
+        reason:
+          type: string
+          enum: [early_terminated, cancelled]
+          example: "early_terminated"
+          description: "early_terminated = tất toán trước hạn, cancelled = hủy khoản đầu tư"
+        withdrawal_date:
+          type: string
+          format: date-time
+          description: Thời điểm rút/tất toán. Mặc định = thời điểm gọi API nếu không truyền.
+        period_type:
+          type: string
+          enum: [day, month, year]
+          example: "month"
+          description: "1 trong các period_type bị tác động bởi lần clawback này (xem quy tắc xác định ở dưới)"
+        applied_period_key:
+          type: string
+          example: "2026-06"
+          description: "period_key tương ứng với period_type, cùng định dạng với kpi_period_target"
+        note:
+          type: string
+          example: ""
+        created_by:
+          type: object
+          description: "Populated từ account (username)"
+          properties:
+            _id:      { type: string }
+            username: { type: string }
+        isDeleted: { type: boolean, example: false }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    # --- Request DTOs ---
+
+    KpiAdjustmentCreateBody:
+      type: object
+      required: [investment_id, reason]
+      description: |
+        Ghi nhận clawback cho 1 khoản đầu tư. Server tự xác định các kỳ bị ảnh hưởng
+        và tạo nhiều `kpi_adjustment` row tương ứng (atomic — transaction).
+
+        **Quy tắc xác định kỳ bị trừ** (dựa trên `is_closed` của record THÁNG gốc,
+        nơi doanh số khoản đầu tư từng được tính vào actual — đơn giản hóa từ quy tắc
+        3 tầng tuần/tháng/năm trong BRD xuống 2 tầng, vì hệ thống hiện chỉ tracking
+        theo day + month):
+        - Tháng gốc **chưa chốt** (`is_closed=false`) → trừ **day** (ngày đầu tư) + **month**
+        - Tháng gốc **đã chốt** (`is_closed=true`) → không sửa số đã chốt, trừ vào **year** (lũy kế năm)
+
+        `sale_id` và `ttkd_id` server tự resolve từ `investment.commission.sale_id`
+        — không truyền vào body.
+      properties:
+        investment_id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e900"
+          description: |
+            Phải tồn tại, chưa bị xóa, có `commission.sale_id` gắn sẵn.
+            Trả **409** nếu investment này đã được clawback trước đó.
+        reason:
+          type: string
+          enum: [early_terminated, cancelled]
+          example: "early_terminated"
+        withdrawal_date:
+          type: string
+          format: date-time
+          description: "Optional — mặc định = thời điểm gọi API"
+        amount:
+          type: number
+          minimum: 0
+          example: 50000000
+          description: "Optional — mặc định = investment.amount (toàn bộ số tiền gốc)"
+        note:
+          type: string
+          example: "KH rút trước hạn do cần tiền gấp"
+
+    KpiAdjustmentCreateResponseData:
+      type: object
+      description: Kết quả sau khi ghi nhận clawback
+      properties:
+        adjustments:
+          type: array
+          description: Danh sách các kpi_adjustment row vừa tạo (1 hoặc 2 phần tử tùy quy tắc)
+          items: { $ref: "#/components/schemas/KpiAdjustment" }
+        amount:
+          type: number
+          example: 50000000
+        periods_applied:
+          type: array
+          description: Các kỳ đã bị trừ actual
+          items:
+            type: object
+            properties:
+              period_type: { type: string, example: "month" }
+              period_key:  { type: string, example: "2026-06" }
+
+paths:
+  /kpi/adjustments:
+    get:
+      tags: [KPI Adjustment]
+      summary: Danh sách clawback (audit log)
+      description: |
+        Yêu cầu quyền `kpi.dashboard.view`.
+        **Non-admin:** tự động filter về TTKD mình. Truyền `ttkd_id` để lọc cụ thể (phải thuộc).
+        **Admin:** thấy tất cả. Sort theo withdrawal_date giảm dần.
+      parameters:
+        - in: query
+          name: investment_id
+          schema: { type: string }
+        - in: query
+          name: sale_id
+          schema: { type: string }
+        - in: query
+          name: ttkd_id
+          schema: { type: string }
+          description: "Admin: filter theo TTKD. Non-admin: phải là TTKD của mình."
+        - in: query
+          name: reason
+          schema: { type: string, enum: [early_terminated, cancelled] }
+        - in: query
+          name: period_type
+          schema: { type: string, enum: [day, month, year] }
+      responses:
+        "200":
+          description: Danh sách bản ghi clawback
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/KpiAdjustment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+    post:
+      tags: [KPI Adjustment]
+      summary: Ghi nhận clawback cho 1 khoản đầu tư
+      description: |
+        Yêu cầu quyền `kpi.monthend.close`.
+        **Atomic (transaction):** với mỗi kỳ bị ảnh hưởng (1 hoặc 2 kỳ tùy quy tắc is_closed):
+        1. Tạo 1 `kpi_adjustment` row (audit).
+        2. Trừ `amount` khỏi `kpi_period_target.actual` của **cả** scope=sale
+           (Sale bị trừ) **và** scope=ttkd (TTKD của Sale đó), cùng metric/period_type/period_key.
+        3. Nếu record `kpi_period_target` chưa tồn tại → tự tạo mới (upsert, base_target=0).
+        4. Bỏ qua (không trừ) nếu record đích đã `is_closed=true`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiAdjustmentCreateBody" }
+      responses:
+        "201":
+          description: Đã ghi nhận clawback
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã ghi nhận clawback" }
+                  data: { $ref: "#/components/schemas/KpiAdjustmentCreateResponseData" }
+        "400": { description: "Thiếu trường / reason không hợp lệ / investment_id không tồn tại / investment không có sale_id / amount < 0" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền monthend.close hoặc account không thuộc TTKD của Sale này" }
+        "409": { description: "Khoản đầu tư này đã được ghi nhận clawback trước đó" }
+
+  /kpi/adjustments/{id}:
+    get:
+      tags: [KPI Adjustment]
+      summary: Chi tiết 1 bản ghi clawback
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Chi tiết bản ghi clawback
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data: { $ref: "#/components/schemas/KpiAdjustment" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    delete:
+      tags: [KPI Adjustment]
+      summary: Hủy 1 bản ghi clawback (hoàn tác)
+      description: |
+        Yêu cầu quyền `kpi.monthend.close`.
+        **Atomic (transaction):** hoàn lại `amount` vào `kpi_period_target.actual`
+        của cả scope=sale lẫn scope=ttkd tương ứng (delta dương), sau đó soft-delete
+        bản ghi clawback. Nếu chỉ muốn hủy 1 trong nhiều period_type của cùng 1 lần
+        clawback, gọi DELETE riêng cho từng `_id` — mỗi row độc lập.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: "Đã hủy clawback và hoàn lại actual" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền monthend.close hoặc account không thuộc TTKD này" }
+        "404": { $ref: "#/components/responses/NotFound" }

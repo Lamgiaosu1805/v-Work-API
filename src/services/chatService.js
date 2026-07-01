@@ -744,14 +744,13 @@ async function updateMemberNickname({
 }) {
   const conversation = await ConversationModel.findOne({
     _id: conversationId,
-    type: "group",
     members: actorUserInfoId,
     isDeleted: false
   });
-  if (!conversation) throw new ChatError("Không tìm thấy nhóm", 404);
+  if (!conversation) throw new ChatError("Không tìm thấy cuộc trò chuyện", 404);
 
   const isMember = conversation.members.some((m) => String(m) === String(targetUserInfoId));
-  if (!isMember) throw new ChatError("Thành viên không tồn tại trong nhóm", 404);
+  if (!isMember) throw new ChatError("Thành viên không tồn tại trong cuộc trò chuyện", 404);
 
   const normalizedNickname = String(nickname || "").trim();
   const existingIndex = (conversation.nicknames || []).findIndex(

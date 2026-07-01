@@ -76,7 +76,8 @@ const definition = {
     { name: "AI", description: "Tính năng AI" },
     { name: "Chat", description: "Nhắn tin nội bộ" },
     { name: "KPI Metric", description: "F01 — Danh mục chỉ tiêu KPI (động)" },
-    { name: "KPI Assignment", description: "F03 — Combo KPI tháng (Trưởng phòng giao cho Sale)" }
+    { name: "KPI Assignment", description: "F03 — Combo KPI tháng (Trưởng phòng giao cho Sale)" },
+    { name: "Omicall", description: "Webhook nhận sự kiện cuộc gọi từ Omicall (test)" }
   ]
 };
 

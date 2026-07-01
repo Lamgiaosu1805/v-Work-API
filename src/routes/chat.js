@@ -55,6 +55,13 @@ router.patch(
   authenticate,
   ChatController.promoteMember
 );
+
+router.patch(
+  "/conversations/:conversationId/members/:memberId/nickname",
+  authenticate,
+  ChatController.updateMemberNickname
+);
+
 router.delete(
   "/conversations/:conversationId/messages/:messageId",
   authenticate,

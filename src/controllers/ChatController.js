@@ -25,7 +25,8 @@ const {
   leaveGroup,
   addMembers,
   ensureConversationAccess,
-  updateGroupConversationAvatar
+  updateGroupConversationAvatar,
+  updateMemberNickname
 } = require("../services/chatService");
 
 const CONTENT_TYPE_MAP = {
@@ -670,6 +671,46 @@ const ChatController = {
       return res.status(200).json({
         message: "Xoá tin nhắn thành công",
         data: result
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  updateMemberNickname: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const targetUserInfo = await UserInfoModel.findById(req.params.memberId)
+        .select("full_name")
+        .lean();
+
+      const conversation = await updateMemberNickname({
+        conversationId: req.params.conversationId,
+        actorUserInfoId: currentUserInfo._id,
+        targetUserInfoId: req.params.memberId,
+        nickname: req.body.nickname
+      });
+
+      const io = req.app.get("io");
+      if (io) {
+        emitConversationEvent(io, "conversation:upserted", conversation, { conversation });
+      }
+
+      if (targetUserInfo) {
+        const nickname = String(req.body.nickname || "").trim();
+        await createAndBroadcastSystemMessage({
+          io,
+          conversationId: req.params.conversationId,
+          actorUserInfoId: currentUserInfo._id,
+          content: nickname
+            ? `${currentUserInfo.full_name} đã đặt biệt danh cho ${targetUserInfo.full_name} là "${nickname}"`
+            : `${currentUserInfo.full_name} đã xoá biệt danh của ${targetUserInfo.full_name}`
+        });
+      }
+
+      return res.status(200).json({
+        message: "Đổi biệt danh thành công",
+        data: signAvatarsDeep(conversation)
       });
     } catch (error) {
       return handleChatError(res, error);

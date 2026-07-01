@@ -31,6 +31,7 @@ const kpiAssignmentRouter = require("./kpiAssignment");
 const kpiYearPlanRouter = require("./kpiYearPlan");
 const kpiTierConfigRouter = require("./kpiTierConfig");
 const kpiTierAssignmentRouter = require("./kpiTierAssignment");
+const omicallRouter = require("./omicall");
 
 const route = (app) => {
   app.use(`/posts`, postRouter);
@@ -66,6 +67,7 @@ const route = (app) => {
   app.use(`/kpi/year-plans`, kpiYearPlanRouter);
   app.use(`/kpi/tier-configs`, kpiTierConfigRouter);
   app.use(`/kpi/tier-assignments`, kpiTierAssignmentRouter);
+  app.use(`/omicall`, omicallRouter);
 };
 
 module.exports = route;

@@ -1,0 +1,376 @@
+components:
+  schemas:
+  
+    MonthlyTarget:
+      type: object
+      description: Chỉ tiêu của 1 tháng trong kế hoạch năm
+      properties:
+        month:
+          type: integer
+          minimum: 1
+          maximum: 12
+          example: 3
+        base_target:
+          type: number
+          minimum: 0
+          example: 10000000000
+          description: Giá trị gốc khi lập kế hoạch (year_target / 12). Không thay đổi sau khi tạo.
+        adjusted_target:
+          type: number
+          minimum: 0
+          example: 15000000000
+          description: Giá trị sau khi GĐ TTKD điều chỉnh. Ban đầu = base_target.
+        is_adjusted:
+          type: boolean
+          example: true
+          description: "true nếu adjusted_target đã bị override khỏi base_target"
+
+
+    KpiYearPlan:
+      type: object
+      description: Kế hoạch KPI năm của 1 TTKD cho 1 chỉ tiêu
+      properties:
+        _id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9b1"
+        ttkd_id:
+          type: object
+          description: "Populated từ department (department_name, department_code)"
+          properties:
+            _id:          { type: string }
+            department_name: { type: string, example: "TTKD Hà Nội" }
+            department_code: { type: string, example: "TTKD-HN" }
+        year:
+          type: integer
+          example: 2026
+        metric_code:
+          type: string
+          example: "investment_revenue"
+          description: Ref → kpi_metric.code (immutable sau khi tạo)
+        year_target:
+          type: number
+          example: 120000000000
+          description: Chỉ tiêu cả năm (VND hoặc đơn vị của metric). Cố định sau khi activate.
+        monthly_targets:
+          type: array
+          description: 12 phần tử, mỗi phần tử là 1 tháng
+          items: { $ref: "#/components/schemas/MonthlyTarget" }
+        status:
+          type: string
+          enum: [draft, active, superseded]
+          example: "active"
+          description: |
+            - draft: mới tạo, chưa có hiệu lực
+            - active: đang áp dụng (chỉ 1 bản active / ttkd+year+metric)
+            - superseded: đã bị thay thế bởi version mới hơn
+        version:
+          type: integer
+          example: 1
+          description: Tăng tự động mỗi khi tạo bản mới cho cùng ttkd+year+metric_code
+        created_by:
+          type: object
+          description: "Populated từ account (username). GĐ TTKD đã lập kế hoạch."
+          properties:
+            _id:      { type: string }
+            username: { type: string, example: "gdttkd.hn" }
+        activated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Thời điểm activate. null nếu còn draft.
+        note:
+          type: string
+          example: "Kế hoạch Q1 điều chỉnh tăng theo chỉ đạo BOD"
+        isDeleted:
+          type: boolean
+          example: false
+        createdAt:  { type: string, format: date-time }
+        updatedAt:  { type: string, format: date-time }
+
+    # --- Request DTOs ---
+
+    KpiYearPlanCreateBody:
+      type: object
+      required: [ttkd_id, year, metric_code, year_target]
+      description: |
+        Tạo kế hoạch năm ở trạng thái draft.
+        Server tự phân rã year_target thành 12 tháng bằng thuật toán chia đều (equal).
+        GĐ TTKD có thể chỉnh từng tháng sau khi tạo qua endpoint /monthly.
+      properties:
+        ttkd_id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9b0"
+          description: "department._id của TTKD. Account phải thuộc TTKD này (admin bypass)."
+        year:
+          type: integer
+          example: 2026
+        metric_code:
+          type: string
+          example: "investment_revenue"
+          description: Phải tồn tại và đang is_active=true trong kpi_metric
+        year_target:
+          type: number
+          minimum: 0
+          example: 120000000000
+          description: Chỉ tiêu cả năm. Server chia đều /12 để tạo monthly_targets ban đầu.
+        note:
+          type: string
+          example: ""
+
+    KpiYearPlanUpdateBody:
+      type: object
+      description: |
+        Chỉ sửa được khi status=draft. Tất cả field đều optional.
+        Nếu truyền year_target mới → toàn bộ monthly_targets reset về equal mới
+        (mọi điều chỉnh tháng trước đó bị xóa).
+      properties:
+        year_target:
+          type: number
+          minimum: 0
+          example: 130000000000
+          description: Đổi chỉ tiêu năm → reset 12 tháng về equal mới
+        note:
+          type: string
+
+    MonthlyAdjustment:
+      type: object
+      required: [month, adjusted_target]
+      description: Điều chỉnh chỉ tiêu 1 tháng cụ thể
+      properties:
+        month:
+          type: integer
+          minimum: 1
+          maximum: 12
+          example: 7
+        adjusted_target:
+          type: number
+          minimum: 0
+          example: 15000000000
+          description: |
+            Giá trị mới cho tháng này. base_target giữ nguyên.
+            is_adjusted tự cập nhật = (adjusted_target !== base_target).
+
+    KpiYearPlanAdjustMonthlyBody:
+      type: object
+      required: [adjustments]
+      description: |
+        Điều chỉnh chỉ tiêu từng tháng. Cho phép điều chỉnh nhiều tháng 1 lần.
+        Áp dụng được cho cả draft lẫn active. Không điều chỉnh được tháng đã qua.
+      properties:
+        adjustments:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/MonthlyAdjustment" }
+          example:
+            - { month: 7, adjusted_target: 15000000000 }
+            - { month: 8, adjusted_target: 12000000000 }
+
+paths:
+  /kpi/year-plans:
+    get:
+      tags: [KPI Year Plan]
+      summary: Danh sách kế hoạch năm
+      description: |
+        Yêu cầu quyền `kpi.dashboard.view`.
+        **Non-admin:** tự động filter về TTKD mình. Truyền `ttkd_id` để filter cụ thể (phải thuộc).
+        **Admin:** thấy tất cả, `ttkd_id` chỉ là filter tùy chọn.
+        Sort theo year giảm dần, version giảm dần.
+      parameters:
+        - in: query
+          name: ttkd_id
+          schema: { type: string }
+          description: "Admin: filter theo TTKD. Non-admin: phải là TTKD của mình."
+        - in: query
+          name: year
+          schema: { type: integer }
+          example: 2026
+        - in: query
+          name: metric_code
+          schema: { type: string }
+          example: "investment_revenue"
+        - in: query
+          name: status
+          schema: { type: string, enum: [draft, active, superseded] }
+      responses:
+        "200":
+          description: Danh sách kế hoạch năm
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/KpiYearPlan" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+    post:
+      tags: [KPI Year Plan]
+      summary: Tạo kế hoạch năm (draft)
+      description: |
+        Yêu cầu quyền `kpi.year_plan.allocate`.
+        Server phân rã `year_target / 12` thành 12 `monthly_targets` (thuật toán equal).
+        `version` tự tăng theo (ttkd_id, year, metric_code). Phải activate riêng để có hiệu lực.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiYearPlanCreateBody" }
+      responses:
+        "201":
+          description: Đã tạo kế hoạch năm (draft)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã tạo kế hoạch năm (draft)" }
+                  data: { $ref: "#/components/schemas/KpiYearPlan" }
+        "400": { description: "Thiếu trường bắt buộc / year_target < 0 / metric_code không active" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền allocate hoặc account không thuộc TTKD này" }
+        "409": { description: "Trùng version (race condition) — thử lại" }
+
+  /kpi/year-plans/{id}:
+    get:
+      tags: [KPI Year Plan]
+      summary: Chi tiết kế hoạch năm
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Chi tiết kế hoạch năm
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data: { $ref: "#/components/schemas/KpiYearPlan" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    patch:
+      tags: [KPI Year Plan]
+      summary: Sửa kế hoạch năm (chỉ khi draft)
+      description: |
+        Yêu cầu quyền `kpi.year_plan.allocate`. Chỉ sửa được khi status=**draft**.
+        Nếu truyền `year_target` mới → toàn bộ `monthly_targets` reset về equal mới,
+        mọi điều chỉnh tháng trước đó bị xóa.
+        Để chỉnh từng tháng sau khi active, dùng `PATCH /{id}/monthly`.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiYearPlanUpdateBody" }
+      responses:
+        "200":
+          description: Đã cập nhật kế hoạch năm
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã cập nhật kế hoạch năm" }
+                  data: { $ref: "#/components/schemas/KpiYearPlan" }
+        "400": { description: "year_target < 0 / id sai" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Kế hoạch không ở trạng thái draft" }
+
+    delete:
+      tags: [KPI Year Plan]
+      summary: Xóa mềm kế hoạch năm (chỉ khi draft)
+      description: "Yêu cầu quyền `kpi.year_plan.allocate`. Không xóa được active/superseded."
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Đã xóa kế hoạch năm }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Kế hoạch không ở trạng thái draft" }
+
+  /kpi/year-plans/{id}/activate:
+    post:
+      tags: [KPI Year Plan]
+      summary: Activate kế hoạch năm
+      description: |
+        Yêu cầu quyền `kpi.year_plan.allocate`.
+        **Atomic (transaction):** kế hoạch `active` cũ của cùng ttkd+year+metric_code → `superseded`,
+        kế hoạch này → `active`. Ghi `activated_at = now`.
+        Chỉ thực hiện được khi status=draft.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Đã activate kế hoạch năm
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã activate kế hoạch năm" }
+                  data: { $ref: "#/components/schemas/KpiYearPlan" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Kế hoạch đã active hoặc đã superseded" }
+
+  /kpi/year-plans/{id}/monthly:
+    patch:
+      tags: [KPI Year Plan]
+      summary: Điều chỉnh chỉ tiêu từng tháng
+      description: |
+        Yêu cầu quyền `kpi.year_plan.allocate`.
+        Cho phép điều chỉnh nhiều tháng trong 1 request.
+        Áp dụng được cho cả **draft** lẫn **active** (không áp dụng cho superseded).
+        **Chặn tháng đã qua:** nếu kế hoạch cùng năm hiện tại, không điều chỉnh được
+        tháng < tháng hiện tại. Kế hoạch năm tương lai: tất cả tháng đều chỉnh được.
+        `base_target` không đổi. `is_adjusted` tự cập nhật.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiYearPlanAdjustMonthlyBody" }
+      responses:
+        "200":
+          description: Đã điều chỉnh chỉ tiêu tháng
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã điều chỉnh chỉ tiêu tháng" }
+                  data: { $ref: "#/components/schemas/KpiYearPlan" }
+        "400": { description: "adjustments rỗng / month ngoài 1-12 / adjusted_target < 0" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Tháng đã qua hoặc kế hoạch đã superseded" }

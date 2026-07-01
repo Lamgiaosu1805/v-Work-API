@@ -29,6 +29,8 @@ const rbacRouter = require("./rbac");
 const kpiMetricRouter = require("./kpiMetric");
 const kpiAssignmentRouter = require("./kpiAssignment");
 const kpiYearPlanRouter = require("./kpiYearPlan");
+const kpiTierConfigRouter = require("./kpiTierConfig");
+const kpiTierAssignmentRouter = require("./kpiTierAssignment");
 
 const route = (app) => {
   app.use(`/posts`, postRouter);
@@ -62,6 +64,8 @@ const route = (app) => {
   app.use(`/kpi/metrics`, kpiMetricRouter);
   app.use(`/kpi/assignments`, kpiAssignmentRouter);
   app.use(`/kpi/year-plans`, kpiYearPlanRouter);
+  app.use(`/kpi/tier-configs`, kpiTierConfigRouter);
+  app.use(`/kpi/tier-assignments`, kpiTierAssignmentRouter);
 };
 
 module.exports = route;

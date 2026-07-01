@@ -1,0 +1,249 @@
+components:
+  schemas:
+    TierItem:
+      type: object
+      required: [level, weight]
+      description: Định nghĩa 1 bậc trong cấu hình tier
+      properties:
+        level:
+          type: integer
+          minimum: 1
+          example: 3
+          description: |
+            Số thứ tự bậc (số nguyên dương, không có giới hạn tối đa cứng).
+            Thực tế thường 1–5. Không được trùng trong cùng 1 config.
+        weight:
+          type: number
+          minimum: 0
+          maximum: 1
+          example: 0.15
+          description: |
+            Trọng số so với KPI tổng tháng của TTKD (0–1).
+            Công thức: target Sale bậc này = TTKD monthly target × weight.
+            Ví dụ weight=0.15, TTKD target tháng 10 tỷ → Sale target = 1.5 tỷ.
+            Các TTKD khác nhau quy mô → cùng weight → target tuyệt đối khác nhau.
+
+    # --- Response schema ---
+
+    KpiTierConfig:
+      type: object
+      description: Cấu hình bậc KPI cho 1 TTKD / 1 metric / 1 năm
+      properties:
+        _id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9c2"
+        ttkd_id:
+          type: object
+          description: "Populated từ department (department_name, department_code)"
+          properties:
+            _id:             { type: string }
+            department_name: { type: string, example: "TTKD Hà Nội" }
+            department_code: { type: string, example: "TTKD-HN" }
+        metric_code:
+          type: string
+          example: "investment_revenue"
+          description: Ref → kpi_metric.code
+        year:
+          type: integer
+          example: 2026
+        tiers:
+          type: array
+          description: |
+            Danh sách các bậc. Số bậc tùy ý (không bắt buộc đủ 5).
+            Không có thứ tự bắt buộc — sort theo level tăng dần ở frontend.
+          items: { $ref: "#/components/schemas/TierItem" }
+          example:
+            - { level: 1, weight: 0.05 }
+            - { level: 2, weight: 0.10 }
+            - { level: 3, weight: 0.15 }
+            - { level: 4, weight: 0.20 }
+            - { level: 5, weight: 0.25 }
+        configured_by:
+          type: object
+          description: "Populated từ account (username). Người tạo/sửa gần nhất."
+          properties:
+            _id:      { type: string }
+            username: { type: string, example: "gdttkd.hn" }
+        isDeleted:  { type: boolean, example: false }
+        createdAt:  { type: string, format: date-time }
+        updatedAt:  { type: string, format: date-time }
+
+    # --- Request DTOs ---
+
+    KpiTierConfigCreateBody:
+      type: object
+      required: [ttkd_id, metric_code, year, tiers]
+      description: |
+        Tạo cấu hình bậc mới. Unique theo (ttkd_id, metric_code, year) —
+        trả 409 nếu đã tồn tại (dùng PATCH /:id để cập nhật).
+        Account phải thuộc TTKD được truyền vào (admin bypass).
+      properties:
+        ttkd_id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9b0"
+          description: "department._id của TTKD. Account phải thuộc TTKD này."
+        metric_code:
+          type: string
+          example: "investment_revenue"
+          description: Phải tồn tại và đang is_active=true trong kpi_metric
+        year:
+          type: integer
+          example: 2026
+        tiers:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/TierItem" }
+          description: |
+            Ít nhất 1 bậc. Level không được trùng. Weight trong [0, 1].
+
+    KpiTierConfigUpdateBody:
+      type: object
+      required: [tiers]
+      description: |
+        Thay toàn bộ danh sách bậc. Không thể đổi ttkd_id / metric_code / year.
+        `configured_by` tự cập nhật = account đang gọi API.
+      properties:
+        tiers:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/TierItem" }
+
+paths:
+  /kpi/tier-configs:
+    get:
+      tags: [KPI Tier Config]
+      summary: Danh sách cấu hình bậc
+      description: |
+        Yêu cầu quyền `kpi.dashboard.view`.
+        **Non-admin:** tự filter về TTKD mình. Truyền `ttkd_id` để lọc cụ thể (phải thuộc).
+        **Admin:** thấy tất cả. `ttkd_id` là filter tùy chọn.
+        Sort theo year giảm dần, metric_code tăng dần.
+      parameters:
+        - in: query
+          name: ttkd_id
+          schema: { type: string }
+          description: "Admin: filter theo TTKD. Non-admin: phải là TTKD của mình."
+        - in: query
+          name: year
+          schema: { type: integer }
+          example: 2026
+        - in: query
+          name: metric_code
+          schema: { type: string }
+          example: "investment_revenue"
+      responses:
+        "200":
+          description: Danh sách cấu hình bậc
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/KpiTierConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+    post:
+      tags: [KPI Tier Config]
+      summary: Tạo cấu hình bậc
+      description: |
+        Yêu cầu quyền `kpi.tier.config`.
+        Unique theo (ttkd_id, metric_code, year) — trả **409** nếu đã tồn tại.
+        Để sửa config hiện có: lấy `_id` qua GET list rồi dùng `PATCH /:id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiTierConfigCreateBody" }
+      responses:
+        "201":
+          description: Đã tạo cấu hình bậc
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã tạo cấu hình bậc" }
+                  data: { $ref: "#/components/schemas/KpiTierConfig" }
+        "400": { description: "Thiếu trường / level trùng / weight ngoài [0,1] / metric_code không active" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền tier.config hoặc account không thuộc TTKD này" }
+        "409": { description: "Cấu hình bậc cho TTKD + metric + năm này đã tồn tại" }
+
+  /kpi/tier-configs/{id}:
+    get:
+      tags: [KPI Tier Config]
+      summary: Chi tiết cấu hình bậc
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Chi tiết cấu hình bậc
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data: { $ref: "#/components/schemas/KpiTierConfig" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    patch:
+      tags: [KPI Tier Config]
+      summary: Cập nhật cấu hình bậc
+      description: |
+        Yêu cầu quyền `kpi.tier.config`.
+        Thay toàn bộ `tiers` — không patch từng bậc lẻ.
+        Ownership check: lấy `ttkd_id` từ document trong DB, validate account thuộc TTKD đó.
+        `configured_by` tự cập nhật = account đang gọi.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiTierConfigUpdateBody" }
+      responses:
+        "200":
+          description: Đã cập nhật cấu hình bậc
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã cập nhật cấu hình bậc" }
+                  data: { $ref: "#/components/schemas/KpiTierConfig" }
+        "400": { description: "tiers rỗng / level trùng / weight ngoài [0,1] / id sai" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền tier.config hoặc account không thuộc TTKD này" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    delete:
+      tags: [KPI Tier Config]
+      summary: Xóa mềm cấu hình bậc
+      description: |
+        Yêu cầu quyền `kpi.tier.config`.
+        Ownership check từ document trong DB (không trust body).
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Đã xóa cấu hình bậc }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền tier.config hoặc account không thuộc TTKD này" }
+        "404": { $ref: "#/components/responses/NotFound" }

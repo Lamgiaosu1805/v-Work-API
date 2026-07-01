@@ -1,0 +1,195 @@
+components:
+  schemas:
+    KpiAssignmentItem:
+      type: object
+      required: [metric_code, target]
+      properties:
+        metric_code: { type: string, example: "investment_revenue" }
+        target:      { type: number, minimum: 0, example: 500000000 }
+
+    KpiAssignment:
+      type: object
+      properties:
+        _id:          { type: string }
+        sale_id:      { type: object, description: "user_info (full_name, code)" }
+        ttkd_id:      { type: object, description: "department (department_name, department_code)" }
+        assigned_by:  { type: object, description: "account (username)" }
+        year:         { type: integer, example: 2026 }
+        month:        { type: integer, example: 6 }
+        version:      { type: integer, example: 1 }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/KpiAssignmentItem" }
+        status:       { type: string, enum: [draft, active, superseded] }
+        note:         { type: string }
+        activated_at: { type: string, format: date-time, nullable: true }
+        createdAt:    { type: string, format: date-time }
+        updatedAt:    { type: string, format: date-time }
+
+    KpiAssignmentCreateBody:
+      type: object
+      required: [sale_id, ttkd_id, year, month, items]
+      properties:
+        sale_id:  { type: string, description: "user_info._id của Sale được giao" }
+        ttkd_id:  { type: string, description: "department._id của TTKD" }
+        year:     { type: integer, example: 2026 }
+        month:    { type: integer, example: 6, minimum: 1, maximum: 12 }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/KpiAssignmentItem" }
+        note:     { type: string }
+
+paths:
+  /kpi/assignments:
+    get:
+      tags: [KPI Assignment]
+      summary: Danh sách combo KPI
+      parameters:
+        - in: query
+          name: sale_id
+          schema: { type: string }
+          description: Lọc theo Sale (user_info._id)
+        - in: query
+          name: ttkd_id
+          schema: { type: string }
+          description: Lọc theo TTKD
+        - in: query
+          name: year
+          schema: { type: integer }
+        - in: query
+          name: month
+          schema: { type: integer }
+        - in: query
+          name: status
+          schema: { type: string, enum: [draft, active, superseded] }
+      responses:
+        "200":
+          description: Danh sách assignment, sort year/month/version mới nhất trước
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/KpiAssignment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+    post:
+      tags: [KPI Assignment]
+      summary: Tạo combo KPI tháng (draft)
+      description: |
+        Yêu cầu quyền `kpi.assignment.manage`. Tạo ở trạng thái **draft**.
+        `version` tự tăng theo (sale_id, year, month). Phải activate riêng để có hiệu lực.
+        `metric_code` trong items phải tồn tại và đang `is_active=true`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiAssignmentCreateBody" }
+      responses:
+        "201":
+          description: Đã tạo assignment (draft)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: "#/components/schemas/KpiAssignment" }
+        "400": { description: "Thiếu trường / metric_code không hợp lệ / target < 0" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /kpi/assignments/{id}:
+    get:
+      tags: [KPI Assignment]
+      summary: Chi tiết combo KPI
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Chi tiết assignment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: "#/components/schemas/KpiAssignment" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    patch:
+      tags: [KPI Assignment]
+      summary: Sửa combo KPI (chỉ khi draft)
+      description: "Yêu cầu quyền `kpi.assignment.manage`. Chỉ sửa được `items` và `note` khi status=draft."
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items: { $ref: "#/components/schemas/KpiAssignmentItem" }
+                note: { type: string }
+      responses:
+        "200": { description: Đã cập nhật }
+        "400": { description: "metric_code không hợp lệ / id sai" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Assignment không ở trạng thái draft" }
+
+    delete:
+      tags: [KPI Assignment]
+      summary: Xóa mềm combo KPI (chỉ khi draft)
+      description: "Yêu cầu quyền `kpi.assignment.manage`. Không xóa được active/superseded."
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Đã xóa }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Assignment không ở trạng thái draft" }
+
+  /kpi/assignments/{id}/activate:
+    post:
+      tags: [KPI Assignment]
+      summary: Activate combo KPI
+      description: |
+        Yêu cầu quyền `kpi.assignment.manage`.
+        Atomic (transaction): combo `active` cũ của cùng sale/month → `superseded`,
+        combo này → `active`. Chỉ thực hiện được khi status=draft.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Đã activate }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Assignment đã active hoặc đã superseded" }

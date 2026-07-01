@@ -22,14 +22,12 @@ const KPI_ASSIGNMENT_STATUS = Object.freeze({
   SUPERSEDED: "superseded"
 });
 
-// Trạng thái kế hoạch năm — giống assignment: draft → active → superseded
 const KPI_YEAR_PLAN_STATUS = Object.freeze({
   DRAFT: "draft",
   ACTIVE: "active",
   SUPERSEDED: "superseded"
 });
 
-// Đơn vị kỳ thời gian dùng trong kpi_period_target
 const KPI_PERIOD_TYPE = Object.freeze({
   DAY: "day",
   WEEK: "week",
@@ -38,40 +36,30 @@ const KPI_PERIOD_TYPE = Object.freeze({
   YEAR: "year"
 });
 
-// period_key format theo period_type:
-//   day     → "2026-06-29"
-//   week    → "2026-W26"
-//   month   → "2026-06"
-//   quarter → "2026-Q2"
-//   year    → "2026"
-
-// Phạm vi của 1 bản ghi period_target: TTKD-level hoặc Sale-level
 const KPI_SCOPE_TYPE = Object.freeze({
   TTKD: "ttkd",
   SALE: "sale"
 });
 
-// Trạng thái báo cáo tác nghiệp ngày (F04)
 const KPI_DAILY_REPORT_STATUS = Object.freeze({
   DRAFT: "draft",
   SUBMITTED: "submitted"
 });
 
-// Lý do clawback
 const KPI_ADJUSTMENT_REASON = Object.freeze({
   EARLY_TERMINATED: "early_terminated",
   CANCELLED: "cancelled"
 });
 
-const KPI_GROUP_VALUES            = Object.values(KPI_GROUP);
-const KPI_SOURCE_VALUES           = Object.values(KPI_SOURCE);
-const KPI_AUTO_SOURCE_VALUES      = Object.values(KPI_AUTO_SOURCE);
-const KPI_ASSIGNMENT_STATUS_VALUES    = Object.values(KPI_ASSIGNMENT_STATUS);
-const KPI_YEAR_PLAN_STATUS_VALUES     = Object.values(KPI_YEAR_PLAN_STATUS);
-const KPI_PERIOD_TYPE_VALUES          = Object.values(KPI_PERIOD_TYPE);
-const KPI_SCOPE_TYPE_VALUES           = Object.values(KPI_SCOPE_TYPE);
-const KPI_DAILY_REPORT_STATUS_VALUES  = Object.values(KPI_DAILY_REPORT_STATUS);
-const KPI_ADJUSTMENT_REASON_VALUES    = Object.values(KPI_ADJUSTMENT_REASON);
+const KPI_GROUP_VALUES = Object.values(KPI_GROUP);
+const KPI_SOURCE_VALUES = Object.values(KPI_SOURCE);
+const KPI_AUTO_SOURCE_VALUES = Object.values(KPI_AUTO_SOURCE);
+const KPI_ASSIGNMENT_STATUS_VALUES = Object.values(KPI_ASSIGNMENT_STATUS);
+const KPI_YEAR_PLAN_STATUS_VALUES = Object.values(KPI_YEAR_PLAN_STATUS);
+const KPI_PERIOD_TYPE_VALUES = Object.values(KPI_PERIOD_TYPE);
+const KPI_SCOPE_TYPE_VALUES = Object.values(KPI_SCOPE_TYPE);
+const KPI_DAILY_REPORT_STATUS_VALUES = Object.values(KPI_DAILY_REPORT_STATUS);
+const KPI_ADJUSTMENT_REASON_VALUES = Object.values(KPI_ADJUSTMENT_REASON);
 
 module.exports = {
   KPI_GROUP,

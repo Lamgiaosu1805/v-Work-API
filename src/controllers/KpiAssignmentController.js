@@ -5,44 +5,40 @@ const { KPI_ASSIGNMENT_STATUS } = require("../constants");
 
 const { DRAFT, ACTIVE, SUPERSEDED } = KPI_ASSIGNMENT_STATUS;
 
-// Validate items: metric_code phải tồn tại + active, không trùng trong 1 combo
 async function validateItems(items) {
-  if (!Array.isArray(items) || items.length === 0)
-    return "items không được rỗng";
+  if (!Array.isArray(items) || items.length === 0) return "items không được rỗng";
 
   const codes = items.map((i) => i.metric_code);
   const uniqueCodes = new Set(codes);
-  if (uniqueCodes.size !== codes.length)
-    return "items có metric_code bị trùng";
+  if (uniqueCodes.size !== codes.length) return "items có metric_code bị trùng";
 
   const activeMetrics = await KpiMetricModel.find({
     code: { $in: codes },
     is_active: true,
     isDeleted: false
-  }).select("code").lean();
+  })
+    .select("code")
+    .lean();
 
   const foundCodes = new Set(activeMetrics.map((m) => m.code));
   const missing = codes.filter((c) => !foundCodes.has(c));
-  if (missing.length)
-    return `metric_code không tồn tại hoặc không active: ${missing.join(", ")}`;
+  if (missing.length) return `metric_code không tồn tại hoặc không active: ${missing.join(", ")}`;
 
   const invalidTarget = items.find((i) => typeof i.target !== "number" || i.target < 0);
-  if (invalidTarget)
-    return `target của '${invalidTarget.metric_code}' phải là số >= 0`;
+  if (invalidTarget) return `target của '${invalidTarget.metric_code}' phải là số >= 0`;
 
   return null;
 }
 
 const KpiAssignmentController = {
-  // GET /kpi/assignments
   list: async (req, res) => {
     try {
       const filter = { isDeleted: false };
-      if (req.query.sale_id)   filter.sale_id  = req.query.sale_id;
-      if (req.query.ttkd_id)   filter.ttkd_id  = req.query.ttkd_id;
-      if (req.query.year)      filter.year      = Number(req.query.year);
-      if (req.query.month)     filter.month     = Number(req.query.month);
-      if (req.query.status)    filter.status    = req.query.status;
+      if (req.query.sale_id) filter.sale_id = req.query.sale_id;
+      if (req.query.ttkd_id) filter.ttkd_id = req.query.ttkd_id;
+      if (req.query.year) filter.year = Number(req.query.year);
+      if (req.query.month) filter.month = Number(req.query.month);
+      if (req.query.status) filter.status = req.query.status;
 
       const assignments = await KpiAssignmentModel.find(filter)
         .sort({ year: -1, month: -1, version: -1 })
@@ -57,7 +53,6 @@ const KpiAssignmentController = {
     }
   },
 
-  // GET /kpi/assignments/:id
   getById: async (req, res) => {
     try {
       const assignment = await KpiAssignmentModel.findOne({
@@ -76,22 +71,21 @@ const KpiAssignmentController = {
     }
   },
 
-  // POST /kpi/assignments — tạo draft
   create: async (req, res) => {
     try {
       const { sale_id, ttkd_id, year, month, items, note } = req.body;
 
       if (!sale_id || !ttkd_id || !year || !month || !items)
-        return res.status(400).json({ message: "Thiếu trường bắt buộc: sale_id, ttkd_id, year, month, items" });
+        return res
+          .status(400)
+          .json({ message: "Thiếu trường bắt buộc: sale_id, ttkd_id, year, month, items" });
 
       const itemError = await validateItems(items);
       if (itemError) return res.status(400).json({ message: itemError });
 
-      // version = max version hiện tại của (sale_id, year, month) + 1
-      const latest = await KpiAssignmentModel.findOne(
-        { sale_id, year, month },
-        { version: 1 }
-      ).sort({ version: -1 }).lean();
+      const latest = await KpiAssignmentModel.findOne({ sale_id, year, month }, { version: 1 })
+        .sort({ version: -1 })
+        .lean();
       const version = latest ? latest.version + 1 : 1;
 
       const assignment = await KpiAssignmentModel.create({
@@ -114,7 +108,6 @@ const KpiAssignmentController = {
     }
   },
 
-  // PATCH /kpi/assignments/:id — chỉ sửa được khi status=draft
   update: async (req, res) => {
     try {
       const assignment = await KpiAssignmentModel.findOne({
@@ -143,8 +136,6 @@ const KpiAssignmentController = {
     }
   },
 
-  // POST /kpi/assignments/:id/activate
-  // Trong transaction: set old active → superseded, set này → active
   activate: async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -163,12 +154,18 @@ const KpiAssignmentController = {
       }
       if (assignment.status === SUPERSEDED) {
         await session.abortTransaction();
-        return res.status(409).json({ message: "Assignment đã bị supersede, không thể activate lại" });
+        return res
+          .status(409)
+          .json({ message: "Assignment đã bị supersede, không thể activate lại" });
       }
 
-      // Supersede combo đang active của cùng sale/month (nếu có)
       await KpiAssignmentModel.updateOne(
-        { sale_id: assignment.sale_id, year: assignment.year, month: assignment.month, status: ACTIVE },
+        {
+          sale_id: assignment.sale_id,
+          year: assignment.year,
+          month: assignment.month,
+          status: ACTIVE
+        },
         { $set: { status: SUPERSEDED } },
         { session }
       );
@@ -187,7 +184,6 @@ const KpiAssignmentController = {
     }
   },
 
-  // DELETE /kpi/assignments/:id — soft delete, chỉ khi draft
   remove: async (req, res) => {
     try {
       const assignment = await KpiAssignmentModel.findOne({

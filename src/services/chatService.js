@@ -656,7 +656,13 @@ async function kickMember({ conversationId, adminUserInfoId, targetUserInfoId })
 
   await ConversationModel.updateOne(
     { _id: conversationId },
-    { $pull: { members: targetUserInfoId, admins: targetUserInfoId } }
+    {
+      $pull: {
+        members: targetUserInfoId,
+        admins: targetUserInfoId,
+        nicknames: { userId: targetUserInfoId }
+      }
+    }
   );
 
   return loadConversationById(conversationId, adminUserInfoId);
@@ -703,7 +709,13 @@ async function leaveGroup({ conversationId, userInfoId }) {
 
   await ConversationModel.updateOne(
     { _id: conversationId },
-    { $pull: { members: userInfoId, admins: userInfoId } }
+    {
+      $pull: {
+        members: userInfoId,
+        admins: userInfoId,
+        nicknames: { userId: userInfoId }
+      }
+    }
   );
 
   const updated = await ConversationModel.findOne({ _id: conversationId })
@@ -723,6 +735,68 @@ async function leaveGroup({ conversationId, userInfoId }) {
     updated.members[0] ?? remainingMembers[0]
   );
   return { conversationId: String(conversationId), disbanded: false, conversation: updatedConv };
+}
+
+async function updateMemberNickname({
+  conversationId,
+  actorUserInfoId,
+  targetUserInfoId,
+  nickname
+}) {
+  const conversation = await ConversationModel.findOne({
+    _id: conversationId,
+    type: "group",
+    members: actorUserInfoId,
+    isDeleted: false
+  });
+  if (!conversation) throw new ChatError("Không tìm thấy nhóm", 404);
+
+  const isMember = conversation.members.some((m) => String(m) === String(targetUserInfoId));
+  if (!isMember) throw new ChatError("Thành viên không tồn tại trong nhóm", 404);
+
+  const normalizedNickname = String(nickname || "").trim();
+  const existingIndex = (conversation.nicknames || []).findIndex(
+    (entry) => String(entry.userId) === String(targetUserInfoId)
+  );
+  const nextUpdatedAt = new Date();
+
+  if (normalizedNickname) {
+    if (existingIndex >= 0) {
+      await ConversationModel.updateOne(
+        { _id: conversationId, "nicknames.userId": targetUserInfoId },
+        {
+          $set: {
+            "nicknames.$.nickname": normalizedNickname,
+            "nicknames.$.setBy": actorUserInfoId,
+            "nicknames.$.updatedAt": nextUpdatedAt,
+            updatedAt: nextUpdatedAt
+          }
+        }
+      );
+    } else {
+      await ConversationModel.updateOne(
+        { _id: conversationId },
+        {
+          $push: {
+            nicknames: {
+              userId: targetUserInfoId,
+              nickname: normalizedNickname,
+              setBy: actorUserInfoId,
+              updatedAt: nextUpdatedAt
+            }
+          },
+          $set: { updatedAt: nextUpdatedAt }
+        }
+      );
+    }
+  } else if (existingIndex >= 0) {
+    await ConversationModel.updateOne(
+      { _id: conversationId },
+      { $pull: { nicknames: { userId: targetUserInfoId } }, $set: { updatedAt: nextUpdatedAt } }
+    );
+  }
+
+  return loadConversationById(conversationId, actorUserInfoId);
 }
 
 module.exports = {
@@ -745,5 +819,6 @@ module.exports = {
   ensureConversationAccess,
   createMessageDocument,
   formatConversation,
-  updateGroupConversationAvatar
+  updateGroupConversationAvatar,
+  updateMemberNickname
 };

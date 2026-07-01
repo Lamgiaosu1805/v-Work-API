@@ -32,6 +32,27 @@ const ConversationModel = new mongoose.Schema(
         ref: "user_info",
       },
     ],
+    nicknames: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "user_info",
+        },
+        nickname: {
+          type: String,
+          trim: true,
+          maxlength: 50,
+        },
+        setBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "user_info",
+        },
+        updatedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     lastMessage: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "message",

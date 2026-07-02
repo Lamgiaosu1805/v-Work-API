@@ -8,8 +8,11 @@ class ChatError extends Error {
 
 function handleChatError(res, error) {
   if (error instanceof ChatError) {
+    console.warn(`[ChatError] ${error.statusCode} - ${error.message}`);
     return res.status(error.statusCode).json({ message: error.message });
   }
+
+  console.error("[UnhandledError]", error);
   return res.status(500).json({
     message: "Internal server error",
     error: error.message
@@ -22,12 +25,30 @@ function ack(ackFn, payload) {
 
 function onAuthed(socket, event, handler) {
   socket.on(event, async (payload, cb) => {
+    const userInfoId = socket.data.userInfoId;
+
     try {
-      if (!socket.data.userInfoId) throw new ChatError("Bạn chưa xác thực socket", 401);
+      if (!userInfoId) throw new ChatError("Bạn chưa xác thực socket", 401);
       const data = await handler(payload, socket);
       ack(cb, { ok: true, ...data });
     } catch (error) {
-      ack(cb, { ok: false, message: error.message });
+      if (error instanceof ChatError) {
+        console.warn(
+          `[Socket:${event}] user=${userInfoId ?? "unknown"} - ${error.statusCode} ${error.message}`
+        );
+      } else {
+        console.error(
+          `[Socket:${event}] user=${userInfoId ?? "unknown"} - Unhandled error:`,
+          error
+        );
+      }
+
+      ack(cb, {
+        ok: false,
+        message: error instanceof ChatError ? error.message : "Đã có lỗi xảy ra",
+        ...(process.env.NODE_ENV !== "production" &&
+          !(error instanceof ChatError) && { stack: error.stack })
+      });
     }
   });
 }

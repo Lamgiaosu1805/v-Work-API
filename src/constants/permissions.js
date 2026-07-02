@@ -6,7 +6,9 @@ const PERMISSION = Object.freeze({
   KPI_ASSIGNMENT_MANAGE: "kpi.assignment.manage",
   KPI_TIER_CONFIG: "kpi.tier.config",
   KPI_REPORT_SUBMIT: "kpi.report.submit",
-  KPI_MONTHEND_CLOSE: "kpi.monthend.close"
+  KPI_MONTHEND_CLOSE: "kpi.monthend.close",
+  HRM_REQUEST_VIEW_ALL: "hrm.request.view_all",
+  HRM_REQUEST_REVIEW_ALL: "hrm.request.review_all"
 });
 
 const PERMISSION_VALUES = Object.values(PERMISSION);

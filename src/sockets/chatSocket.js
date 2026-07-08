@@ -21,6 +21,7 @@ async function sendMessageWithRetry({ payload, socket, maxRetries = 3, attempt =
       senderUserInfoId: socket.data.userInfoId,
       content: payload.content,
       type: payload.type,
+      replyToMessageId: payload.replyToMessageId || null,
       session
     });
     await session.commitTransaction();

@@ -31,6 +31,11 @@ const MessageModel = new mongoose.Schema(
       height: { type: Number, default: null },
       originalName: { type: String, default: null }
     },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "message",
+      default: null
+    },
     seenBy: [
       {
         type: mongoose.Schema.Types.ObjectId,

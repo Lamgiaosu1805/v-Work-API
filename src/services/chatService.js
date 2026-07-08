@@ -7,6 +7,15 @@ const UserInfoModel = require("../models/UserInfoModel");
 const AccountModel = require("../models/AccountModel");
 const { ChatError } = require("../helpers/socketHandler");
 
+const REPLY_POPULATE = {
+  path: "replyTo",
+  select: "content type senderId attachment recalled isDeleted deletedFor",
+  populate: {
+    path: "senderId",
+    select: "full_name avatar ma_nv id_account"
+  }
+};
+
 function removeAttachmentFiles(attachment) {
   if (!attachment) return;
 
@@ -199,6 +208,7 @@ async function createMessageDocument({
   content,
   type = "text",
   attachment = null,
+  replyTo = null,
   seenBy = [],
   session
 }) {
@@ -212,6 +222,10 @@ async function createMessageDocument({
 
   if (attachment) {
     payload.attachment = attachment;
+  }
+
+  if (replyTo) {
+    payload.replyTo = replyTo;
   }
 
   const createdMessages = session
@@ -409,6 +423,7 @@ async function getConversationMessages({ conversationId, userInfoId, page = 1, l
   const total = await MessageModel.countDocuments(filter);
   const messages = await MessageModel.find(filter)
     .populate("senderId", "full_name avatar ma_nv id_account")
+    .populate(REPLY_POPULATE)
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
@@ -433,6 +448,7 @@ async function sendMessage({
   content,
   type = "text",
   attachment = null,
+  replyToMessageId = null,
   session
 }) {
   if (!session) {
@@ -454,12 +470,29 @@ async function sendMessage({
     throw new ChatError("Thiếu file ảnh", 400);
   }
 
+  let replyTo = null;
+  if (replyToMessageId) {
+    const originalMessage = await MessageModel.findOne({
+      _id: replyToMessageId,
+      conversationId,
+      isDeleted: false
+    })
+      .select("_id")
+      .session(session);
+
+    if (!originalMessage) {
+      throw new ChatError("Tin nhắn được trả lời không tồn tại", 404);
+    }
+    replyTo = originalMessage._id;
+  }
+
   const message = await createMessageDocument({
     conversationId,
     senderUserInfoId,
     content: normalizedContent,
     type,
     attachment,
+    replyTo,
     seenBy: [senderUserInfoId],
     session
   });
@@ -476,10 +509,9 @@ async function sendMessage({
     { session }
   );
 
-  const query = MessageModel.findById(message._id).populate(
-    "senderId",
-    "full_name avatar ma_nv id_account"
-  );
+  const query = MessageModel.findById(message._id)
+    .populate("senderId", "full_name avatar ma_nv id_account")
+    .populate(REPLY_POPULATE);
   if (session) {
     query.session(session);
   }
@@ -797,6 +829,22 @@ async function updateMemberNickname({
   return loadConversationById(conversationId, actorUserInfoId);
 }
 
+async function getMessageById({ conversationId, messageId, userInfoId }) {
+  await ensureConversationAccess(conversationId, userInfoId);
+
+  const message = await MessageModel.findOne({
+    _id: messageId,
+    conversationId,
+    isDeleted: false,
+    deletedFor: { $ne: userInfoId }
+  })
+    .populate("senderId", "full_name avatar")
+    .populate(REPLY_POPULATE)
+    .lean();
+
+  return message;
+}
+
 module.exports = {
   getCurrentUserInfo,
   createPrivateConversation,
@@ -810,6 +858,7 @@ module.exports = {
   recallMessage,
   deleteMessageForSelf,
   updateGroupConversationName,
+  getMessageById,
   addMembers,
   kickMember,
   promoteMember,

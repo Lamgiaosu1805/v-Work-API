@@ -26,7 +26,8 @@ const {
   addMembers,
   ensureConversationAccess,
   updateGroupConversationAvatar,
-  updateMemberNickname
+  updateMemberNickname,
+  getMessageById
 } = require("../services/chatService");
 
 const CONTENT_TYPE_MAP = {
@@ -333,12 +334,14 @@ const ChatController = {
 
       session.startTransaction();
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
+
       const message = await sendMessage({
         conversationId: req.params.conversationId,
         senderUserInfoId: currentUserInfo._id,
         content: req.body.content,
         type: attachment ? "image" : req.body.type,
         attachment,
+        replyToMessageId: req.body.replyToMessageId || null,
         session
       });
       await session.commitTransaction();
@@ -712,6 +715,28 @@ const ChatController = {
       return res.status(200).json({
         message: "Đổi biệt danh thành công",
         data: signAvatarsDeep(conversation)
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  getMessageById: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const message = await getMessageById({
+        conversationId: req.params.conversationId,
+        messageId: req.params.messageId,
+        userInfoId: currentUserInfo._id
+      });
+
+      if (!message) {
+        return res.status(404).json({ message: "Tin nhắn không tồn tại." });
+      }
+
+      return res.status(200).json({
+        message: "Lấy tin nhắn thành công",
+        data: signAvatarsDeep(message)
       });
     } catch (error) {
       return handleChatError(res, error);

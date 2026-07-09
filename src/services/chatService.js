@@ -850,6 +850,51 @@ async function getMessageById({ conversationId, messageId, userInfoId }) {
   return message;
 }
 
+async function getConversationImages({ conversationId, userInfoId, page = 1, limit = 50 }) {
+  await ensureConversationAccess(conversationId, userInfoId);
+
+  const filter = {
+    conversationId,
+    type: "image",
+    isDeleted: false,
+    "recalled.at": null,
+    deletedFor: {
+      $ne: userInfoId
+    }
+  };
+
+  const total = await MessageModel.countDocuments(filter);
+
+  const images = await MessageModel.find(filter)
+    .populate("senderId", "full_name avatar ma_nv id_account")
+    .select(
+      `
+      _id
+      senderId
+      attachment
+      createdAt
+      content
+      replyTo
+    `
+    )
+    .sort({
+      createdAt: -1
+    })
+    .skip((page - 1) * limit)
+    .limit(limit)
+    .lean();
+
+  return {
+    data: images,
+    pagination: {
+      total,
+      page,
+      limit,
+      total_pages: Math.ceil(total / limit)
+    }
+  };
+}
+
 module.exports = {
   getCurrentUserInfo,
   createPrivateConversation,
@@ -872,5 +917,6 @@ module.exports = {
   createMessageDocument,
   formatConversation,
   updateGroupConversationAvatar,
-  updateMemberNickname
+  updateMemberNickname,
+  getConversationImages
 };

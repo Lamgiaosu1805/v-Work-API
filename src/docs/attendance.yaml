@@ -164,7 +164,7 @@ paths:
   /attendance/import-excel:
     post:
       tags: [Attendance]
-      summary: Import chấm công từ Excel (admin)
+      summary: Import chấm công từ Excel (yêu cầu permission hrm.attendance.import — admin hoặc role hr)
       requestBody:
         required: true
         content:
@@ -182,7 +182,10 @@ paths:
   /attendance/admin/worksheet/{worksheetId}:
     patch:
       tags: [Attendance]
-      summary: Sửa worksheet (admin)
+      summary: Sửa worksheet (yêu cầu permission hrm.attendance.edit — admin hoặc role hr)
+      description: >-
+        Ghi lại người sửa/thời điểm sửa vào worksheet (edited_by/edited_at) — không có field
+        lý do, chỉ cần biết ai/khi nào sửa.
       parameters:
         - { in: path, name: worksheetId, required: true, schema: { type: string } }
       requestBody:

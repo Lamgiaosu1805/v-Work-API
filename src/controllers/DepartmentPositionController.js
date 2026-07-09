@@ -2,13 +2,14 @@ const DepartmentModel = require("../models/DepartmentModel");
 const { LEAF_TYPES } = require("../models/DepartmentModel");
 const PositionModel = require("../models/PositionModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
+const UserInfoModel = require("../models/UserInfoModel");
 const { ensureFolderForDept } = require("../jobs/ensureDeptFolders");
 
 const DepartmentPositionController = {
     // POST /department/createDepartment
     createDepartment: async (req, res) => {
         try {
-            const { department_name, department_code, description, type, address, parent_id } = req.body;
+            const { department_name, department_code, description, type, address, parent_id, manager_id } = req.body;
 
             if (!department_name || !department_code)
                 return res.status(400).json({ message: "Tên và mã phòng ban là bắt buộc" });
@@ -22,6 +23,12 @@ const DepartmentPositionController = {
                     return res.status(404).json({ message: "Phòng ban cha không tồn tại" });
             }
 
+            if (manager_id) {
+                const managerInfo = await UserInfoModel.findOne({ _id: manager_id, isDeleted: false });
+                if (!managerInfo)
+                    return res.status(404).json({ message: "Người quản lý không tồn tại" });
+            }
+
             const newDept = await DepartmentModel.create({
                 department_name,
                 department_code,
@@ -29,6 +36,7 @@ const DepartmentPositionController = {
                 type: type || "department",
                 address: address || "",
                 parent: parent_id || null,
+                manager: manager_id || null,
             });
 
             if (LEAF_TYPES.includes(newDept.type)) {
@@ -56,6 +64,7 @@ const DepartmentPositionController = {
 
             const departments = await DepartmentModel.find(filter)
                 .populate("parent", "department_name department_code type")
+                .populate("manager", "full_name ma_nv")
                 .sort({ createdAt: 1 })
                 .lean();
 
@@ -90,7 +99,7 @@ const DepartmentPositionController = {
     updateDepartment: async (req, res) => {
         try {
             const { id } = req.params;
-            const { department_name, description, type, address, parent_id } = req.body;
+            const { department_name, description, type, address, parent_id, manager_id } = req.body;
 
             const dept = await DepartmentModel.findOne({ _id: id, isDeleted: false });
             if (!dept)
@@ -116,6 +125,17 @@ const DepartmentPositionController = {
                     if (!parent)
                         return res.status(404).json({ message: "Phòng ban cha không tồn tại" });
                     dept.parent = parent_id;
+                }
+            }
+
+            if (manager_id !== undefined) {
+                if (!manager_id) {
+                    dept.manager = null;
+                } else {
+                    const managerInfo = await UserInfoModel.findOne({ _id: manager_id, isDeleted: false });
+                    if (!managerInfo)
+                        return res.status(404).json({ message: "Người quản lý không tồn tại" });
+                    dept.manager = manager_id;
                 }
             }
 

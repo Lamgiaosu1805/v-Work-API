@@ -5,6 +5,8 @@ const { RequestModel } = require("../models/RequestModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const notificationService = require("../services/notificationService");
 const { AUTO_REJECT_AFTER_DAYS } = require("../config/common/leaveConfig");
+const { adjustLeaveBalance } = require("../helpers/leaveBalance");
+const { LEAVE_BALANCE_REASON } = require("../constants");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -42,11 +44,17 @@ async function autoRejectLeaveRequests() {
         await request.save({ session });
 
         if (request.paid_days > 0) {
-          await UserInfoModel.findByIdAndUpdate(
-            request.user_id,
-            { $inc: { "leave_balance.annual": request.paid_days } },
-            { session }
-          );
+          // allowNegative: true — refund dương vẫn có thể ra kết quả âm nếu
+          // balance đang âm do ứng phép, không được chặn (giống onReject).
+          await adjustLeaveBalance({
+            userId: request.user_id,
+            amount: request.paid_days,
+            reason: LEAVE_BALANCE_REASON.AUTO_REJECT_REFUND,
+            refId: request._id,
+            refType: "request",
+            allowNegative: true,
+            session
+          });
         }
 
         await session.commitTransaction();
@@ -58,24 +66,15 @@ async function autoRejectLeaveRequests() {
             if (!userInfo) return;
             const fromStr = moment.tz(request.from_date, TZ).format("DD/MM/YYYY");
             const body = `Đơn xin nghỉ từ ${fromStr} đã bị tự động từ chối do quá ${AUTO_REJECT_AFTER_DAYS} ngày không được duyệt`;
-            return Promise.all([
-              NotificationModel.create({
-                target: "individual",
-                account_id: userInfo.id_account,
-                title: "Đơn nghỉ bị từ chối",
-                body,
-                type: "leave_rejected",
-                ref_id: request._id,
-                ref_type: "request",
-                uri: `/requests/${request._id}`
-              }),
-              pushNotification.sendToAccount({
-                account_id: userInfo.id_account,
-                title: "Đơn nghỉ bị từ chối",
-                body,
-                data: { type: "leave_rejected", uri: `/requests/${request._id}` }
-              })
-            ]);
+            return notificationService.createNotification({
+              account_id: userInfo.id_account,
+              title: "Đơn nghỉ bị từ chối",
+              body,
+              type: "leave_rejected",
+              ref_id: request._id,
+              ref_type: "request",
+              uri: `/requests/${request._id}`
+            });
           })
           .catch(() => {});
       } catch (err) {

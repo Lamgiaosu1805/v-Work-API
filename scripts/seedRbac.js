@@ -9,8 +9,19 @@ const ROLES = [
   {
     code: "hr",
     name: "Nhân sự",
-    description: "Xem toàn bộ đơn từ của nhân viên",
-    permissions: [PERMISSION.HRM_REQUEST_VIEW_ALL]
+    description: "Xem toàn bộ đơn từ của nhân viên; import/chỉnh sửa chấm công",
+    permissions: [
+      PERMISSION.HRM_REQUEST_VIEW_ALL,
+      PERMISSION.HRM_ATTENDANCE_IMPORT,
+      PERMISSION.HRM_ATTENDANCE_EDIT
+    ]
+  },
+  {
+    code: "unit_head",
+    name: "Trưởng đơn vị",
+    description:
+      "Duyệt đơn của nhân viên trong phạm vi phòng ban mình quản lý (xem docs/REQUEST-APPROVAL-CHAIN-PLAN.md)",
+    permissions: [PERMISSION.HRM_REQUEST_REVIEW]
   }
 ];
 

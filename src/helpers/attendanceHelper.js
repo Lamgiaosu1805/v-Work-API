@@ -78,6 +78,9 @@ function resolveAttendanceDay({
   let newCheckIn = machineIn && appIn ? new Date(Math.min(machineIn, appIn)) : machineIn || appIn;
   let newCheckOut =
     machineOut && appOut ? new Date(Math.max(machineOut, appOut)) : machineOut || appOut;
+  // Override forgot_checkin chạy SAU bước lấy min/max và vẫn thắng dữ liệu máy chấm công —
+  // đơn quên chấm công đã duyệt là dữ liệu chuẩn (worksheet.check_in/out đã được
+  // forgotCheckinHandler.onApprove ghi trực tiếp), không để máy chấm công ghi đè lên.
   if (forgot) {
     if (forgot.type === "check_in" || forgot.type === "both") newCheckIn = worksheet.check_in;
     if (forgot.type === "check_out" || forgot.type === "both") newCheckOut = worksheet.check_out;

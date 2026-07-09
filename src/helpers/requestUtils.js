@@ -1,9 +1,47 @@
-const mongoose = require("mongoose");
 const moment = require("moment-timezone");
-const UserInfoModel = require("../models/UserInfoModel");
 const notificationService = require("../services/notificationService");
+const redis = require("../config/redis");
 
 const TZ = "Asia/Ho_Chi_Minh";
+
+const REVIEW_LOCK_TTL_MS = 5000;
+const REVIEW_LOCK_WAIT_BUDGET_MS = 10000;
+const ENV_PREFIX = (process.env.BASE_URL ?? "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+
+class RequestReviewLockError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// Khóa quanh đoạn đọc-tính-ghi `approvals` khi duyệt đơn nghỉ dài ngày (2 người duyệt) —
+// tránh 2 lượt duyệt gần như đồng thời cùng đọc `approvals` cũ, cùng push, dẫn đến mất
+// lượt duyệt hoặc cùng nghĩ mình là người thứ 2 nên gọi `handler.onApprove` (trừ phép) 2 lần.
+// Mirror đúng pattern `acquireUserLeaveLock` ở src/helpers/leaveBalance.js.
+async function acquireRequestReviewLock(requestId) {
+  const key = `${ENV_PREFIX}:request_review:lock:${String(requestId)}`;
+  const token = `${Date.now()}-${Math.random()}`;
+  const deadline = Date.now() + REVIEW_LOCK_WAIT_BUDGET_MS;
+
+  while (Date.now() < deadline) {
+    const ok = await redis.set(key, token, "PX", REVIEW_LOCK_TTL_MS, "NX");
+    if (ok === "OK") {
+      return async () => {
+        try {
+          const val = await redis.get(key);
+          if (val === token) await redis.del(key);
+        } catch {
+          // best-effort release — TTL là lưới an toàn thực sự
+        }
+      };
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50 + Math.random() * 50);
+    });
+  }
+  throw new RequestReviewLockError(409, "Đơn đang được xử lý duyệt, vui lòng thử lại");
+}
 
 function calcTotalDays(fromDate, fromPeriod, toDate, toPeriod) {
   const from = moment.tz(fromDate, TZ).startOf("day");
@@ -87,45 +125,6 @@ function buildWorkDatesWithStatus(request, fromMoment, toMoment) {
   });
 }
 
-async function getEligibleReviewers(userInfoId) {
-  const employee = await UserInfoModel.findById(userInfoId, { branch_id: 1 });
-  const branchId = employee?.branch_id ?? null;
-  if (!branchId) return [];
-
-  const results = await UserInfoModel.aggregate([
-    {
-      $match: {
-        isDeleted: false,
-        _id: { $ne: new mongoose.Types.ObjectId(String(userInfoId)) }
-      }
-    },
-    {
-      $lookup: {
-        from: "accounts",
-        localField: "id_account",
-        foreignField: "_id",
-        as: "account"
-      }
-    },
-    { $unwind: "$account" },
-    {
-      $match: {
-        "account.role": "manager",
-        // "account.module_access": "hrm",
-        "account.isDeleted": false,
-        $or: [{ branch_id: branchId }, { "account.dept_scope": "all" }]
-      }
-    },
-    { $project: { _id: 1, full_name: 1, account_id: "$account._id" } }
-  ]);
-
-  return results.map((r) => ({
-    userInfoId: r._id,
-    accountId: r.account_id,
-    full_name: r.full_name
-  }));
-}
-
 async function notify(accountId, { title, body, type, ref_id, ref_type, uri }) {
   await notificationService.createNotification({
     account_id: accountId,
@@ -154,7 +153,8 @@ function calcWorkUnit(shifts, minutesLate, minuteEarly) {
 module.exports = {
   calcTotalDays,
   buildWorkDatesWithStatus,
-  getEligibleReviewers,
   notify,
-  calcWorkUnit
+  calcWorkUnit,
+  acquireRequestReviewLock,
+  RequestReviewLockError
 };

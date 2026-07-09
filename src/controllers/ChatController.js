@@ -331,6 +331,13 @@ const ChatController = {
           }
         : null;
 
+      let mentions = [];
+      try {
+        mentions = req.body.mentions ? JSON.parse(req.body.mentions) : [];
+      } catch {
+        mentions = [];
+      }
+
       session.startTransaction();
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
 
@@ -341,6 +348,7 @@ const ChatController = {
         type: attachment ? "image" : req.body.type,
         attachment,
         replyToMessageId: req.body.replyToMessageId || null,
+        mentions,
         session
       });
       await session.commitTransaction();

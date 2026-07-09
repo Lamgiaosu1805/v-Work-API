@@ -36,6 +36,20 @@ const MessageModel = new mongoose.Schema(
       ref: "message",
       default: null
     },
+    mentions: [
+      {
+        type: {
+          type: String,
+          enum: ["user", "all"],
+          required: true
+        },
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "user_info",
+          default: null
+        }
+      }
+    ],
     seenBy: [
       {
         type: mongoose.Schema.Types.ObjectId,

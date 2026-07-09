@@ -34,6 +34,12 @@ router.get(
   ChatController.getMessageById
 );
 
+router.get(
+  "/conversations/:conversationId/images",
+  authenticate,
+  ChatController.getConversationImages
+);
+
 router.patch(
   "/conversations/:conversationId/group-name",
   authenticate,

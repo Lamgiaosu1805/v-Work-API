@@ -27,7 +27,8 @@ const {
   ensureConversationAccess,
   updateGroupConversationAvatar,
   updateMemberNickname,
-  getMessageById
+  getMessageById,
+  getConversationImages
 } = require("../services/chatService");
 
 const CONTENT_TYPE_MAP = {
@@ -744,6 +745,29 @@ const ChatController = {
       return res.status(200).json({
         message: "Lấy tin nhắn thành công",
         data: signAvatarsDeep(message)
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  getConversationImages: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+
+      const result = await getConversationImages({
+        conversationId: req.params.conversationId,
+        userInfoId: currentUserInfo._id,
+        page,
+        limit
+      });
+
+      return res.status(200).json({
+        message: "Lấy danh sách ảnh thành công",
+        ...signAvatarsDeep(result)
       });
     } catch (error) {
       return handleChatError(res, error);

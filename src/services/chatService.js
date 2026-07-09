@@ -6,6 +6,12 @@ const MessageModel = require("../models/MessageModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AccountModel = require("../models/AccountModel");
 const { ChatError } = require("../helpers/socketHandler");
+const {
+  toPlainObject,
+  normalizeObjectIds,
+  removeAttachmentFiles,
+  normalizeMentions
+} = require("../utils/chatUtils");
 
 const REPLY_POPULATE = {
   path: "replyTo",
@@ -16,35 +22,10 @@ const REPLY_POPULATE = {
   }
 };
 
-function removeAttachmentFiles(attachment) {
-  if (!attachment) return;
-
-  const baseDir =
-    process.env.NODE_ENV === "production"
-      ? process.env.UPLOAD_DIR_PROD
-      : process.env.UPLOAD_DIR_DEV;
-
-  [attachment.url, attachment.thumbnailUrl].filter(Boolean).forEach((relativePath) => {
-    try {
-      const filePath = path.resolve(baseDir, relativePath);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    } catch (error) {
-      console.error("removeAttachmentFiles error:", error?.message || error);
-    }
-  });
-}
-
-function normalizeObjectIds(values) {
-  if (!Array.isArray(values)) return [];
-
-  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
-}
-
-function toPlainObject(doc) {
-  if (!doc) return doc;
-  if (typeof doc.toObject === "function") return doc.toObject();
-  return doc;
-}
+const MENTIONS_POPULATE = {
+  path: "mentions.userId",
+  select: "full_name avatar ma_nv id_account"
+};
 
 function formatConversation(conversation, currentUserInfoId) {
   const plainConversation = toPlainObject(conversation);
@@ -209,6 +190,7 @@ async function createMessageDocument({
   type = "text",
   attachment = null,
   replyTo = null,
+  mentions = [],
   seenBy = [],
   session
 }) {
@@ -226,6 +208,10 @@ async function createMessageDocument({
 
   if (replyTo) {
     payload.replyTo = replyTo;
+  }
+
+  if (Array.isArray(mentions) && mentions.length > 0) {
+    payload.mentions = mentions;
   }
 
   const createdMessages = session
@@ -425,6 +411,7 @@ async function getConversationMessages({ conversationId, userInfoId, page = 1, l
   const messages = await MessageModel.find(filter)
     .populate("senderId", "full_name avatar ma_nv id_account")
     .populate(REPLY_POPULATE)
+    .populate(MENTIONS_POPULATE)
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
@@ -450,6 +437,7 @@ async function sendMessage({
   type = "text",
   attachment = null,
   replyToMessageId = null,
+  mentions = [],
   session
 }) {
   if (!session) {
@@ -487,12 +475,25 @@ async function sendMessage({
     replyTo = originalMessage._id;
   }
 
+  let normalizedMentions = [];
+  if (Array.isArray(mentions) && mentions.length > 0) {
+    const conversationDoc = await ConversationModel.findOne({ _id: conversationId })
+      .select("members type")
+      .session(session)
+      .lean();
+
+    if (conversationDoc) {
+      normalizedMentions = normalizeMentions(mentions, conversationDoc);
+    }
+  }
+
   const message = await createMessageDocument({
     conversationId,
     senderUserInfoId,
     content: normalizedContent,
     type,
     attachment,
+    mentions: normalizedMentions,
     replyTo,
     seenBy: [senderUserInfoId],
     session
@@ -512,7 +513,9 @@ async function sendMessage({
 
   const query = MessageModel.findById(message._id)
     .populate("senderId", "full_name avatar ma_nv id_account")
-    .populate(REPLY_POPULATE);
+    .populate(REPLY_POPULATE)
+    .populate(MENTIONS_POPULATE);
+
   if (session) {
     query.session(session);
   }
@@ -841,6 +844,7 @@ async function getMessageById({ conversationId, messageId, userInfoId }) {
   })
     .populate("senderId", "full_name avatar")
     .populate(REPLY_POPULATE)
+    .populate(MENTIONS_POPULATE)
     .lean();
 
   return message;

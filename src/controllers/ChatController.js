@@ -28,7 +28,8 @@ const {
   updateGroupConversationAvatar,
   updateMemberNickname,
   getMessageById,
-  getConversationImages
+  getConversationImages,
+  reactToMessage
 } = require("../services/chatService");
 
 const CONTENT_TYPE_MAP = {
@@ -768,6 +769,34 @@ const ChatController = {
       return res.status(200).json({
         message: "Lấy danh sách ảnh thành công",
         ...signAvatarsDeep(result)
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  reactToMessage: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const { message, action } = await reactToMessage({
+        conversationId: req.params.conversationId,
+        messageId: req.params.messageId,
+        userInfoId: currentUserInfo._id,
+        type: req.body.type
+      });
+
+      const io = req.app.get("io");
+      if (io) {
+        io.to(`conversation:${String(req.params.conversationId)}`).emit("message:reaction", {
+          conversationId: String(req.params.conversationId),
+          message: signAvatarsDeep(message),
+          action
+        });
+      }
+
+      return res.status(200).json({
+        message: "Cập nhật reaction thành công",
+        data: signAvatarsDeep(message)
       });
     } catch (error) {
       return handleChatError(res, error);

@@ -22,6 +22,13 @@ router.post(
   processChatImage,
   ChatController.sendMessage
 );
+
+router.post(
+  "/conversations/:conversationId/messages/:messageId/react",
+  authenticate,
+  ChatController.reactToMessage
+);
+
 router.get(
   "/conversations/:conversationId/messages/:messageId/image",
   authenticate,

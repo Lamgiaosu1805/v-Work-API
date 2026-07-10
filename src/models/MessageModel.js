@@ -50,6 +50,16 @@ const MessageModel = new mongoose.Schema(
         }
       }
     ],
+    reactions: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", required: true },
+        type: {
+          type: String,
+          enum: ["like", "love", "haha", "wow", "sad", "angry"],
+          default: "like"
+        }
+      }
+    ],
     seenBy: [
       {
         type: mongoose.Schema.Types.ObjectId,

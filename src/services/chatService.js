@@ -27,6 +27,13 @@ const MENTIONS_POPULATE = {
   select: "full_name avatar ma_nv id_account"
 };
 
+const REACTIONS_POPULATE = {
+  path: "reactions.userId",
+  select: "full_name avatar ma_nv id_account"
+};
+
+const REACTION_TYPES = ["like", "love", "haha", "wow", "sad", "angry"];
+
 function formatConversation(conversation, currentUserInfoId) {
   const plainConversation = toPlainObject(conversation);
   if (!plainConversation) return null;
@@ -412,6 +419,7 @@ async function getConversationMessages({ conversationId, userInfoId, page = 1, l
     .populate("senderId", "full_name avatar ma_nv id_account")
     .populate(REPLY_POPULATE)
     .populate(MENTIONS_POPULATE)
+    .populate(REACTIONS_POPULATE)
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
@@ -895,6 +903,57 @@ async function getConversationImages({ conversationId, userInfoId, page = 1, lim
   };
 }
 
+async function reactToMessage({ conversationId, messageId, userInfoId, type }) {
+  await ensureConversationAccess(conversationId, userInfoId);
+
+  if (!REACTION_TYPES.includes(type)) {
+    throw new ChatError("Loại reaction không hợp lệ", 400);
+  }
+
+  const message = await MessageModel.findOne({
+    _id: messageId,
+    conversationId,
+    isDeleted: false,
+    "recalled.at": null
+  }).select("reactions");
+
+  if (!message) {
+    throw new ChatError("Tin nhắn không tồn tại hoặc đã bị thu hồi", 404);
+  }
+
+  const existing = message.reactions.find((r) => String(r.userId) === String(userInfoId));
+
+  let action;
+  if (existing && existing.type === type) {
+    await MessageModel.updateOne(
+      { _id: messageId },
+      { $pull: { reactions: { userId: userInfoId } } }
+    );
+    action = "removed";
+  } else if (existing) {
+    await MessageModel.updateOne(
+      { _id: messageId, "reactions.userId": userInfoId },
+      { $set: { "reactions.$.type": type } }
+    );
+    action = "updated";
+  } else {
+    await MessageModel.updateOne(
+      { _id: messageId },
+      { $push: { reactions: { userId: userInfoId, type } } }
+    );
+    action = "added";
+  }
+
+  const updated = await MessageModel.findById(messageId)
+    .populate("senderId", "full_name avatar ma_nv id_account")
+    .populate(REPLY_POPULATE)
+    .populate(MENTIONS_POPULATE)
+    .populate(REACTIONS_POPULATE)
+    .lean();
+
+  return { message: updated, action };
+}
+
 module.exports = {
   getCurrentUserInfo,
   createPrivateConversation,
@@ -918,5 +977,6 @@ module.exports = {
   formatConversation,
   updateGroupConversationAvatar,
   updateMemberNickname,
-  getConversationImages
+  getConversationImages,
+  reactToMessage
 };

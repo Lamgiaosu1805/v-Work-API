@@ -41,6 +41,13 @@ const CustomerInteractionModel = new mongoose.Schema(
         metadata: {
             old_status: { type: String, default: null },
             new_status: { type: String, default: null },
+            from_sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
+            to_sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
+            removed_sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
+            assigned_by: { type: mongoose.Schema.Types.ObjectId, ref: "account", default: null },
+            removed_by: { type: mongoose.Schema.Types.ObjectId, ref: "account", default: null },
+            reason: { type: String, default: null },
+            confirm_sale_source: { type: Boolean, default: null },
         },
 
         ...BaseSchema.obj,
@@ -55,5 +62,6 @@ const CustomerInteractionModel = new mongoose.Schema(
 // Index để query nhanh theo app + sale hoặc app + customer
 CustomerInteractionModel.index({ app_id: 1, sale_id: 1 });
 CustomerInteractionModel.index({ app_id: 1, customer_id: 1 });
+CustomerInteractionModel.index({ type: 1, createdAt: 1, customer_id: 1 });
 
 module.exports = mongoose.model("customer_interaction", CustomerInteractionModel);

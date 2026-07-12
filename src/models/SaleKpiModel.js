@@ -14,6 +14,14 @@ const SaleKpiModel = new mongoose.Schema(
             kyc_verified: { type: Number, default: 0 },
             active_investors: { type: Number, default: 0 },
             revenue: { type: Number, default: 0 },
+            interactions: {
+                not_kyc: { type: Number, default: 0 },
+                kyc_verified: { type: Number, default: 0 },
+                active_investor: { type: Number, default: 0 },
+                settled: { type: Number, default: 0 },
+                upsale: { type: Number, default: 0 },
+                cross_sale: { type: Number, default: 0 },
+            },
         },
         actuals: {
             new_customers: { type: Number, default: 0 },

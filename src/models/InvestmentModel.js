@@ -64,5 +64,6 @@ InvestmentSchema.index({ customer_id: 1 });
 InvestmentSchema.index({ "commission.sale_id": 1 });
 InvestmentSchema.index({ "commission.agent_id": 1 });
 InvestmentSchema.index({ "commission.period_month": 1, "commission.period_year": 1 });
+InvestmentSchema.index({ status: 1, invested_at: 1, customer_id: 1 });
 
 module.exports = mongoose.model("investment", InvestmentSchema);

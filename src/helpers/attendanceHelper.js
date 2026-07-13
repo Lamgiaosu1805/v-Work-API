@@ -9,7 +9,6 @@ const EMPLOYEE_HEADER_REGEX = /Mã nhân viên:\s*(\S+)/;
 const DATE_REGEX = /^\d{2}\/\d{2}\/\d{4}$/;
 const TIME_REGEX = /^\d{2}:\d{2}/;
 
-
 function parseExcelToBlocks(buffer) {
   const wb = xlsx.read(buffer, { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
@@ -22,36 +21,29 @@ function parseExcelToBlocks(buffer) {
   }
 
   return headers.map((h, idx) => {
-    const nextStart =
-      idx + 1 < headers.length ? headers[idx + 1].startRow : rows.length;
+    const nextStart = idx + 1 < headers.length ? headers[idx + 1].startRow : rows.length;
     return {
       machine_code: h.machine_code,
-      rows: rows.slice(h.startRow + 1, nextStart),
+      rows: rows.slice(h.startRow + 1, nextStart)
     };
   });
 }
-
 
 function parseDayRows(block) {
   const dayRows = [];
   for (const row of block.rows) {
     const dateStr = String(row[0] || "").trim();
     if (!DATE_REGEX.test(dateStr)) continue;
-    const inCell = [row[2], row[4], row[6]].find((v) =>
-      TIME_REGEX.test(String(v).trim()),
-    );
-    const outCell = [row[7], row[5], row[3]].find((v) =>
-      TIME_REGEX.test(String(v).trim()),
-    );
+    const inCell = [row[2], row[4], row[6]].find((v) => TIME_REGEX.test(String(v).trim()));
+    const outCell = [row[7], row[5], row[3]].find((v) => TIME_REGEX.test(String(v).trim()));
     dayRows.push({
       dateStr,
       rawIn: inCell ? String(inCell).trim().slice(0, 5) : null,
-      rawOut: outCell ? String(outCell).trim().slice(0, 5) : null,
+      rawOut: outCell ? String(outCell).trim().slice(0, 5) : null
     });
   }
   return dayRows;
 }
-
 
 function resolveAttendanceDay({
   dateKey,
@@ -63,7 +55,7 @@ function resolveAttendanceDay({
   lateForgivenSet,
   leavePeriodsMap,
   resolveLatePenalty,
-  resolveForgotPenalty,
+  resolveForgotPenalty
 }) {
   const forgot = forgotMap.get(dateKey);
 
@@ -80,15 +72,15 @@ function resolveAttendanceDay({
     ? moment.tz(`${dateKey} ${rawOut}`, "YYYY-MM-DD HH:mm", TZ).toDate()
     : null;
 
-  let newCheckIn = machineIn;
-  let newCheckOut = machineOut;
-  if (!newCheckIn && worksheet.check_in) newCheckIn = worksheet.check_in;
-  if (!newCheckOut && worksheet.check_out) newCheckOut = worksheet.check_out;
+  const appIn = worksheet.check_in ? new Date(worksheet.check_in) : null;
+  const appOut = worksheet.check_out ? new Date(worksheet.check_out) : null;
+
+  let newCheckIn = machineIn && appIn ? new Date(Math.min(machineIn, appIn)) : machineIn || appIn;
+  let newCheckOut =
+    machineOut && appOut ? new Date(Math.max(machineOut, appOut)) : machineOut || appOut;
   if (forgot) {
-    if (forgot.type === "check_in" || forgot.type === "both")
-      newCheckIn = worksheet.check_in;
-    if (forgot.type === "check_out" || forgot.type === "both")
-      newCheckOut = worksheet.check_out;
+    if (forgot.type === "check_in" || forgot.type === "both") newCheckIn = worksheet.check_in;
+    if (forgot.type === "check_out" || forgot.type === "both") newCheckOut = worksheet.check_out;
   }
 
   const MIN_GAP_MINUTES = 120;
@@ -111,11 +103,9 @@ function resolveAttendanceDay({
   }
 
   const leavePeriods = leavePeriodsMap?.get(dateKey);
-  let leaveMorning =
-    !!leavePeriods && (leavePeriods.has("morning") || leavePeriods.has("full"));
+  let leaveMorning = !!leavePeriods && (leavePeriods.has("morning") || leavePeriods.has("full"));
   let leaveAfternoon =
-    !!leavePeriods &&
-    (leavePeriods.has("afternoon") || leavePeriods.has("full"));
+    !!leavePeriods && (leavePeriods.has("afternoon") || leavePeriods.has("full"));
   if (hasIn && hasOut) {
     if (leaveMorning) {
       const noon = moment.tz(dateKey, TZ).hour(12).minute(0).second(0);
@@ -129,13 +119,12 @@ function resolveAttendanceDay({
         .minute(endM)
         .second(0)
         .subtract(60, "minutes");
-      if (moment.tz(newCheckOut, TZ).isSameOrAfter(threshold))
-        leaveAfternoon = false;
+      if (moment.tz(newCheckOut, TZ).isSameOrAfter(threshold)) leaveAfternoon = false;
     }
   }
   const leaveDeduction = Math.min(
     isSaturday ? 0.5 : 1,
-    (leaveMorning ? 0.5 : 0) + (leaveAfternoon ? 0.5 : 0),
+    (leaveMorning ? 0.5 : 0) + (leaveAfternoon ? 0.5 : 0)
   );
   const missedIn = !hasIn && !leaveMorning;
   const missedOut = !hasOut && !leaveAfternoon;
@@ -145,10 +134,7 @@ function resolveAttendanceDay({
   if (hasIn && !leaveMorning && firstShift && firstShift.start_time) {
     const [sh, sm] = firstShift.start_time.split(":").map(Number);
     const shiftStart = moment.tz(dateKey, TZ).hour(sh).minute(sm).second(0);
-    minutesLate = Math.max(
-      0,
-      Math.floor((moment.tz(newCheckIn, TZ) - shiftStart) / 60000),
-    );
+    minutesLate = Math.max(0, Math.floor((moment.tz(newCheckIn, TZ) - shiftStart) / 60000));
   }
   if (forgiven) minutesLate = 0;
 
@@ -199,7 +185,7 @@ function resolveAttendanceDay({
     hasOut,
     missedIn,
     missedOut,
-    lastShiftEnd,
+    lastShiftEnd
   };
 }
 
@@ -220,7 +206,7 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
       checkInTime: computed.newCheckIn,
       checkOutTime: computed.newCheckOut,
       lastShiftEnd: computed.lastShiftEnd,
-      session,
+      session
     });
 
     const OVERRIDABLE = ["pending", "missed_clock", "absent"];
@@ -230,13 +216,13 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
         {
           user_id: userId,
           date: { $gte: dayStart, $lt: dayEnd },
-          status: { $in: OVERRIDABLE },
+          status: { $in: OVERRIDABLE }
         },
-        { session },
+        { session }
       );
       for (const [period, st] of [
         ["morning", "absent"],
-        ["afternoon", "present"],
+        ["afternoon", "present"]
       ]) {
         await WorkDayStatusModel.updateOne(
           { user_id: userId, date: dayStart, period },
@@ -245,10 +231,10 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
               worksheet_id: worksheet._id,
               status: st,
               sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
-              isDeleted: false,
-            },
+              isDeleted: false
+            }
           },
-          { upsert: true, session },
+          { upsert: true, session }
         );
       }
     } else {
@@ -259,10 +245,10 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
           user_id: userId,
           date: { $gte: dayStart, $lt: dayEnd },
           status: { $in: OVERRIDABLE },
-          isDeleted: false,
+          isDeleted: false
         },
         { status: newStatus },
-        { session },
+        { session }
       );
     }
 
@@ -279,5 +265,5 @@ module.exports = {
   parseExcelToBlocks,
   parseDayRows,
   resolveAttendanceDay,
-  saveAttendanceDay,
+  saveAttendanceDay
 };

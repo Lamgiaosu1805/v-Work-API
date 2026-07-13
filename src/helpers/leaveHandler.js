@@ -200,8 +200,10 @@ async function onApprove(request, session) {
 
   const existing = await WorkSheetModel.find(
     { user_id: request.user_id, date: { $gte: fromStart, $lte: toEnd }, isDeleted: false },
-    { date: 1 },
-  ).session(session);
+    { date: 1, check_in: 1, check_out: 1, shifts: 1 }
+  )
+    .populate("shifts")
+    .session(session);
   const sheetMap = new Map(
     existing.map((w) => [moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id]),
   );
@@ -233,6 +235,20 @@ async function onApprove(request, session) {
       },
       { upsert: true, session, new: true },
     );
+  }
+
+  for (const w of existing) {
+    if (!w.check_in || !w.check_out) continue;
+    const lastShift = w.shifts?.length ? w.shifts[w.shifts.length - 1] : null;
+    await resolveLeaveConflictOnAttendance({
+      userId: request.user_id,
+      worksheetId: w._id,
+      date: moment.tz(w.date, TZ).format("YYYY-MM-DD"),
+      checkInTime: w.check_in,
+      checkOutTime: w.check_out,
+      lastShiftEnd: lastShift?.end_time ?? null,
+      session
+    });
   }
 }
 

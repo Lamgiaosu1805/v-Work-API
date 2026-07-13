@@ -80,10 +80,12 @@ function resolveAttendanceDay({
     ? moment.tz(`${dateKey} ${rawOut}`, "YYYY-MM-DD HH:mm", TZ).toDate()
     : null;
 
-  let newCheckIn = machineIn;
-  let newCheckOut = machineOut;
-  if (!newCheckIn && worksheet.check_in) newCheckIn = worksheet.check_in;
-  if (!newCheckOut && worksheet.check_out) newCheckOut = worksheet.check_out;
+  const appIn = worksheet.check_in ? new Date(worksheet.check_in) : null;
+  const appOut = worksheet.check_out ? new Date(worksheet.check_out) : null;
+
+  let newCheckIn = machineIn && appIn ? new Date(Math.min(machineIn, appIn)) : machineIn || appIn;
+  let newCheckOut =
+    machineOut && appOut ? new Date(Math.max(machineOut, appOut)) : machineOut || appOut;
   if (forgot) {
     if (forgot.type === "check_in" || forgot.type === "both")
       newCheckIn = worksheet.check_in;
@@ -254,7 +256,7 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
     } else {
       const complete = !computed.missedIn && !computed.missedOut;
       const newStatus = complete ? "present" : "missed_clock";
-      await WorkDayStatusModel.updateMany(
+      const result = await WorkDayStatusModel.updateMany(
         {
           user_id: userId,
           date: { $gte: dayStart, $lt: dayEnd },
@@ -264,6 +266,20 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
         { status: newStatus },
         { session },
       );
+      if (result.matchedCount === 0) {
+        await WorkDayStatusModel.updateOne(
+          { user_id: userId, date: dayStart, period: "full" },
+          {
+            $set: { status: newStatus },
+            $setOnInsert: {
+              worksheet_id: worksheet._id,
+              sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
+              isDeleted: false
+            }
+          },
+          { upsert: true, session }
+        );
+      }
     }
 
     await session.commitTransaction();

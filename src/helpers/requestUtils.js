@@ -5,6 +5,41 @@ const notificationService = require("../services/notificationService");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
+const REVIEW_LOCK_TTL_MS = 5000;
+const REVIEW_LOCK_WAIT_BUDGET_MS = 10000;
+const ENV_PREFIX = (process.env.BASE_URL ?? "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+
+class RequestReviewLockError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function acquireRequestReviewLock(requestId) {
+  const key = `${ENV_PREFIX}:request_review:lock:${String(requestId)}`;
+  const token = `${Date.now()}-${Math.random()}`;
+  const deadline = Date.now() + REVIEW_LOCK_WAIT_BUDGET_MS;
+
+  while (Date.now() < deadline) {
+    const ok = await redis.set(key, token, "PX", REVIEW_LOCK_TTL_MS, "NX");
+    if (ok === "OK") {
+      return async () => {
+        try {
+          const val = await redis.get(key);
+          if (val === token) await redis.del(key);
+        } catch {
+          // best-effort release — TTL là lưới an toàn thực sự
+        }
+      };
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50 + Math.random() * 50);
+    });
+  }
+  throw new RequestReviewLockError(409, "Đơn đang được xử lý duyệt, vui lòng thử lại");
+}
+
 function calcTotalDays(fromDate, fromPeriod, toDate, toPeriod) {
   const from = moment.tz(fromDate, TZ).startOf("day");
   const to = moment.tz(toDate, TZ).startOf("day");
@@ -83,7 +118,7 @@ function buildWorkDatesWithStatus(request, fromMoment, toMoment) {
     } else {
       status = "leave_unpaid";
     }
-    return { date, status, period };
+    return { date, status, period, weight };
   });
 }
 

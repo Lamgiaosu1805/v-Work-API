@@ -6,18 +6,6 @@ const { adjustLeaveBalance } = require("../src/helpers/leaveBalance");
 const { LEAVE_BALANCE_REASON } = require("../src/constants");
 const { MONTHLY_ACCRUAL } = require("../src/config/common/leaveConfig");
 
-// Migration 1 lần: gán loại hợp đồng "Chính thức" (code: "official") cho MỌI nhân
-// viên hiện có CHƯA có employment_status (mặc định coi nhân viên cũ trong hệ thống
-// đã qua thử việc), đồng thời cộng bù phép hồi tố theo đúng công thức đang dùng ở
-// UserController.setEmploymentStatus (số tháng từ start_date × MONTHLY_ACCRUAL).
-// Nhân viên nào ĐÃ có employment_status sẽ bị bỏ qua — an toàn khi chạy lại nhiều lần.
-//
-// ⚠️ Ghi số dư phép thật cho nhân viên thật — mặc định chạy DRY RUN (chỉ in ra,
-// KHÔNG ghi DB). Xem log dry-run kỹ trước khi chạy thật.
-//
-// Dry run:  node scripts/assignDefaultEmploymentStatus.js
-// Chạy thật: node scripts/assignDefaultEmploymentStatus.js --apply
-
 const APPLY = process.argv.includes("--apply");
 
 const connectDB = async () => {
@@ -74,8 +62,6 @@ const run = async () => {
     session.startTransaction();
     try {
       if (backpay > 0) {
-        // allowNegative: true — backpay luôn dương, khớp đúng logic gốc ở
-        // UserController.setEmploymentStatus.
         await adjustLeaveBalance({
           userId: emp._id,
           amount: backpay,

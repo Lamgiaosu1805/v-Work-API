@@ -78,9 +78,6 @@ function resolveAttendanceDay({
   let newCheckIn = machineIn && appIn ? new Date(Math.min(machineIn, appIn)) : machineIn || appIn;
   let newCheckOut =
     machineOut && appOut ? new Date(Math.max(machineOut, appOut)) : machineOut || appOut;
-  // Override forgot_checkin chạy SAU bước lấy min/max và vẫn thắng dữ liệu máy chấm công —
-  // đơn quên chấm công đã duyệt là dữ liệu chuẩn (worksheet.check_in/out đã được
-  // forgotCheckinHandler.onApprove ghi trực tiếp), không để máy chấm công ghi đè lên.
   if (forgot) {
     if (forgot.type === "check_in" || forgot.type === "both") newCheckIn = worksheet.check_in;
     if (forgot.type === "check_out" || forgot.type === "both") newCheckOut = worksheet.check_out;
@@ -243,7 +240,7 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
     } else {
       const complete = !computed.missedIn && !computed.missedOut;
       const newStatus = complete ? "present" : "missed_clock";
-      await WorkDayStatusModel.updateMany(
+      const result = await WorkDayStatusModel.updateMany(
         {
           user_id: userId,
           date: { $gte: dayStart, $lt: dayEnd },
@@ -253,6 +250,20 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
         { status: newStatus },
         { session }
       );
+      if (result.matchedCount === 0) {
+        await WorkDayStatusModel.updateOne(
+          { user_id: userId, date: dayStart, period: "full" },
+          {
+            $set: { status: newStatus },
+            $setOnInsert: {
+              worksheet_id: worksheet._id,
+              sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
+              isDeleted: false
+            }
+          },
+          { upsert: true, session }
+        );
+      }
     }
 
     await session.commitTransaction();

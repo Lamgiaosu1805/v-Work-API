@@ -9,10 +9,20 @@ const { getApprovalChain, getManagedUserIds } = require("../helpers/approvalChai
 const leaveHandler = require("../helpers/leaveHandler");
 const lateEarlyHandler = require("../helpers/lateEarlyHandler");
 const remoteHandler = require("../helpers/remoteHandler");
+const businessTripHandler = require("../helpers/businessTripHandler");
+const clientVisitHandler = require("../helpers/clientVisitHandler");
 const explanationHandler = require("../helpers/explanationHandler");
 const forgotCheckinHandler = require("../helpers/forgotCheckinHandler");
 
-const VALID_TYPES = ["leave", "late_early", "remote", "explanation", "forgot_checkin"];
+const VALID_TYPES = [
+  "leave",
+  "late_early",
+  "remote",
+  "business_trip",
+  "client_visit",
+  "explanation",
+  "forgot_checkin"
+];
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -20,6 +30,8 @@ const TYPE_LABELS = {
   leave: "xin nghỉ phép",
   late_early: "đi muộn/về sớm",
   remote: "làm việc từ xa",
+  business_trip: "đi công tác",
+  client_visit: "đi gặp gỡ khách hàng",
   explanation: "giải trình",
   forgot_checkin: "quên chấm công"
 };
@@ -28,13 +40,13 @@ const handlers = {
   leave: leaveHandler,
   late_early: lateEarlyHandler,
   remote: remoteHandler,
+  business_trip: businessTripHandler,
+  client_visit: clientVisitHandler,
   explanation: explanationHandler,
   forgot_checkin: forgotCheckinHandler
 };
 
 const RequestController = {
-  // Preview người sẽ tự động được chọn làm quản lý trực tiếp nếu tạo đơn ngay bây giờ
-  // (không còn dùng để chọn người duyệt lúc tạo đơn — assigned_reviewer đã bỏ hẳn).
   getEligibleReviewers: async (req, res) => {
     try {
       const userInfo = await UserInfoModel.findOne({
@@ -102,8 +114,6 @@ const RequestController = {
         await session.commitTransaction();
         session.endSession();
 
-        // Báo cho quản lý trực tiếp — best-effort, không tìm thấy thì bỏ qua, không lỗi
-        // (không chặn tạo đơn vì lý do "chưa tìm được người duyệt").
         getApprovalChain(userInfo._id, { stopAtFirstMatch: true })
           .then((chain) => {
             const nearest = chain[0];
@@ -180,8 +190,6 @@ const RequestController = {
       const skip = (Number(page) - 1) * Number(limit);
       const filter = { isDeleted: false };
 
-      // Admin (bypass trong can) và người có quyền view_all (HR) thấy toàn bộ đơn.
-      // scopedUserIds !== null nghĩa là phải giới hạn theo phạm vi quản lý (getManagedUserIds).
       const hasViewAll = await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL);
       let scopedUserIds = null;
       if (!hasViewAll) {
@@ -218,8 +226,7 @@ const RequestController = {
           ]
         }).select("_id");
         const matchedIds = matchedUsers.map((u) => u._id);
-        // Giao với phạm vi quản lý (nếu có) — search không được phép mở rộng ra ngoài
-        // phạm vi đã gate ở trên.
+
         if (scopedUserIds) {
           const matchedSet = new Set(matchedIds.map((id) => id.toString()));
           scopedUserIds = scopedUserIds.filter((id) => matchedSet.has(id.toString()));
@@ -267,27 +274,13 @@ const RequestController = {
     let release = null;
     let session = null;
     try {
-      // Pre-check nhẹ (ngoài transaction) chỉ để biết đơn có rơi vào nhánh "cần đủ 2
-      // người duyệt" hay không, từ đó quyết định có cần khóa Redis trước khi mở
-      // transaction. Phải khóa TRƯỚC khi mở transaction — nếu mở transaction rồi mới
-      // khóa, snapshot của transaction đã cố định từ lúc đọc đầu tiên, đọc lại request
-      // bên trong cùng transaction sẽ không thấy được lượt duyệt mà transaction khác
-      // vừa commit.
       const preCheck = await RequestModel.findOne(
         { _id: id, isDeleted: false },
         { request_type: 1, total_days: 1 }
       );
       if (!preCheck) return res.status(404).json({ message: "Đơn không tồn tại" });
 
-      // review_all cho phép duyệt mọi đơn (admin auto-pass qua can) — chỉ bypass yêu cầu
-      // "phải nằm trong chuỗi phê duyệt" (xem check isInChain bên dưới), KHÔNG bypass yêu
-      // cầu đủ 2 người cho đơn nghỉ dài ngày. Tính ĐỘNG lại mỗi lần, phản ánh đúng cơ cấu
-      // tổ chức hiện tại thay vì dựa vào giá trị đã đóng băng lúc tạo đơn.
       const canReviewAll = await can(req.account, PERMISSION.HRM_REQUEST_REVIEW_ALL);
-      // Đơn nghỉ dài ngày (>3 ngày) cần đủ 2 người khác nhau duyệt mới thật sự "approved"
-      // — không áp dụng cho reject (1 người từ chối là đủ). Admin/HR (review_all) VẪN
-      // tính là 1 trong 2 người, không tự động duyệt xong ngay — đúng yêu cầu: dù có quyền
-      // duyệt mọi đơn, 1 mình admin cũng không được tự ý duyệt xong đơn nghỉ dài ngày.
       const needsMultiApproval =
         action === "approve" && preCheck.request_type === "leave" && preCheck.total_days > 3;
 
@@ -324,7 +317,6 @@ const RequestController = {
         return res.status(409).json({ message: "Đơn không ở trạng thái chờ duyệt" });
       }
 
-      // Chặn tự duyệt với tất cả, kể cả admin
       if (request.user_id.equals(reviewerInfo._id)) {
         await session.abortTransaction();
         session.endSession();
@@ -388,8 +380,6 @@ const RequestController = {
       if (release) await release();
 
       if (!isFinal) {
-        // Mới đủ 1/2 lượt duyệt — chỉ báo nhẹ cho người tạo đơn biết đã có người duyệt
-        // bước 1, chưa gửi broadcast đầy đủ như lúc đơn thật sự "approved".
         UserInfoModel.findById(request.user_id)
           .select("id_account full_name")
           .then((employeeInfo) => {
@@ -414,8 +404,6 @@ const RequestController = {
         });
       }
 
-      // Báo cho người tạo đơn + quản lý trực tiếp + toàn bộ HR — dedupe theo accountId,
-      // loại bỏ chính người vừa duyệt khỏi TOÀN BỘ danh sách trước khi gửi.
       Promise.all([
         UserInfoModel.findById(request.user_id).select("id_account full_name"),
         getApprovalChain(request.user_id, { stopAtFirstMatch: true }),

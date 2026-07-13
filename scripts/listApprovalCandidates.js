@@ -1,13 +1,8 @@
-// Liệt kê ứng viên khả nghi cho role `unit_head` (permission hrm.request.review) — theo
-// docs/REQUEST-APPROVAL-CHAIN-PLAN.md mục 2.6. CHỈ IN RA CONSOLE, KHÔNG GHI DB.
-// position_name là free-text nên đây chỉ là gợi ý — admin phải tự xác nhận rồi gán
-// role qua API RBAC có sẵn (POST /rbac/users/:accountId/roles, roleCode: "unit_head").
 require("dotenv").config();
 const mongoose = require("mongoose");
 const AccountModel = require("../src/models/AccountModel");
 const PositionModel = require("../src/models/PositionModel");
 const UserDepartmentPositionModel = require("../src/models/UserDepartmentPositionModel");
-// Chỉ cần side-effect đăng ký model cho .populate("user"/"department", ...) bên dưới
 require("../src/models/UserInfoModel");
 require("../src/models/DepartmentModel");
 const PermissionModel = require("../src/models/PermissionModel");
@@ -23,8 +18,6 @@ const connectDB = async () => {
   console.log("✅ Kết nối MongoDB thành công");
 };
 
-// Check trực tiếp qua DB, KHÔNG qua Redis (script chạy độc lập, tránh phụ thuộc Redis
-// đang chạy hay không — mirror logic của can()/getEffectivePermissions nhưng không cache).
 async function alreadyHasReviewPermission(account) {
   if (account.role === "admin") return true;
 

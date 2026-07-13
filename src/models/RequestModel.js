@@ -15,9 +15,6 @@ const RequestSchema = new mongoose.Schema(
     reviewed_by: { type: ObjId, ref: "user_info", default: null },
     reviewed_at: { type: Date, default: null },
     reviewer_note: { type: String, default: "" },
-    // Lưu vết từng lượt duyệt riêng lẻ — dùng cho đơn nghỉ dài ngày (total_days > 3)
-    // cần đủ 2 người khác nhau mới thật sự "approved" (xem RequestController.review()).
-    // Đơn thường (1 lượt là xong) không dùng field này.
     approvals: [
       {
         account: { type: ObjId, ref: "account" },
@@ -76,6 +73,24 @@ const RemoteRequest = RequestModel.discriminator(
   })
 );
 
+const BusinessTripRequest = RequestModel.discriminator(
+  "business_trip",
+  new mongoose.Schema({
+    from_date: { type: Date, required: true },
+    to_date: { type: Date, required: true },
+    total_days: { type: Number, required: true }
+  })
+);
+
+const ClientVisitRequest = RequestModel.discriminator(
+  "client_visit",
+  new mongoose.Schema({
+    from_date: { type: Date, required: true },
+    to_date: { type: Date, required: true },
+    total_days: { type: Number, required: true }
+  })
+);
+
 const ExplanationRequest = RequestModel.discriminator(
   "explanation",
   new mongoose.Schema({
@@ -104,6 +119,8 @@ module.exports = {
   LeaveRequest,
   LateEarlyRequest,
   RemoteRequest,
+  BusinessTripRequest,
+  ClientVisitRequest,
   ExplanationRequest,
   ForgotCheckinRequest
 };

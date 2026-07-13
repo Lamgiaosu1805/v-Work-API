@@ -5,13 +5,6 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const { can } = require("./rbac");
 const { PERMISSION } = require("../constants");
 
-// Không nhận session — đọc dữ liệu tổ chức "hiện hành" (ai thuộc phòng ban nào,
-// ai có quyền gì), không cần nhất quán theo snapshot của 1 transaction cụ thể.
-
-// Đi lên: trả về mảng người duyệt hợp lệ, gần nhất trước (level 0 = chính phòng ban của employee).
-// stopAtFirstMatch=true: dừng ngay khi tìm được match ở 1 cấp, không đi tiếp lên cao hơn
-// — dùng cho create() (chỉ cần người gần nhất để báo, không cần cả chuỗi).
-// getAll()/review() gọi mặc định (false) vì cần TOÀN BỘ chuỗi.
 async function getApprovalChain(userInfoId, { stopAtFirstMatch = false } = {}) {
   const employee = await UserInfoModel.findById(userInfoId, { branch_id: 1, isDeleted: 1 });
   if (!employee || employee.isDeleted) return [];
@@ -27,12 +20,11 @@ async function getApprovalChain(userInfoId, { stopAtFirstMatch = false } = {}) {
   const seenUsers = new Set();
   let frontier = memberships.map(String);
 
-  while (frontier.length && seenDeptIds.size < 50 /* safety cap chống loop hỏng data */) {
+  while (frontier.length && seenDeptIds.size < 50) {
     const newFrontier = frontier.filter((id) => !seenDeptIds.has(id));
     if (!newFrontier.length) break;
     newFrontier.forEach((id) => seenDeptIds.add(id));
 
-    // Tìm candidate ở đúng cấp hiện tại (loại trừ chính employee)
     const candidateUserIds = await UserDepartmentPositionModel.find({
       department: { $in: newFrontier },
       isDeleted: false,
@@ -45,7 +37,6 @@ async function getApprovalChain(userInfoId, { stopAtFirstMatch = false } = {}) {
         { branch_id: 1, full_name: 1, id_account: 1 }
       );
 
-      // Lọc branch_id trước (rẻ, không cần I/O) để giảm số candidate phải check permission
       const branchMatched = candidates.filter(
         (c) => employee.branch_id && c.branch_id && employee.branch_id.equals(c.branch_id)
       );
@@ -56,7 +47,6 @@ async function getApprovalChain(userInfoId, { stopAtFirstMatch = false } = {}) {
       );
       const accountMap = new Map(accounts.map((a) => [String(a._id), a]));
 
-      // Check permission song song thay vì tuần tự trong for — tránh N+1 round-trip Redis/DB
       const permissionChecks = await Promise.all(
         branchMatched.map((c) => {
           const account = accountMap.get(String(c.id_account));
@@ -71,10 +61,6 @@ async function getApprovalChain(userInfoId, { stopAtFirstMatch = false } = {}) {
       });
     }
 
-    // Tier 2: field `manager` ngay trên phòng ban ở cấp này — tái dùng đúng query
-    // lấy `parent` (đi lên 1 cấp) bên dưới, chỉ thêm `manager` vào projection, không
-    // tốn thêm round-trip DB nào. KHÔNG check branch_id — admin đã gán tường minh
-    // (vd 1 Phó TGĐ phụ trách nhiều chi nhánh cùng lúc), không cần suy luận thêm.
     const depts = await DepartmentModel.find(
       { _id: { $in: newFrontier }, isDeleted: false },
       { parent: 1, manager: 1 }
@@ -108,23 +94,12 @@ async function getApprovalChain(userInfoId, { stopAtFirstMatch = false } = {}) {
       .map(String);
   }
 
-  return chain; // thứ tự: gần nhất trước
+  return chain;
 }
-
-// Chiều ngược lại (đi xuống children thay vì parent), dùng cho getAll — CHỈ phục vụ
-// liệt kê, không phải cổng duyệt thật (review() luôn xác thực lại qua getApprovalChain
-// theo từng đơn cụ thể) nên không cần chính xác tuyệt đối theo từng tier.
-// Khác biệt quan trọng so với getApprovalChain: KHÔNG check lại permission cho từng
-// nhân viên cấp dưới — quyền đã được gate 1 lần duy nhất ở getAll() cho chính manager
-// gọi API, ở đây chỉ cần lọc theo phòng ban con cháu + khớp branch_id.
 async function getManagedUserIds(managerUserInfoId) {
   const manager = await UserInfoModel.findById(managerUserInfoId, { branch_id: 1, isDeleted: 1 });
   if (!manager || manager.isDeleted) return [];
 
-  // Gộp 2 điểm xuất phát: tier-1 (phòng ban họ THUỘC) + tier-2 (phòng ban họ được
-  // gán làm manager tường minh). Có bất kỳ phòng ban tier-2 nào thì bỏ hẳn check
-  // branch_id cho toàn bộ kết quả — tier-2 vốn ngụ ý phụ trách vượt phạm vi 1 chi
-  // nhánh (vd 1 Phó TGĐ quản lý nhiều chi nhánh), không cần suy luận thêm.
   const [ownDepts, managedDepts] = await Promise.all([
     UserDepartmentPositionModel.find({
       user: managerUserInfoId,
@@ -139,7 +114,6 @@ async function getManagedUserIds(managerUserInfoId) {
   const seenDeptIds = new Set(startDepts);
   let frontier = startDepts;
 
-  // BFS xuống: gom toàn bộ phòng ban con cháu (bao gồm chính phòng ban của manager)
   while (frontier.length) {
     const children = await DepartmentModel.find(
       { parent: { $in: frontier }, isDeleted: false },

@@ -2,9 +2,10 @@ const mongoose = require("mongoose");
 const moment = require("moment-timezone");
 const { RequestModel } = require("../models/RequestModel");
 const UserInfoModel = require("../models/UserInfoModel");
-const { can } = require("../helpers/rbac");
-const { PERMISSION, ROLE } = require("../constants");
-const { getEligibleReviewers, notify } = require("../helpers/requestUtils");
+const { can, getAccountsWithPermission } = require("../helpers/rbac");
+const { PERMISSION } = require("../constants");
+const { notify, acquireRequestReviewLock } = require("../helpers/requestUtils");
+const { getApprovalChain, getManagedUserIds } = require("../helpers/approvalChain");
 const leaveHandler = require("../helpers/leaveHandler");
 const lateEarlyHandler = require("../helpers/lateEarlyHandler");
 const remoteHandler = require("../helpers/remoteHandler");
@@ -32,6 +33,8 @@ const handlers = {
 };
 
 const RequestController = {
+  // Preview người sẽ tự động được chọn làm quản lý trực tiếp nếu tạo đơn ngay bây giờ
+  // (không còn dùng để chọn người duyệt lúc tạo đơn — assigned_reviewer đã bỏ hẳn).
   getEligibleReviewers: async (req, res) => {
     try {
       const userInfo = await UserInfoModel.findOne({
@@ -40,20 +43,18 @@ const RequestController = {
       });
       if (!userInfo) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
 
-      const reviewers = await getEligibleReviewers(userInfo._id);
-      return res.status(200).json({ message: "OK", data: reviewers });
+      const chain = await getApprovalChain(userInfo._id, { stopAtFirstMatch: true });
+      return res.status(200).json({ message: "OK", data: chain[0] ?? null });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
   },
 
   create: async (req, res) => {
-    const { request_type, assigned_reviewer, reason } = req.body;
+    const { request_type, reason } = req.body;
 
     if (!VALID_TYPES.includes(request_type))
       return res.status(400).json({ message: "Loại đơn không hợp lệ" });
-    if (!assigned_reviewer || !mongoose.Types.ObjectId.isValid(assigned_reviewer))
-      return res.status(400).json({ message: "Người duyệt không hợp lệ" });
 
     const handler = handlers[request_type];
 
@@ -63,20 +64,8 @@ const RequestController = {
         isDeleted: false
       });
       if (!userInfo) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
-      if (!userInfo.branch_id)
-        return res
-          .status(400)
-          .json({ message: "Tài khoản của bạn chưa được gán chi nhánh, vui lòng liên hệ admin" });
 
-      const eligible = await getEligibleReviewers(userInfo._id);
-      if (!eligible.length)
-        return res.status(400).json({
-          message: "Phòng ban của bạn chưa có người quản lý, vui lòng liên hệ admin"
-        });
-      if (!eligible.map((e) => e.userInfoId.toString()).includes(assigned_reviewer.toString()))
-        return res.status(400).json({ message: "Người duyệt không hợp lệ" });
-
-      const { payload, error } = handler.validate(req.body, userInfo);
+      const { payload, error } = await handler.validate(req.body, userInfo);
       if (error) return res.status(error.status).json({ message: error.message });
 
       const session = await mongoose.startSession();
@@ -95,7 +84,6 @@ const RequestController = {
               user_id: userInfo._id,
               request_type,
               reason: reason || "",
-              assigned_reviewer,
               ...payload
             }
           ],
@@ -114,11 +102,13 @@ const RequestController = {
         await session.commitTransaction();
         session.endSession();
 
-        UserInfoModel.findById(assigned_reviewer)
-          .select("id_account full_name")
-          .then((reviewerInfo) => {
-            if (!reviewerInfo) return;
-            return notify(reviewerInfo.id_account, {
+        // Báo cho quản lý trực tiếp — best-effort, không tìm thấy thì bỏ qua, không lỗi
+        // (không chặn tạo đơn vì lý do "chưa tìm được người duyệt").
+        getApprovalChain(userInfo._id, { stopAtFirstMatch: true })
+          .then((chain) => {
+            const nearest = chain[0];
+            if (!nearest) return null;
+            return notify(nearest.accountId, {
               title: "Đơn xin phép mới",
               body: `${userInfo.full_name} gửi đơn ${TYPE_LABELS[request_type]}`,
               type: `${request_type}_created`,
@@ -162,7 +152,6 @@ const RequestController = {
 
       const [requests, total] = await Promise.all([
         RequestModel.find(filter)
-          .populate("assigned_reviewer", "full_name")
           .populate("reviewed_by", "full_name")
           .sort({ createdAt: -1 })
           .skip(skip)
@@ -192,10 +181,12 @@ const RequestController = {
       const filter = { isDeleted: false };
 
       // Admin (bypass trong can) và người có quyền view_all (HR) thấy toàn bộ đơn.
-      // Phải check TRƯỚC role === "user" vì account HR thường mang role "user".
+      // scopedUserIds !== null nghĩa là phải giới hạn theo phạm vi quản lý (getManagedUserIds).
       const hasViewAll = await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL);
+      let scopedUserIds = null;
       if (!hasViewAll) {
-        if (req.account.role === ROLE.USER)
+        const hasReview = await can(req.account, PERMISSION.HRM_REQUEST_REVIEW);
+        if (!hasReview)
           return res.status(403).json({
             errorCode: "FORBIDDEN",
             message: "Bạn không có quyền quản lý tính năng này"
@@ -207,7 +198,7 @@ const RequestController = {
         });
         if (!managerInfo)
           return res.status(404).json({ message: "Không tìm thấy thông tin quản lý" });
-        filter.assigned_reviewer = managerInfo._id;
+        scopedUserIds = await getManagedUserIds(managerInfo._id);
       }
 
       if (request_type && VALID_TYPES.includes(request_type)) filter.request_type = request_type;
@@ -226,13 +217,22 @@ const RequestController = {
             { ma_nv: { $regex: search, $options: "i" } }
           ]
         }).select("_id");
-        filter.user_id = { $in: matchedUsers.map((u) => u._id) };
+        const matchedIds = matchedUsers.map((u) => u._id);
+        // Giao với phạm vi quản lý (nếu có) — search không được phép mở rộng ra ngoài
+        // phạm vi đã gate ở trên.
+        if (scopedUserIds) {
+          const matchedSet = new Set(matchedIds.map((id) => id.toString()));
+          scopedUserIds = scopedUserIds.filter((id) => matchedSet.has(id.toString()));
+        } else {
+          scopedUserIds = matchedIds;
+        }
       }
+
+      if (scopedUserIds) filter.user_id = { $in: scopedUserIds };
 
       const [requests, total] = await Promise.all([
         RequestModel.find(filter)
           .populate("user_id", "full_name ma_nv phone_number")
-          .populate("assigned_reviewer", "full_name")
           .populate("reviewed_by", "full_name")
           .sort({ createdAt: -1 })
           .skip(skip)
@@ -264,9 +264,38 @@ const RequestController = {
     if (!["approve", "reject"].includes(action))
       return res.status(400).json({ message: "Hành động không hợp lệ" });
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    let release = null;
+    let session = null;
     try {
+      // Pre-check nhẹ (ngoài transaction) chỉ để biết đơn có rơi vào nhánh "cần đủ 2
+      // người duyệt" hay không, từ đó quyết định có cần khóa Redis trước khi mở
+      // transaction. Phải khóa TRƯỚC khi mở transaction — nếu mở transaction rồi mới
+      // khóa, snapshot của transaction đã cố định từ lúc đọc đầu tiên, đọc lại request
+      // bên trong cùng transaction sẽ không thấy được lượt duyệt mà transaction khác
+      // vừa commit.
+      const preCheck = await RequestModel.findOne(
+        { _id: id, isDeleted: false },
+        { request_type: 1, total_days: 1 }
+      );
+      if (!preCheck) return res.status(404).json({ message: "Đơn không tồn tại" });
+
+      // review_all cho phép duyệt mọi đơn (admin auto-pass qua can) — chỉ bypass yêu cầu
+      // "phải nằm trong chuỗi phê duyệt" (xem check isInChain bên dưới), KHÔNG bypass yêu
+      // cầu đủ 2 người cho đơn nghỉ dài ngày. Tính ĐỘNG lại mỗi lần, phản ánh đúng cơ cấu
+      // tổ chức hiện tại thay vì dựa vào giá trị đã đóng băng lúc tạo đơn.
+      const canReviewAll = await can(req.account, PERMISSION.HRM_REQUEST_REVIEW_ALL);
+      // Đơn nghỉ dài ngày (>3 ngày) cần đủ 2 người khác nhau duyệt mới thật sự "approved"
+      // — không áp dụng cho reject (1 người từ chối là đủ). Admin/HR (review_all) VẪN
+      // tính là 1 trong 2 người, không tự động duyệt xong ngay — đúng yêu cầu: dù có quyền
+      // duyệt mọi đơn, 1 mình admin cũng không được tự ý duyệt xong đơn nghỉ dài ngày.
+      const needsMultiApproval =
+        action === "approve" && preCheck.request_type === "leave" && preCheck.total_days > 3;
+
+      if (needsMultiApproval) release = await acquireRequestReviewLock(id);
+
+      session = await mongoose.startSession();
+      session.startTransaction();
+
       const reviewerInfo = await UserInfoModel.findOne({
         id_account: req.account._id,
         isDeleted: false
@@ -274,6 +303,7 @@ const RequestController = {
       if (!reviewerInfo) {
         await session.abortTransaction();
         session.endSession();
+        if (release) await release();
         return res.status(404).json({ message: "Không tìm thấy thông tin quản lý" });
       }
 
@@ -284,11 +314,13 @@ const RequestController = {
       if (!request) {
         await session.abortTransaction();
         session.endSession();
+        if (release) await release();
         return res.status(404).json({ message: "Đơn không tồn tại" });
       }
       if (request.status !== "pending") {
         await session.abortTransaction();
         session.endSession();
+        if (release) await release();
         return res.status(409).json({ message: "Đơn không ở trạng thái chờ duyệt" });
       }
 
@@ -296,53 +328,153 @@ const RequestController = {
       if (request.user_id.equals(reviewerInfo._id)) {
         await session.abortTransaction();
         session.endSession();
+        if (release) await release();
         return res.status(403).json({ message: "Không thể tự duyệt đơn của mình" });
       }
-      // Duyệt theo quan hệ được gán; review_all cho phép duyệt mọi đơn (admin auto-pass qua can)
-      const canReviewAll = await can(req.account, PERMISSION.HRM_REQUEST_REVIEW_ALL);
-      if (!canReviewAll && !request.assigned_reviewer.equals(reviewerInfo._id)) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(403).json({ message: "Bạn không được chỉ định duyệt đơn này" });
+      if (!canReviewAll) {
+        const chain = await getApprovalChain(request.user_id);
+        const isInChain = chain.some((c) => c.accountId.toString() === req.account._id.toString());
+        if (!isInChain) {
+          await session.abortTransaction();
+          session.endSession();
+          if (release) await release();
+          return res.status(403).json({ message: "Bạn không được chỉ định duyệt đơn này" });
+        }
       }
 
-      request.status = action === "approve" ? "approved" : "rejected";
-      request.reviewed_by = reviewerInfo._id;
-      request.reviewed_at = new Date();
-      request.reviewer_note = reviewer_note;
-      await request.save({ session });
+      let isFinal = true;
+      if (!needsMultiApproval) {
+        request.status = action === "approve" ? "approved" : "rejected";
+        request.reviewed_by = reviewerInfo._id;
+        request.reviewed_at = new Date();
+        request.reviewer_note = reviewer_note;
+        await request.save({ session });
 
-      const handler = handlers[request.request_type];
-      if (action === "approve" && handler?.onApprove) {
-        await handler.onApprove(request, session);
-      } else if (action === "reject" && handler?.onReject) {
-        await handler.onReject(request, session);
+        const handler = handlers[request.request_type];
+        if (action === "approve" && handler?.onApprove) {
+          await handler.onApprove(request, session);
+        } else if (action === "reject" && handler?.onReject) {
+          await handler.onReject(request, session);
+        }
+      } else {
+        const alreadyApproved = request.approvals.some(
+          (a) => String(a.account) === String(req.account._id)
+        );
+        if (alreadyApproved) {
+          await session.abortTransaction();
+          session.endSession();
+          if (release) await release();
+          return res.status(409).json({ message: "Bạn đã duyệt đơn này rồi" });
+        }
+        request.approvals.push({ account: req.account._id, reviewed_at: new Date() });
+
+        if (request.approvals.length >= 2) {
+          request.status = "approved";
+          request.reviewed_by = reviewerInfo._id;
+          request.reviewed_at = new Date();
+          request.reviewer_note = reviewer_note;
+          await request.save({ session });
+
+          const handler = handlers[request.request_type];
+          if (handler?.onApprove) await handler.onApprove(request, session);
+        } else {
+          isFinal = false;
+          await request.save({ session });
+        }
       }
 
       await session.commitTransaction();
       session.endSession();
+      if (release) await release();
 
-      UserInfoModel.findById(request.user_id)
-        .select("id_account full_name")
-        .then((employeeInfo) => {
+      if (!isFinal) {
+        // Mới đủ 1/2 lượt duyệt — chỉ báo nhẹ cho người tạo đơn biết đã có người duyệt
+        // bước 1, chưa gửi broadcast đầy đủ như lúc đơn thật sự "approved".
+        UserInfoModel.findById(request.user_id)
+          .select("id_account full_name")
+          .then((employeeInfo) => {
+            if (!employeeInfo) return null;
+            const employeeAccountId = employeeInfo.id_account.toString();
+            if (employeeAccountId === req.account._id.toString()) return null;
+            const label = TYPE_LABELS[request.request_type];
+            return notify(employeeInfo.id_account, {
+              title: "Đơn đã được duyệt bước 1/2",
+              body: `Đơn ${label} của bạn đã được ${reviewerInfo.full_name} duyệt (1/2), đang chờ người duyệt tiếp theo`,
+              type: "leave_partially_approved",
+              ref_id: request._id,
+              ref_type: "request",
+              uri: `/requests/${request._id}`
+            });
+          })
+          .catch(() => {});
+
+        return res.status(200).json({
+          message: "Đã ghi nhận duyệt, đang chờ người duyệt tiếp theo",
+          data: request
+        });
+      }
+
+      // Báo cho người tạo đơn + quản lý trực tiếp + toàn bộ HR — dedupe theo accountId,
+      // loại bỏ chính người vừa duyệt khỏi TOÀN BỘ danh sách trước khi gửi.
+      Promise.all([
+        UserInfoModel.findById(request.user_id).select("id_account full_name"),
+        getApprovalChain(request.user_id, { stopAtFirstMatch: true }),
+        getAccountsWithPermission(PERMISSION.HRM_REQUEST_VIEW_ALL)
+      ])
+        .then(([employeeInfo, nearestChain, hrAccountIds]) => {
           if (!employeeInfo) return;
+
           const label = TYPE_LABELS[request.request_type];
           const title = action === "approve" ? "Đơn được duyệt" : "Đơn bị từ chối";
-          const body =
+          const type =
             action === "approve"
-              ? `Đơn ${label} của bạn đã được ${reviewerInfo.full_name} duyệt`
-              : `Đơn ${label} của bạn đã bị ${reviewerInfo.full_name} từ chối${reviewer_note ? `: ${reviewer_note}` : ""}`;
-          return notify(employeeInfo.id_account, {
-            title,
-            body,
-            type:
-              action === "approve"
-                ? `${request.request_type}_approved`
-                : `${request.request_type}_rejected`,
-            ref_id: request._id,
-            ref_type: "request",
-            uri: `/requests/${request._id}`
+              ? `${request.request_type}_approved`
+              : `${request.request_type}_rejected`;
+          const reviewerAccountId = req.account._id.toString();
+          const employeeAccountId = employeeInfo.id_account.toString();
+
+          const notifications = [];
+
+          if (employeeAccountId !== reviewerAccountId) {
+            notifications.push(
+              notify(employeeInfo.id_account, {
+                title,
+                body:
+                  action === "approve"
+                    ? `Đơn ${label} của bạn đã được ${reviewerInfo.full_name} duyệt`
+                    : `Đơn ${label} của bạn đã bị ${reviewerInfo.full_name} từ chối${reviewer_note ? `: ${reviewer_note}` : ""}`,
+                type,
+                ref_id: request._id,
+                ref_type: "request",
+                uri: `/requests/${request._id}`
+              })
+            );
+          }
+
+          const broadcastIds = new Set(hrAccountIds.map((accId) => accId.toString()));
+          if (nearestChain[0]) broadcastIds.add(nearestChain[0].accountId.toString());
+          broadcastIds.delete(reviewerAccountId);
+          broadcastIds.delete(employeeAccountId);
+
+          const broadcastBody =
+            action === "approve"
+              ? `Đơn ${label} của ${employeeInfo.full_name} đã được ${reviewerInfo.full_name} duyệt`
+              : `Đơn ${label} của ${employeeInfo.full_name} đã bị ${reviewerInfo.full_name} từ chối${reviewer_note ? `: ${reviewer_note}` : ""}`;
+
+          broadcastIds.forEach((accountId) => {
+            notifications.push(
+              notify(accountId, {
+                title,
+                body: broadcastBody,
+                type,
+                ref_id: request._id,
+                ref_type: "request",
+                uri: `/requests/${request._id}`
+              })
+            );
           });
+
+          return Promise.all(notifications);
         })
         .catch(() => {});
 
@@ -351,9 +483,15 @@ const RequestController = {
         data: request
       });
     } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(500).json({ message: "Lỗi server", error: error.message });
+      if (session) {
+        await session.abortTransaction();
+        session.endSession();
+      }
+      if (release) await release();
+      const status = error.status || 500;
+      return res
+        .status(status)
+        .json({ message: status === 500 ? "Lỗi server" : error.message, error: error.message });
     }
   },
 
@@ -389,7 +527,7 @@ const RequestController = {
 
       const handler = handlers[request.request_type];
       if (handler?.onReject) {
-        await handler.onReject(request, session);
+        await handler.onReject(request, session, true);
       }
 
       request.status = "cancelled";

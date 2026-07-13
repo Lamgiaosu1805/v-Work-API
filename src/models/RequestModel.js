@@ -9,25 +9,32 @@ const RequestSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ["pending", "approved", "rejected", "cancelled"],
-      default: "pending",
+      default: "pending"
     },
     reason: { type: String, default: "" },
-    assigned_reviewer: { type: ObjId, ref: "user_info", required: true },
     reviewed_by: { type: ObjId, ref: "user_info", default: null },
     reviewed_at: { type: Date, default: null },
     reviewer_note: { type: String, default: "" },
-    ...BaseSchema.obj,
+    // Lưu vết từng lượt duyệt riêng lẻ — dùng cho đơn nghỉ dài ngày (total_days > 3)
+    // cần đủ 2 người khác nhau mới thật sự "approved" (xem RequestController.review()).
+    // Đơn thường (1 lượt là xong) không dùng field này.
+    approvals: [
+      {
+        account: { type: ObjId, ref: "account" },
+        reviewed_at: { type: Date, default: Date.now }
+      }
+    ],
+    ...BaseSchema.obj
   },
   {
     discriminatorKey: "request_type",
     timestamps: BaseSchema.options.timestamps,
     toJSON: BaseSchema.options.toJSON,
-    toObject: BaseSchema.options.toObject,
-  },
+    toObject: BaseSchema.options.toObject
+  }
 );
 
 RequestSchema.index({ user_id: 1, status: 1 });
-RequestSchema.index({ assigned_reviewer: 1, status: 1 });
 RequestSchema.index({ user_id: 1, request_type: 1, status: 1 });
 
 const RequestModel = mongoose.model("request", RequestSchema);
@@ -39,15 +46,15 @@ const LeaveRequest = RequestModel.discriminator(
     from_period: {
       type: String,
       enum: ["morning", "afternoon"],
-      required: true, 
+      required: true
     },
     to_date: { type: Date, required: true },
     to_period: { type: String, enum: ["morning", "afternoon"], required: true },
     total_days: { type: Number, required: true },
     leave_type: { type: String, enum: ["paid", "unpaid"], required: true },
     paid_days: { type: Number, default: 0 },
-    unpaid_days: { type: Number, default: 0 },
-  }),
+    unpaid_days: { type: Number, default: 0 }
+  })
 );
 
 const LateEarlyRequest = RequestModel.discriminator(
@@ -56,8 +63,8 @@ const LateEarlyRequest = RequestModel.discriminator(
     date: { type: Date, required: true },
     shift_id: { type: ObjId, ref: "shift", required: true },
     type: { type: String, enum: ["late", "early_out"], required: true },
-    minutes: { type: Number, required: true },
-  }),
+    minutes: { type: Number, required: true }
+  })
 );
 
 const RemoteRequest = RequestModel.discriminator(
@@ -65,8 +72,8 @@ const RemoteRequest = RequestModel.discriminator(
   new mongoose.Schema({
     from_date: { type: Date, required: true },
     to_date: { type: Date, required: true },
-    total_days: { type: Number, required: true },
-  }),
+    total_days: { type: Number, required: true }
+  })
 );
 
 const ExplanationRequest = RequestModel.discriminator(
@@ -74,8 +81,8 @@ const ExplanationRequest = RequestModel.discriminator(
   new mongoose.Schema({
     date: { type: Date, required: true },
     shift_id: { type: ObjId, ref: "shift", default: null },
-    content: { type: String, required: true },
-  }),
+    content: { type: String, required: true }
+  })
 );
 
 const ForgotCheckinRequest = RequestModel.discriminator(
@@ -85,11 +92,11 @@ const ForgotCheckinRequest = RequestModel.discriminator(
     type: {
       type: String,
       enum: ["check_in", "check_out", "both"],
-      required: true,
+      required: true
     },
     expected_check_in: { type: Date, default: null },
-    expected_check_out: { type: Date, default: null },
-  }),
+    expected_check_out: { type: Date, default: null }
+  })
 );
 
 module.exports = {
@@ -98,5 +105,5 @@ module.exports = {
   LateEarlyRequest,
   RemoteRequest,
   ExplanationRequest,
-  ForgotCheckinRequest,
+  ForgotCheckinRequest
 };

@@ -7,6 +7,12 @@ const heicConvert = require("heic-convert");
 const AccountModel = require("../models/AccountModel");
 const EmploymentStatusModel = require("../models/EmploymentStatusModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
+const {
+  adjustLeaveBalance,
+  getLeaveBalance,
+  LeaveBalanceError
+} = require("../helpers/leaveBalance");
+const { LEAVE_BALANCE_REASON } = require("../constants");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
@@ -16,6 +22,7 @@ const DepartmentModel = require("../models/DepartmentModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
 const { sign, serializeUser } = require("../helpers/staticUrl");
+const { getEffectivePermissions } = require("../helpers/rbac");
 
 const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 
@@ -161,8 +168,7 @@ const UserController = {
             ma_nv: maNV,
             employment_type,
             branch_id: branch_id || null,
-            employment_status: employment_status || null,
-            leave_balance: { annual: 0 }
+            employment_status: employment_status || null
           }
         ],
         { session }
@@ -359,7 +365,14 @@ const UserController = {
     try {
       const { account } = req;
 
-      const user = await UserInfoModel.findOne({ id_account: account._id });
+      const [user, effectivePermissions] = await Promise.all([
+        UserInfoModel.findOne({ id_account: account._id }),
+        getEffectivePermissions(account._id)
+      ]);
+      // Lưu ý: admin bypass ở tầng can()/requirePermission() phía server, KHÔNG nằm
+      // trong danh sách này — permissions rỗng với admin là bình thường, FE phải tự
+      // check role === "admin" trước khi tra permissions, không suy luận ngược lại.
+      const permissions = [...effectivePermissions];
 
       if (!user) {
         return res.status(200).json({
@@ -368,6 +381,7 @@ const UserController = {
           role: account.role,
           module_access: account.module_access || [],
           dept_scope: account.dept_scope,
+          permissions,
           full_name: null,
           avatar: null,
           ma_nv: null,
@@ -393,6 +407,7 @@ const UserController = {
         role: account.role,
         module_access: account.module_access || [],
         dept_scope: account.dept_scope,
+        permissions,
         ...user.toObject(),
         avatar: sign(user.avatar),
         cover_photo: sign(user.cover_photo),
@@ -701,14 +716,15 @@ const UserController = {
         }
       }
 
-      if (req.body.leave_balance_annual !== undefined) {
-        const val = Number(req.body.leave_balance_annual);
-        if (Number.isNaN(val) || val < 0) {
+      const hasLeaveBalanceDelta = req.body.leave_balance_annual_delta !== undefined;
+      let leaveBalanceDelta = null;
+      if (hasLeaveBalanceDelta) {
+        leaveBalanceDelta = Number(req.body.leave_balance_annual_delta);
+        if (Number.isNaN(leaveBalanceDelta) || leaveBalanceDelta === 0) {
           await session.abortTransaction();
           session.endSession();
-          return res.status(400).json({ message: "leave_balance_annual không hợp lệ" });
+          return res.status(400).json({ message: "leave_balance_annual_delta không hợp lệ" });
         }
-        updates["leave_balance.annual"] = val;
       }
 
       const hasFiles = Object.keys(req.files || {}).length > 0;
@@ -721,7 +737,8 @@ const UserController = {
         !hasFiles &&
         !hasDepartments &&
         !hasSchedules &&
-        !hasDeletedAttachments
+        !hasDeletedAttachments &&
+        !hasLeaveBalanceDelta
       ) {
         await session.abortTransaction();
         session.endSession();
@@ -746,6 +763,31 @@ const UserController = {
           "-id_account -__v"
         );
       }
+
+      if (hasLeaveBalanceDelta) {
+        try {
+          await adjustLeaveBalance({
+            userId: id,
+            amount: leaveBalanceDelta,
+            reason: LEAVE_BALANCE_REASON.HR_MANUAL_ADJUSTMENT,
+            note: req.body.leave_balance_note || "",
+            createdBy: req.account._id,
+            allowNegative: false, // site duy nhất thực sự bị chặn âm — delta HR nhập tay, không có thẩm định trước
+            session
+          });
+        } catch (e) {
+          await session.abortTransaction();
+          session.endSession();
+          if (e instanceof LeaveBalanceError)
+            return res.status(e.status).json({ message: e.message });
+          // Không throw lại ra ngoài — transaction đã abort + session đã end ở đây,
+          // catch bên ngoài abort lần nữa sẽ crash cả process ("Cannot call
+          // abortTransaction twice"). Trả lỗi trực tiếp tại chỗ.
+          console.error("Error adjusting leave balance in updateUser:", e);
+          return res.status(500).json({ message: "Lỗi server", error: e.message });
+        }
+      }
+
       // Update departments
       if (hasDepartments) {
         let userDepartmentsData = req.body.userDepartments;
@@ -890,12 +932,19 @@ const UserController = {
       await session.commitTransaction();
       session.endSession();
 
+      const leaveBalance = await getLeaveBalance(id);
+
       return res.status(200).json({
         message: "Cập nhật thông tin user thành công",
-        data: updated
+        data: { ...updated.toObject(), leave_balance: leaveBalance }
       });
     } catch (error) {
-      await session.abortTransaction();
+      // Guard: nếu 1 nhánh xử lý bên trong try đã abort + endSession rồi mới throw
+      // lên đây, gọi abortTransaction() lần nữa sẽ crash cả process (MongoTransactionError
+      // "Cannot call abortTransaction twice") — chỉ abort nếu session còn đang trong transaction.
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
       session.endSession();
       console.error("Error in updateUser:", error);
       return res.status(500).json({ message: "Internal server error", error: error.message });
@@ -1043,8 +1092,16 @@ const UserController = {
         EmploymentStatusModel.findOne({ _id: employment_status_id, isDeleted: false })
       ]);
 
-      if (!userInfo) return res.status(404).json({ message: "Không tìm thấy nhân viên" });
-      if (!newStatus) return res.status(404).json({ message: "Không tìm thấy loại hợp đồng" });
+      if (!userInfo) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({ message: "Không tìm thấy nhân viên" });
+      }
+      if (!newStatus) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({ message: "Không tìm thấy loại hợp đồng" });
+      }
 
       const effectiveMoment = new Date(effective_date);
 
@@ -1055,10 +1112,17 @@ const UserController = {
             (effectiveMoment.getMonth() - startMoment.getMonth())
         );
         if (months > 0) {
-          userInfo.leave_balance = {
-            ...userInfo.leave_balance,
-            annual: (userInfo.leave_balance?.annual ?? 0) + months * MONTHLY_ACCRUAL
-          };
+          // allowNegative: true — backpay luôn dương; nếu balance đang âm do ứng
+          // phép, không được chặn (cùng lý do như các refund khác).
+          await adjustLeaveBalance({
+            userId: userInfo._id,
+            amount: months * MONTHLY_ACCRUAL,
+            reason: LEAVE_BALANCE_REASON.RETROACTIVE_PROMOTION_BACKPAY,
+            refType: "system",
+            note: `Cộng bù ${months} tháng do đổi loại hợp đồng`,
+            allowNegative: true,
+            session
+          });
         }
       }
 

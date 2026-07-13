@@ -12,6 +12,7 @@ const AttendanceMachineMappingModel = require("../models/AttendanceMachineMappin
 const { RequestModel } = require("../models/RequestModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 const { resolveLeaveConflictOnAttendance } = require("../helpers/leaveHandler");
+const { getLeaveBalance } = require("../helpers/leaveBalance");
 const {
   buildLatePenaltyResolver,
   buildForgotPenaltyResolver
@@ -523,7 +524,7 @@ const AttendanceController = {
         })
       ]);
 
-      const currentBalance = user.leave_balance?.annual ?? 0;
+      const currentBalance = await getLeaveBalance(user._id);
       const monthDiff = selected
         .clone()
         .startOf("month")
@@ -815,7 +816,7 @@ const AttendanceController = {
           probation_end_date: userInfo.probation_end_date
             ? moment.tz(userInfo.probation_end_date, TZ).format("DD/MM/YYYY")
             : null,
-          leave_balance: userInfo.leave_balance?.annual >= 0 ? userInfo.leave_balance?.annual : 0
+          leave_balance: Math.max(0, await getLeaveBalance(userInfo._id))
         },
         summary: {
           work_unit_total,
@@ -1418,7 +1419,7 @@ const AttendanceController = {
 
       const worksheet = await WorkSheetModel.findOneAndUpdate(
         { _id: worksheetId, isDeleted: false },
-        { work_unit },
+        { work_unit, edited_by: req.account._id, edited_at: new Date() },
         { new: true }
       );
       if (!worksheet) return res.status(404).json({ message: "Không tìm thấy bản ghi công" });

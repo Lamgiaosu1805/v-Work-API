@@ -31,25 +31,43 @@ const PenaltyTierController = {
       if (!effMoment.isValid())
         return res.status(400).json({ message: "effective_from không hợp lệ" });
 
+      const isCountBased = type === "forgot";
+
       for (const t of tiers) {
-        if (t.from_minutes == null || !t.penalty_kind || t.penalty_value == null)
+        const rangeField = isCountBased ? t.from_count : t.from_minutes;
+        if (rangeField == null || !t.penalty_kind || t.penalty_value == null)
           return res.status(400).json({
-            message: "Mỗi tier cần from_minutes, penalty_kind, penalty_value",
+            message: isCountBased
+              ? "Mỗi tier cần from_count, penalty_kind, penalty_value"
+              : "Mỗi tier cần from_minutes, penalty_kind, penalty_value",
           });
-        if (!["money", "work_unit"].includes(t.penalty_kind))
+        if (!["money", "work_unit", "half_day_money"].includes(t.penalty_kind))
           return res.status(400).json({ message: `penalty_kind không hợp lệ: ${t.penalty_kind}` });
       }
 
-      const docs = tiers.map((t) => ({
-        type,
-        from_minutes: t.from_minutes,
-        to_minutes: t.to_minutes ?? null,
-        penalty_kind: t.penalty_kind,
-        penalty_value: t.penalty_value,
-        effective_from: effMoment.toDate(),
-        description: t.description || "",
-        is_active: t.is_active !== false,
-      }));
+      const docs = tiers.map((t) =>
+        isCountBased
+          ? {
+              type,
+              from_count: t.from_count,
+              to_count: t.to_count ?? null,
+              penalty_kind: t.penalty_kind,
+              penalty_value: t.penalty_value,
+              effective_from: effMoment.toDate(),
+              description: t.description || "",
+              is_active: t.is_active !== false,
+            }
+          : {
+              type,
+              from_minutes: t.from_minutes,
+              to_minutes: t.to_minutes ?? null,
+              penalty_kind: t.penalty_kind,
+              penalty_value: t.penalty_value,
+              effective_from: effMoment.toDate(),
+              description: t.description || "",
+              is_active: t.is_active !== false,
+            },
+      );
 
       const created = await AttendancePenaltyTierModel.insertMany(docs);
       res.status(201).json({ message: `Tạo ${created.length} tier thành công`, data: created });
@@ -62,15 +80,27 @@ const PenaltyTierController = {
   updateTier: async (req, res) => {
     try {
       const { id } = req.params;
-      const { from_minutes, to_minutes, penalty_kind, penalty_value, description, is_active, effective_from } = req.body;
+      const {
+        from_minutes,
+        to_minutes,
+        from_count,
+        to_count,
+        penalty_kind,
+        penalty_value,
+        description,
+        is_active,
+        effective_from,
+      } = req.body;
 
       const tier = await AttendancePenaltyTierModel.findOne({ _id: id, isDeleted: false });
       if (!tier) return res.status(404).json({ message: "Không tìm thấy tier" });
 
       if (from_minutes != null) tier.from_minutes = from_minutes;
       if (to_minutes !== undefined) tier.to_minutes = to_minutes;
+      if (from_count != null) tier.from_count = from_count;
+      if (to_count !== undefined) tier.to_count = to_count;
       if (penalty_kind) {
-        if (!["money", "work_unit"].includes(penalty_kind))
+        if (!["money", "work_unit", "half_day_money"].includes(penalty_kind))
           return res.status(400).json({ message: "penalty_kind không hợp lệ" });
         tier.penalty_kind = penalty_kind;
       }

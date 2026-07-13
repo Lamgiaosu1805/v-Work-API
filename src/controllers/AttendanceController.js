@@ -12,8 +12,11 @@ const { RequestModel } = require("../models/RequestModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 const { resolveLeaveConflictOnAttendance } = require("../helpers/leaveHandler");
 const { getLeaveBalance } = require("../helpers/leaveBalance");
+const { can } = require("../helpers/rbac");
+const { PERMISSION } = require("../constants");
 const {
   buildLatePenaltyResolver,
+  buildEarlyPenaltyResolver,
   buildForgotPenaltyResolver
 } = require("../helpers/attendancePenalty");
 const {
@@ -404,7 +407,12 @@ const AttendanceController = {
 
       let userIds;
 
-      if (req.account.role === "admin" || req.account.dept_scope === "all") {
+      const hasViewAll =
+        req.account.role === "admin" ||
+        req.account.dept_scope === "all" ||
+        (await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL));
+
+      if (hasViewAll) {
         const users = await UserInfoModel.find({ isDeleted: false }, "_id");
         userIds = users.map((u) => u._id);
       } else {
@@ -551,7 +559,12 @@ const AttendanceController = {
       });
       if (!userInfo) return res.status(404).json({ message: "Không tìm thấy nhân viên" });
 
-      if (req.account.role !== "admin" && req.account.dept_scope !== "all") {
+      const hasViewAll =
+        req.account.role === "admin" ||
+        req.account.dept_scope === "all" ||
+        (await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL));
+
+      if (!hasViewAll) {
         const myInfo = await UserInfoModel.findOne({
           id_account: req.account._id,
           isDeleted: false
@@ -841,7 +854,12 @@ const AttendanceController = {
       const periodEnd = refDate.clone().date(25).endOf("day");
 
       const userFilter = { isDeleted: false };
-      if (req.account.role !== "admin" && req.account.dept_scope !== "all") {
+      const hasViewAll =
+        req.account.role === "admin" ||
+        req.account.dept_scope === "all" ||
+        (await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL));
+
+      if (!hasViewAll) {
         const myInfo = await UserInfoModel.findOne({
           id_account: req.account._id,
           isDeleted: false
@@ -1103,6 +1121,7 @@ const AttendanceController = {
       const mappingMap = new Map(allMappings.map((m) => [m.machine_code, m.user_id]));
 
       const resolveLatePenalty = await buildLatePenaltyResolver();
+      const resolveEarlyPenalty = await buildEarlyPenaltyResolver();
       const resolveForgotPenalty = await buildForgotPenaltyResolver();
 
       const unmatched = [];
@@ -1125,6 +1144,7 @@ const AttendanceController = {
         let forgotMap;
         let forgotCountMap;
         let lateForgivenSet;
+        let earlyForgivenSet;
         let leavePeriodsMap;
         try {
           const rangeStart = moment
@@ -1139,7 +1159,7 @@ const AttendanceController = {
           const monthStart = moment.tz(rangeStart, TZ).startOf("month").toDate();
           const monthEnd = moment.tz(rangeEnd, TZ).endOf("month").toDate();
 
-          const [worksheets, forgotReqs, lateReqs, leaveStatuses] = await Promise.all([
+          const [worksheets, forgotReqs, lateReqs, earlyReqs, leaveStatuses] = await Promise.all([
             WorkSheetModel.find({
               user_id: userId,
               date: { $gte: rangeStart, $lte: rangeEnd },
@@ -1156,6 +1176,14 @@ const AttendanceController = {
               user_id: userId,
               request_type: "late_early",
               type: "late",
+              status: "approved",
+              isDeleted: false,
+              date: { $gte: rangeStart, $lte: rangeEnd }
+            }),
+            RequestModel.find({
+              user_id: userId,
+              request_type: "late_early",
+              type: "early_out",
               status: "approved",
               isDeleted: false,
               date: { $gte: rangeStart, $lte: rangeEnd }
@@ -1186,6 +1214,9 @@ const AttendanceController = {
           }
           lateForgivenSet = new Set(
             lateReqs.map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD"))
+          );
+          earlyForgivenSet = new Set(
+            earlyReqs.map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD"))
           );
 
           leavePeriodsMap = new Map();
@@ -1223,8 +1254,10 @@ const AttendanceController = {
             forgotMap,
             forgotCountMap,
             lateForgivenSet,
+            earlyForgivenSet,
             leavePeriodsMap,
             resolveLatePenalty,
+            resolveEarlyPenalty,
             resolveForgotPenalty
           });
           if (computed.skip) {
@@ -1265,8 +1298,10 @@ const AttendanceController = {
             forgotMap,
             forgotCountMap,
             lateForgivenSet,
+            earlyForgivenSet,
             leavePeriodsMap,
             resolveLatePenalty,
+            resolveEarlyPenalty,
             resolveForgotPenalty
           });
           if (computed.skip) {

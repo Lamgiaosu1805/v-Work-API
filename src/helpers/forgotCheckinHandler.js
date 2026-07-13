@@ -4,6 +4,7 @@ const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const ShiftModel = require("../models/ShiftModel");
 const { resolveLeaveConflictOnAttendance } = require("./leaveHandler");
+const { buildForgotPenaltyResolver } = require("./attendancePenalty");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -97,9 +98,35 @@ async function onApprove(request, session) {
   const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
   const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
 
+  const existing = await WorkSheetModel.findOne({
+    user_id: request.user_id,
+    date: { $gte: dateStart, $lte: dateEnd },
+    isDeleted: false
+  }).session(session);
+
   const clockUpdate = {};
-  if (request.expected_check_in) clockUpdate.check_in = new Date(request.expected_check_in);
-  if (request.expected_check_out) clockUpdate.check_out = new Date(request.expected_check_out);
+  if (request.expected_check_in) {
+    if (
+      request.type === "check_in" &&
+      existing?.check_in &&
+      !existing?.check_out &&
+      new Date(existing.check_in) > new Date(request.expected_check_in)
+    ) {
+      clockUpdate.check_out = existing.check_in;
+    }
+    clockUpdate.check_in = new Date(request.expected_check_in);
+  }
+  if (request.expected_check_out) {
+    if (
+      request.type === "check_out" &&
+      existing?.check_out &&
+      !existing?.check_in &&
+      new Date(existing.check_out) < new Date(request.expected_check_out)
+    ) {
+      clockUpdate.check_in = existing.check_out;
+    }
+    clockUpdate.check_out = new Date(request.expected_check_out);
+  }
 
   let worksheet = await WorkSheetModel.findOneAndUpdate(
     {
@@ -117,6 +144,39 @@ async function onApprove(request, session) {
       { session }
     );
     worksheet = created;
+  }
+
+  // Excel import mới tính lại work_unit cho ngày quên chấm công; nếu chưa import lại
+  // sau khi duyệt, công sẽ treo ở giá trị cũ (thường là 0). Tính luôn work_unit ở đây
+  // để công đúng ngay khi duyệt, không phải chờ import Excel. Import Excel sau này vẫn
+  // là nguồn tính chính thức (có gộp thêm dữ liệu máy chấm công/nghỉ phép), giá trị ở
+  // đây chỉ là kết quả tạm thời hợp lý ngay sau khi duyệt.
+  if (worksheet.check_in && worksheet.check_out) {
+    const monthStart = moment.tz(request.date, TZ).startOf("month").toDate();
+    const monthEnd = moment.tz(request.date, TZ).endOf("month").toDate();
+    const monthRequests = await RequestModel.find({
+      user_id: request.user_id,
+      request_type: "forgot_checkin",
+      status: "approved",
+      isDeleted: false,
+      date: { $gte: monthStart, $lte: monthEnd }
+    })
+      .sort({ date: 1 })
+      .session(session);
+
+    const occurrence = monthRequests.findIndex((r) => r._id.equals(request._id)) + 1;
+    const isSaturday = moment.tz(request.date, TZ).day() === 6;
+    const dayStart = moment.tz(request.date, TZ).startOf("day").toDate();
+
+    const resolveForgotPenalty = await buildForgotPenaltyResolver();
+    const { work_unit, penalty_amount } = resolveForgotPenalty(
+      dayStart,
+      occurrence || monthRequests.length,
+      isSaturday
+    );
+    worksheet.work_unit = work_unit;
+    worksheet.penalty_amount = penalty_amount;
+    await worksheet.save({ session });
   }
 
   let lastShiftEnd = null;

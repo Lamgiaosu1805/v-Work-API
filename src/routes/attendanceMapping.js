@@ -1,11 +1,34 @@
 const express = require("express");
+
 const router = express.Router();
 const AttendanceMappingController = require("../controllers/AttendanceMappingController");
-const { authenticate, isAdmin } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
+const { requirePermission } = require("../helpers/rbac");
+const { PERMISSION } = require("../constants");
 
-router.get("/", authenticate, isAdmin, AttendanceMappingController.getAll);
-router.post("/", authenticate, isAdmin, AttendanceMappingController.create);
-router.patch("/:id", authenticate, isAdmin, AttendanceMappingController.update);
-router.delete("/:id", authenticate, isAdmin, AttendanceMappingController.remove);
+router.get(
+  "/",
+  authenticate,
+  requirePermission(PERMISSION.HRM_MENU_ATTENDANCE_MAPPING),
+  AttendanceMappingController.getAll
+);
+router.post(
+  "/",
+  authenticate,
+  requirePermission(PERMISSION.HRM_MENU_ATTENDANCE_MAPPING),
+  AttendanceMappingController.create
+);
+router.patch(
+  "/:id",
+  authenticate,
+  requirePermission(PERMISSION.HRM_MENU_ATTENDANCE_MAPPING),
+  AttendanceMappingController.update
+);
+router.delete(
+  "/:id",
+  authenticate,
+  requirePermission(PERMISSION.HRM_MENU_ATTENDANCE_MAPPING),
+  AttendanceMappingController.remove
+);
 
 module.exports = router;

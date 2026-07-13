@@ -16,7 +16,13 @@ const RequestSchema = new mongoose.Schema(
     reviewed_by: { type: ObjId, ref: "user_info", default: null },
     reviewed_at: { type: Date, default: null },
     reviewer_note: { type: String, default: "" },
-    ...BaseSchema.obj,
+    approvals: [
+      {
+        account: { type: ObjId, ref: "account" },
+        reviewed_at: { type: Date, default: Date.now }
+      }
+    ],
+    ...BaseSchema.obj
   },
   {
     discriminatorKey: "request_type",
@@ -69,6 +75,24 @@ const RemoteRequest = RequestModel.discriminator(
   }),
 );
 
+const BusinessTripRequest = RequestModel.discriminator(
+  "business_trip",
+  new mongoose.Schema({
+    from_date: { type: Date, required: true },
+    to_date: { type: Date, required: true },
+    total_days: { type: Number, required: true }
+  })
+);
+
+const ClientVisitRequest = RequestModel.discriminator(
+  "client_visit",
+  new mongoose.Schema({
+    from_date: { type: Date, required: true },
+    to_date: { type: Date, required: true },
+    total_days: { type: Number, required: true }
+  })
+);
+
 const ExplanationRequest = RequestModel.discriminator(
   "explanation",
   new mongoose.Schema({
@@ -97,6 +121,8 @@ module.exports = {
   LeaveRequest,
   LateEarlyRequest,
   RemoteRequest,
+  BusinessTripRequest,
+  ClientVisitRequest,
   ExplanationRequest,
   ForgotCheckinRequest,
 };

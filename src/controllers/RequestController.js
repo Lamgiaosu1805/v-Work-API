@@ -5,6 +5,8 @@ const { getEligibleReviewers, notify } = require("../helpers/requestUtils");
 const leaveHandler = require("../helpers/leaveHandler");
 const lateEarlyHandler = require("../helpers/lateEarlyHandler");
 const remoteHandler = require("../helpers/remoteHandler");
+const businessTripHandler = require("../helpers/businessTripHandler");
+const clientVisitHandler = require("../helpers/clientVisitHandler");
 const explanationHandler = require("../helpers/explanationHandler");
 const forgotCheckinHandler = require("../helpers/forgotCheckinHandler");
 
@@ -12,14 +14,18 @@ const VALID_TYPES = [
   "leave",
   "late_early",
   "remote",
+  "business_trip",
+  "client_visit",
   "explanation",
-  "forgot_checkin",
+  "forgot_checkin"
 ];
 
 const TYPE_LABELS = {
   leave: "xin nghỉ phép",
   late_early: "đi muộn/về sớm",
   remote: "làm việc từ xa",
+  business_trip: "đi công tác",
+  client_visit: "đi gặp gỡ khách hàng",
   explanation: "giải trình",
   forgot_checkin: "quên chấm công",
 };
@@ -28,6 +34,8 @@ const handlers = {
   leave: leaveHandler,
   late_early: lateEarlyHandler,
   remote: remoteHandler,
+  business_trip: businessTripHandler,
+  client_visit: clientVisitHandler,
   explanation: explanationHandler,
   forgot_checkin: forgotCheckinHandler,
 };
@@ -111,11 +119,11 @@ const RequestController = {
         await session.commitTransaction();
         session.endSession();
 
-        UserInfoModel.findById(assigned_reviewer)
-          .select("id_account full_name")
-          .then((reviewerInfo) => {
-            if (!reviewerInfo) return;
-            return notify(reviewerInfo.id_account, {
+        getApprovalChain(userInfo._id, { stopAtFirstMatch: true })
+          .then((chain) => {
+            const nearest = chain[0];
+            if (!nearest) return null;
+            return notify(nearest.accountId, {
               title: "Đơn xin phép mới",
               body: `${userInfo.full_name} gửi đơn ${TYPE_LABELS[request_type]}`,
               type: `${request_type}_created`,
@@ -200,10 +208,16 @@ const RequestController = {
 
   getAll: async (req, res) => {
     try {
-      if (req.account.role === "user")
-        return res
-          .status(403)
-          .json({
+      const { request_type, status, from, to, search, page = 1, limit = 20 } = req.query;
+      const skip = (Number(page) - 1) * Number(limit);
+      const filter = { isDeleted: false };
+
+      const hasViewAll = await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL);
+      let scopedUserIds = null;
+      if (!hasViewAll) {
+        const hasReview = await can(req.account, PERMISSION.HRM_REQUEST_REVIEW);
+        if (!hasReview)
+          return res.status(403).json({
             errorCode: "FORBIDDEN",
             message: "Bạn không có quyền quản lý tính năng này",
           });
@@ -252,7 +266,14 @@ const RequestController = {
             { ma_nv: { $regex: search, $options: "i" } },
           ],
         }).select("_id");
-        filter.user_id = { $in: matchedUsers.map((u) => u._id) };
+        const matchedIds = matchedUsers.map((u) => u._id);
+
+        if (scopedUserIds) {
+          const matchedSet = new Set(matchedIds.map((id) => id.toString()));
+          scopedUserIds = scopedUserIds.filter((id) => matchedSet.has(id.toString()));
+        } else {
+          scopedUserIds = matchedIds;
+        }
       }
 
       const [requests, total] = await Promise.all([
@@ -305,6 +326,21 @@ const RequestController = {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
+      const preCheck = await RequestModel.findOne(
+        { _id: id, isDeleted: false },
+        { request_type: 1, total_days: 1 }
+      );
+      if (!preCheck) return res.status(404).json({ message: "Đơn không tồn tại" });
+
+      const canReviewAll = await can(req.account, PERMISSION.HRM_REQUEST_REVIEW_ALL);
+      const needsMultiApproval =
+        action === "approve" && preCheck.request_type === "leave" && preCheck.total_days > 3;
+
+      if (needsMultiApproval) release = await acquireRequestReviewLock(id);
+
+      session = await mongoose.startSession();
+      session.startTransaction();
+
       const reviewerInfo = await UserInfoModel.findOne({
         id_account: req.account._id,
         isDeleted: false,
@@ -334,7 +370,6 @@ const RequestController = {
           .json({ message: "Đơn không ở trạng thái chờ duyệt" });
       }
 
-      // if (req.account.role !== "admin") {
       if (request.user_id.equals(reviewerInfo._id)) {
         await session.abortTransaction();
         session.endSession();
@@ -367,9 +402,37 @@ const RequestController = {
       await session.commitTransaction();
       session.endSession();
 
-      UserInfoModel.findById(request.user_id)
-        .select("id_account full_name")
-        .then((employeeInfo) => {
+      if (!isFinal) {
+        UserInfoModel.findById(request.user_id)
+          .select("id_account full_name")
+          .then((employeeInfo) => {
+            if (!employeeInfo) return null;
+            const employeeAccountId = employeeInfo.id_account.toString();
+            if (employeeAccountId === req.account._id.toString()) return null;
+            const label = TYPE_LABELS[request.request_type];
+            return notify(employeeInfo.id_account, {
+              title: "Đơn đã được duyệt bước 1/2",
+              body: `Đơn ${label} của bạn đã được ${reviewerInfo.full_name} duyệt (1/2), đang chờ người duyệt tiếp theo`,
+              type: "leave_partially_approved",
+              ref_id: request._id,
+              ref_type: "request",
+              uri: `/requests/${request._id}`
+            });
+          })
+          .catch(() => {});
+
+        return res.status(200).json({
+          message: "Đã ghi nhận duyệt, đang chờ người duyệt tiếp theo",
+          data: request
+        });
+      }
+
+      Promise.all([
+        UserInfoModel.findById(request.user_id).select("id_account full_name"),
+        getApprovalChain(request.user_id, { stopAtFirstMatch: true }),
+        getAccountsWithPermission(PERMISSION.HRM_REQUEST_VIEW_ALL)
+      ])
+        .then(([employeeInfo, nearestChain, hrAccountIds]) => {
           if (!employeeInfo) return;
           const label = TYPE_LABELS[request.request_type];
           const title =

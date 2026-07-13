@@ -5,8 +5,6 @@ const { RequestModel } = require("../models/RequestModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const notificationService = require("../services/notificationService");
 const { AUTO_REJECT_AFTER_DAYS } = require("../config/common/leaveConfig");
-const { adjustLeaveBalance } = require("../helpers/leaveBalance");
-const { LEAVE_BALANCE_REASON } = require("../constants");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -48,18 +46,18 @@ async function autoRejectLeaveRequests() {
           { new: true, session }
         );
 
-        if (request.paid_days > 0) {
-          // allowNegative: true — refund dương vẫn có thể ra kết quả âm nếu
-          // balance đang âm do ứng phép, không được chặn (giống onReject).
-          await adjustLeaveBalance({
-            userId: request.user_id,
-            amount: request.paid_days,
-            reason: LEAVE_BALANCE_REASON.AUTO_REJECT_REFUND,
-            refId: request._id,
-            refType: "request",
-            allowNegative: true,
-            session
-          });
+        if (!updated) {
+          await session.abortTransaction();
+          session.endSession();
+          continue;
+        }
+
+        if (updated.paid_days > 0) {
+          await UserInfoModel.findByIdAndUpdate(
+            updated.user_id,
+            { $inc: { "leave_balance.annual": updated.paid_days } },
+            { session }
+          );
         }
 
         await session.commitTransaction();
@@ -76,9 +74,9 @@ async function autoRejectLeaveRequests() {
               title: "Đơn nghỉ bị từ chối",
               body,
               type: "leave_rejected",
-              ref_id: request._id,
+              ref_id: updated._id,
               ref_type: "request",
-              uri: `/requests/${request._id}`
+              uri: `/requests/${updated._id}`
             });
           })
           .catch(() => {});

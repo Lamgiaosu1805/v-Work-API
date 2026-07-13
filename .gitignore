@@ -2,4 +2,3 @@ node_modules
 uploads/internal
 .env
 serviceAccountKey.json
-

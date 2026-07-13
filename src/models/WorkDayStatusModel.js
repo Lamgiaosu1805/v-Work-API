@@ -6,18 +6,18 @@ const WorkDayStatusSchema = new mongoose.Schema(
     user_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "user_info",
-      required: true
+      required: true,
     },
     worksheet_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "work_sheet",
-      required: true
+      required: true,
     },
     date: { type: Date, required: true },
     period: {
       type: String,
       enum: ["morning", "afternoon", "full"],
-      required: true
+      required: true,
     },
     status: {
       type: String,
@@ -29,10 +29,8 @@ const WorkDayStatusSchema = new mongoose.Schema(
         "leave_paid",
         "leave_unpaid",
         "remote",
-        "business_trip",
-        "client_visit"
       ],
-      required: true
+      required: true,
     },
     sources: [
       {
@@ -40,18 +38,13 @@ const WorkDayStatusSchema = new mongoose.Schema(
         ref_type: {
           type: String,
           enum: ["request", "system", "attendance"],
-          required: true
-        }
-      }
+          required: true,
+        },
+      },
     ],
-    ...BaseSchema.obj
+    ...BaseSchema.obj,
   },
-  {
-    timestamps: BaseSchema.options.timestamps,
-    toJSON: BaseSchema.options.toJSON,
-    toObject: BaseSchema.options.toObject,
-    collection: "work_day_statuses"
-  }
+  { ...BaseSchema.options, collection: "work_day_statuses" },
 );
 
 WorkDayStatusSchema.index({ user_id: 1, date: 1 });

@@ -12,12 +12,6 @@
     "airbnb-base",
     "plugin:prettier/recommended"
   ],
-  "overrides": [
-    {
-      "files": ["__tests__/**/*.js"],
-      "env": { "jest": true }
-    }
-  ],
   "rules": {
     "no-console": "off",
     "no-underscore-dangle": "off",

@@ -1,6 +1,7 @@
 const RolePermissionModel = require("../models/RolePermissionModel");
 const UserRoleModel = require("../models/UserRoleModel");
 const UserPermissionModel = require("../models/UserPermissionModel");
+const PermissionModel = require("../models/PermissionModel");
 const redis = require("../config/redis");
 const { mergePermissions } = require("./rbacResolve");
 const { ROLE } = require("../constants");
@@ -64,6 +65,21 @@ async function can(account, ...requiredCodes) {
   return requiredCodes.some((code) => effectivePermissions.has(code));
 }
 
+// Reverse-lookup permission -> role -> account. Chỉ tính permission gán qua role,
+// KHÔNG tính override cá nhân qua UserPermissionModel (ALLOW trực tiếp không qua role).
+async function getAccountsWithPermission(permissionCode) {
+  const permission = await PermissionModel.findOne({ code: permissionCode, isDeleted: false });
+  if (!permission) return [];
+
+  const roleIds = await RolePermissionModel.find({
+    permission: permission._id,
+    isDeleted: false
+  }).distinct("role");
+  if (!roleIds.length) return [];
+
+  return UserRoleModel.find({ role: { $in: roleIds }, isDeleted: false }).distinct("user");
+}
+
 function requirePermission(...requiredCodes) {
   return async (req, res, next) => {
     try {
@@ -83,5 +99,6 @@ module.exports = {
   getEffectivePermissions,
   invalidateRbacCache,
   can,
-  requirePermission
+  requirePermission,
+  getAccountsWithPermission
 };

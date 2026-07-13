@@ -47,12 +47,6 @@ const RbacController = {
       const userRoles = await UserRoleModel.find({ user: accountId, isDeleted: false })
         .populate("role", "code name")
         .lean();
-      const userPermissions = await UserPermissionModel.find({
-        user: accountId,
-        isDeleted: false
-      })
-        .populate("permission", "code")
-        .lean();
       const effective = await getEffectivePermissions(accountId);
 
       return res.status(200).json({
@@ -60,9 +54,6 @@ const RbacController = {
         data: {
           account: { _id: account._id, username: account.username, role: account.role },
           roles: userRoles.map((ur) => ur.role).filter(Boolean),
-          user_permissions: userPermissions
-            .filter((up) => up.permission)
-            .map((up) => ({ code: up.permission.code, effect: up.effect })),
           effective_permissions: [...effective].sort()
         }
       });
@@ -161,63 +152,6 @@ const RbacController = {
       );
       await invalidateRbacCache(accountId);
       return res.status(200).json({ message: "Đã gỡ override" });
-    } catch (err) {
-      return res.status(500).json({ message: "Lỗi server", error: err.message });
-    }
-  },
-
-  addPermissionToRole: async (req, res) => {
-    try {
-      const { roleCode } = req.params;
-      const { permissionCode } = req.body;
-
-      const role = await RoleModel.findOne({ code: roleCode, isDeleted: false });
-      if (!role) return res.status(404).json({ message: "Không tìm thấy role" });
-
-      const permission = await PermissionModel.findOne({ code: permissionCode, isDeleted: false });
-      if (!permission) return res.status(404).json({ message: "Không tìm thấy permission" });
-
-      await RolePermissionModel.updateOne(
-        { role: role._id, permission: permission._id },
-        {
-          $setOnInsert: { role: role._id, permission: permission._id },
-          $set: { isDeleted: false }
-        },
-        { upsert: true }
-      );
-
-      const affectedUserIds = await UserRoleModel.find({
-        role: role._id,
-        isDeleted: false
-      }).distinct("user");
-      await Promise.all(affectedUserIds.map((uid) => invalidateRbacCache(uid)));
-
-      return res.status(200).json({ message: "Đã thêm quyền vào vai trò" });
-    } catch (err) {
-      return res.status(500).json({ message: "Lỗi server", error: err.message });
-    }
-  },
-
-  removePermissionFromRole: async (req, res) => {
-    try {
-      const { roleCode, permissionCode } = req.params;
-      const role = await RoleModel.findOne({ code: roleCode });
-      if (!role) return res.status(404).json({ message: "Không tìm thấy role" });
-      const permission = await PermissionModel.findOne({ code: permissionCode });
-      if (!permission) return res.status(404).json({ message: "Không tìm thấy permission" });
-
-      await RolePermissionModel.updateOne(
-        { role: role._id, permission: permission._id },
-        { $set: { isDeleted: true } }
-      );
-
-      const affectedUserIds = await UserRoleModel.find({
-        role: role._id,
-        isDeleted: false
-      }).distinct("user");
-      await Promise.all(affectedUserIds.map((uid) => invalidateRbacCache(uid)));
-
-      return res.status(200).json({ message: "Đã gỡ quyền khỏi vai trò" });
     } catch (err) {
       return res.status(500).json({ message: "Lỗi server", error: err.message });
     }

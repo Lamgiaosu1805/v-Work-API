@@ -61,11 +61,9 @@ function resolveAttendanceDay({
   forgotMap,
   forgotCountMap,
   lateForgivenSet,
-  earlyForgivenSet,
   leavePeriodsMap,
   resolveLatePenalty,
-  resolveEarlyPenalty,
-  resolveForgotPenalty
+  resolveForgotPenalty,
 }) {
   const forgot = forgotMap.get(dateKey);
 
@@ -82,12 +80,10 @@ function resolveAttendanceDay({
     ? moment.tz(`${dateKey} ${rawOut}`, "YYYY-MM-DD HH:mm", TZ).toDate()
     : null;
 
-  const appIn = worksheet.check_in ? new Date(worksheet.check_in) : null;
-  const appOut = worksheet.check_out ? new Date(worksheet.check_out) : null;
-
-  let newCheckIn = machineIn && appIn ? new Date(Math.min(machineIn, appIn)) : machineIn || appIn;
-  let newCheckOut =
-    machineOut && appOut ? new Date(Math.max(machineOut, appOut)) : machineOut || appOut;
+  let newCheckIn = machineIn;
+  let newCheckOut = machineOut;
+  if (!newCheckIn && worksheet.check_in) newCheckIn = worksheet.check_in;
+  if (!newCheckOut && worksheet.check_out) newCheckOut = worksheet.check_out;
   if (forgot) {
     if (forgot.type === "check_in" || forgot.type === "both")
       newCheckIn = worksheet.check_in;
@@ -156,19 +152,9 @@ function resolveAttendanceDay({
   }
   if (forgiven) minutesLate = 0;
 
-  let minutesEarly = 0;
-  if (hasOut && !leaveAfternoon && lastShiftEnd) {
-    const [eh, em] = lastShiftEnd.split(":").map(Number);
-    const shiftEnd = moment.tz(dateKey, TZ).hour(eh).minute(em).second(0);
-    minutesEarly = Math.max(0, Math.floor((shiftEnd - moment.tz(newCheckOut, TZ)) / 60000));
-  }
-  const earlyForgiven = earlyForgivenSet.has(dateKey);
-  if (earlyForgiven) minutesEarly = 0;
-
   let work_unit;
   let penalty_amount = 0;
   let morning_absent = false;
-  let afternoon_absent = false;
   if (missedIn || missedOut) {
     work_unit = 0;
   } else if (forgot) {
@@ -176,13 +162,13 @@ function resolveAttendanceDay({
     const r = resolveForgotPenalty(dayStart, occurrence, isSaturday);
     work_unit = Math.max(0, r.work_unit - leaveDeduction);
     penalty_amount = r.penalty_amount;
+  } else if (forgiven) {
+    work_unit = Math.max(0, (isSaturday ? 0.5 : 1) - leaveDeduction);
   } else {
-    const lateResult = resolveLatePenalty(dayStart, minutesLate, isSaturday);
-    const earlyResult = resolveEarlyPenalty(dayStart, minutesEarly, isSaturday);
-    work_unit = Math.max(0, Math.min(lateResult.work_unit, earlyResult.work_unit) - leaveDeduction);
-    penalty_amount = lateResult.penalty_amount + earlyResult.penalty_amount;
-    morning_absent = lateResult.morning_absent;
-    afternoon_absent = earlyResult.afternoon_absent;
+    const r = resolveLatePenalty(dayStart, minutesLate, isSaturday);
+    work_unit = Math.max(0, r.work_unit - leaveDeduction);
+    penalty_amount = r.penalty_amount;
+    morning_absent = r.morning_absent;
   }
 
   const sameTime = (a, b) =>
@@ -191,7 +177,6 @@ function resolveAttendanceDay({
     sameTime(worksheet.check_in, newCheckIn) &&
     sameTime(worksheet.check_out, newCheckOut) &&
     (worksheet.minutes_late ?? 0) === minutesLate &&
-    (worksheet.minute_early ?? 0) === minutesEarly &&
     (worksheet.work_unit ?? null) === work_unit &&
     (worksheet.penalty_amount ?? 0) === penalty_amount;
   if (unchanged) return { skip: true, unchanged: true };
@@ -199,7 +184,6 @@ function resolveAttendanceDay({
   worksheet.check_in = newCheckIn;
   worksheet.check_out = newCheckOut;
   worksheet.minutes_late = minutesLate;
-  worksheet.minute_early = minutesEarly;
   worksheet.work_unit = work_unit;
   worksheet.penalty_amount = penalty_amount;
 
@@ -208,11 +192,9 @@ function resolveAttendanceDay({
     newCheckIn,
     newCheckOut,
     minutesLate,
-    minutesEarly,
     work_unit,
     penalty_amount,
     morning_absent,
-    afternoon_absent,
     hasIn,
     hasOut,
     missedIn,
@@ -243,7 +225,7 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
 
     const OVERRIDABLE = ["pending", "missed_clock", "absent"];
 
-    if (computed.morning_absent || computed.afternoon_absent) {
+    if (computed.morning_absent) {
       await WorkDayStatusModel.deleteMany(
         {
           user_id: userId,
@@ -252,22 +234,10 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
         },
         { session },
       );
-      const periodStatuses =
-        computed.morning_absent && computed.afternoon_absent
-          ? [
-              ["morning", "absent"],
-              ["afternoon", "absent"]
-            ]
-          : computed.morning_absent
-            ? [
-                ["morning", "absent"],
-                ["afternoon", "present"]
-              ]
-            : [
-                ["morning", "present"],
-                ["afternoon", "absent"]
-              ];
-      for (const [period, st] of periodStatuses) {
+      for (const [period, st] of [
+        ["morning", "absent"],
+        ["afternoon", "present"],
+      ]) {
         await WorkDayStatusModel.updateOne(
           { user_id: userId, date: dayStart, period },
           {
@@ -284,7 +254,7 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
     } else {
       const complete = !computed.missedIn && !computed.missedOut;
       const newStatus = complete ? "present" : "missed_clock";
-      const result = await WorkDayStatusModel.updateMany(
+      await WorkDayStatusModel.updateMany(
         {
           user_id: userId,
           date: { $gte: dayStart, $lt: dayEnd },
@@ -294,20 +264,6 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
         { status: newStatus },
         { session },
       );
-      if (result.matchedCount === 0) {
-        await WorkDayStatusModel.updateOne(
-          { user_id: userId, date: dayStart, period: "full" },
-          {
-            $set: { status: newStatus },
-            $setOnInsert: {
-              worksheet_id: worksheet._id,
-              sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
-              isDeleted: false
-            }
-          },
-          { upsert: true, session }
-        );
-      }
     }
 
     await session.commitTransaction();

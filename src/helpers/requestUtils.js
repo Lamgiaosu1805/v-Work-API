@@ -15,10 +15,6 @@ class RequestReviewLockError extends Error {
   }
 }
 
-// Khóa quanh đoạn đọc-tính-ghi `approvals` khi duyệt đơn nghỉ dài ngày (2 người duyệt) —
-// tránh 2 lượt duyệt gần như đồng thời cùng đọc `approvals` cũ, cùng push, dẫn đến mất
-// lượt duyệt hoặc cùng nghĩ mình là người thứ 2 nên gọi `handler.onApprove` (trừ phép) 2 lần.
-// Mirror đúng pattern `acquireUserLeaveLock` ở src/helpers/leaveBalance.js.
 async function acquireRequestReviewLock(requestId) {
   const key = `${ENV_PREFIX}:request_review:lock:${String(requestId)}`;
   const token = `${Date.now()}-${Math.random()}`;
@@ -121,7 +117,7 @@ function buildWorkDatesWithStatus(request, fromMoment, toMoment) {
     } else {
       status = "leave_unpaid";
     }
-    return { date, status, period };
+    return { date, status, period, weight };
   });
 }
 

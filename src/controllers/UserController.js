@@ -70,7 +70,6 @@ const UserController = {
 
       let { userDepartments = [], schedules = [] } = req.body;
 
-      // Parse nếu là string
       if (typeof userDepartments === "string") {
         try {
           userDepartments = JSON.parse(userDepartments);
@@ -91,7 +90,6 @@ const UserController = {
         }
       }
 
-      // Nếu là parttime, schedules bắt buộc phải có
       if (employment_type === "parttime") {
         if (!Array.isArray(schedules) || schedules.length === 0) {
           await session.abortTransaction();
@@ -99,7 +97,6 @@ const UserController = {
           return res.status(400).json({ message: "Schedules bắt buộc cho parttime" });
         }
 
-        // Validate từng item và tính tổng số buổi
         let totalShifts = 0;
         for (const item of schedules) {
           if (
@@ -132,7 +129,6 @@ const UserController = {
         return res.status(400).json({ message: "Vui lòng nhập thông tin chi nhánh" });
       }
 
-      // Kiểm tra trùng CCCD
       const existingUser = await UserInfoModel.findOne({ cccd }).session(session);
       if (existingUser) {
         await session.abortTransaction();
@@ -140,7 +136,6 @@ const UserController = {
         return res.status(400).json({ message: "Thông tin đã tồn tại" });
       }
 
-      // Sinh mã nhân viên và tài khoản
       const stt = await UserInfoModel.countDocuments().session(session);
       const maNV = Utils.getMaNV((stt + 1).toString());
       const username = await Utils.generateUsername(full_name);
@@ -148,12 +143,10 @@ const UserController = {
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
 
-      // Tạo tài khoản
       const [account] = await AccountModel.create([{ username, password: hashedPassword }], {
         session
       });
 
-      // Tạo thông tin người dùng
       const [userInfo] = await UserInfoModel.create(
         [
           {
@@ -174,7 +167,6 @@ const UserController = {
         { session }
       );
 
-      // Lưu tài liệu người dùng (nếu có upload)
       const files = req.files || {};
       const documents = [];
 
@@ -193,7 +185,6 @@ const UserController = {
         await UserDocumentModel.create([{ user_id: userInfo._id, documents }], { session });
       }
 
-      // Lưu danh sách phòng ban – vị trí
       if (userDepartments.length > 0) {
         const invalidItem = userDepartments.find(
           (item) => !item.department_id || !item.position_id
@@ -207,7 +198,6 @@ const UserController = {
           });
         }
 
-        // Chỉ cho phép gán vào node lá (department/branch)
         const deptIds = userDepartments.map((i) => i.department_id);
         const depts = await DepartmentModel.find({ _id: { $in: deptIds }, isDeleted: false })
           .select("type")
@@ -230,7 +220,6 @@ const UserController = {
         await UserDepartmentPositionModel.insertMany(udpDocs, { session });
       }
 
-      // Nếu là parttime → tạo WorkSchedule
       if (employment_type === "parttime") {
         const scheduleDocs = schedules.map((item) => ({
           userId: userInfo._id,
@@ -369,9 +358,6 @@ const UserController = {
         UserInfoModel.findOne({ id_account: account._id }),
         getEffectivePermissions(account._id)
       ]);
-      // Lưu ý: admin bypass ở tầng can()/requirePermission() phía server, KHÔNG nằm
-      // trong danh sách này — permissions rỗng với admin là bình thường, FE phải tự
-      // check role === "admin" trước khi tra permissions, không suy luận ngược lại.
       const permissions = [...effectivePermissions];
 
       if (!user) {
@@ -473,7 +459,6 @@ const UserController = {
         filter._id = { $in: deptUserIds };
       }
 
-      // Lọc theo module_access: tìm account có module đó rồi map sang user_info
       if (module) {
         const accountIds = await AccountModel.find({
           $or: [{ role: "admin" }, { module_access: module }],
@@ -506,7 +491,6 @@ const UserController = {
         }).distinct("user");
 
         if (filter._id) {
-          // Giao với dept-scope đã có
           const deptSet = new Set(udpIds.map(String));
           filter._id.$in = filter._id.$in.filter((id) => deptSet.has(String(id)));
         } else {
@@ -610,7 +594,6 @@ const UserController = {
         return res.status(404).json({ message: "Không tìm thấy user" });
       }
 
-      // Nếu không phải admin/hrm, kiểm tra user được xem phải cùng phòng ban
       const isFullAccess =
         req.account.role === "admin" || req.account.module_access?.includes("hrm");
 
@@ -772,7 +755,7 @@ const UserController = {
             reason: LEAVE_BALANCE_REASON.HR_MANUAL_ADJUSTMENT,
             note: req.body.leave_balance_note || "",
             createdBy: req.account._id,
-            allowNegative: false, // site duy nhất thực sự bị chặn âm — delta HR nhập tay, không có thẩm định trước
+            allowNegative: false,
             session
           });
         } catch (e) {
@@ -780,15 +763,11 @@ const UserController = {
           session.endSession();
           if (e instanceof LeaveBalanceError)
             return res.status(e.status).json({ message: e.message });
-          // Không throw lại ra ngoài — transaction đã abort + session đã end ở đây,
-          // catch bên ngoài abort lần nữa sẽ crash cả process ("Cannot call
-          // abortTransaction twice"). Trả lỗi trực tiếp tại chỗ.
           console.error("Error adjusting leave balance in updateUser:", e);
           return res.status(500).json({ message: "Lỗi server", error: e.message });
         }
       }
 
-      // Update departments
       if (hasDepartments) {
         let userDepartmentsData = req.body.userDepartments;
         if (typeof userDepartmentsData === "string") {
@@ -807,7 +786,6 @@ const UserController = {
             session.endSession();
             return res.status(400).json({ message: "Vui lòng chọn vị trí phòng ban" });
           }
-          // Chỉ cho phép gán vào node lá
           const deptIds = userDepartmentsData.map((i) => i.department_id);
           const depts = await DepartmentModel.find({ _id: { $in: deptIds }, isDeleted: false })
             .select("type")
@@ -832,7 +810,6 @@ const UserController = {
         }
       }
 
-      // Update schedules
       if (hasSchedules) {
         let schedulesData = req.body.schedules;
         if (typeof schedulesData === "string") {
@@ -939,9 +916,6 @@ const UserController = {
         data: { ...updated.toObject(), leave_balance: leaveBalance }
       });
     } catch (error) {
-      // Guard: nếu 1 nhánh xử lý bên trong try đã abort + endSession rồi mới throw
-      // lên đây, gọi abortTransaction() lần nữa sẽ crash cả process (MongoTransactionError
-      // "Cannot call abortTransaction twice") — chỉ abort nếu session còn đang trong transaction.
       if (session.inTransaction()) {
         await session.abortTransaction();
       }
@@ -1027,7 +1001,6 @@ const UserController = {
     }
   },
 
-  // GET /user/profile/:accountId  — trang cá nhân (không cần quyền HRM)
   getProfile: async (req, res) => {
     try {
       const { accountId } = req.params;
@@ -1059,7 +1032,6 @@ const UserController = {
         employment_type: userInfo.employment_type,
         sex: userInfo.sex,
         date_of_birth: userInfo.date_of_birth ?? null,
-        // Thông tin nhạy cảm chỉ trả cho chính mình
         ...(isSelf && {
           phone_number: userInfo.phone_number,
           address: userInfo.address
@@ -1112,8 +1084,6 @@ const UserController = {
             (effectiveMoment.getMonth() - startMoment.getMonth())
         );
         if (months > 0) {
-          // allowNegative: true — backpay luôn dương; nếu balance đang âm do ứng
-          // phép, không được chặn (cùng lý do như các refund khác).
           await adjustLeaveBalance({
             userId: userInfo._id,
             amount: months * MONTHLY_ACCRUAL,

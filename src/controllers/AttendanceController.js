@@ -1,6 +1,5 @@
 const { default: mongoose } = require("mongoose");
 const moment = require("moment-timezone");
-const xlsx = require("xlsx");
 const AllowedWifiLocationModel = require("../models/AllowedWifiLocationModel");
 const ShiftModel = require("../models/ShiftModel");
 const UserInfoModel = require("../models/UserInfoModel");
@@ -117,7 +116,6 @@ const AttendanceController = {
       });
       if (!allowed) return res.status(400).json({ message: "SSID không hợp lệ." });
 
-      // Kiểm tra khoảng cách
       const R = 6371000;
       const toRad = (x) => (x * Math.PI) / 180;
       const dLat = toRad(latitude - allowed.latitude);
@@ -134,11 +132,9 @@ const AttendanceController = {
       const userInfo = await UserInfoModel.findOne({ id_account: accountId });
       if (!userInfo) return res.status(400).json({ message: "User info không tồn tại" });
 
-      // Xác định ngày hôm nay theo VN timezone
       const today = moment.tz("Asia/Ho_Chi_Minh").startOf("day").toDate();
       const tomorrow = moment(today).add(1, "day").toDate();
 
-      // Lấy worksheet
       const worksheet = await WorkSheetModel.findOne({
         user_id: userInfo._id,
         date: { $gte: today, $lt: tomorrow },
@@ -152,27 +148,22 @@ const AttendanceController = {
       if (!worksheet.shifts.length)
         return res.status(400).json({ message: "Không có ca làm việc hợp lệ." });
 
-      // Thời gian hiện tại
       const now = moment.tz("Asia/Ho_Chi_Minh");
 
-      // Nếu là part-time và có nhiều ca
       let firstShift = worksheet.shifts[0];
       let lastShift = worksheet.shifts[worksheet.shifts.length - 1];
 
-      // Nếu shifts là ObjectId, fetch lại
       if (typeof firstShift === "string" || firstShift instanceof mongoose.Types.ObjectId) {
         firstShift = await ShiftModel.findById(firstShift);
         lastShift = await ShiftModel.findById(lastShift);
       }
 
-      // Kiểm tra quá giờ: nếu nhiều ca thì lấy giờ out ca cuối
       const [lastEndH, lastEndM] = lastShift.end_time.split(":").map(Number);
       const lastShiftEnd = moment.tz(today, "Asia/Ho_Chi_Minh").hour(lastEndH).minute(lastEndM);
       if (now.isAfter(lastShiftEnd)) {
         return res.status(400).json({ message: "Đã quá giờ làm việc, không thể check-in." });
       }
 
-      // Tính số phút đi muộn dựa vào ca đầu tiên
       const [firstStartH, firstStartM] = firstShift.start_time.split(":").map(Number);
       const firstShiftStart = moment
         .tz(today, "Asia/Ho_Chi_Minh")
@@ -211,7 +202,6 @@ const AttendanceController = {
       });
       if (!allowed) return res.status(400).json({ message: "SSID không hợp lệ." });
 
-      // Kiểm tra khoảng cách
       const R = 6371000;
       const toRad = (x) => (x * Math.PI) / 180;
       const dLat = toRad(latitude - allowed.latitude);
@@ -228,11 +218,9 @@ const AttendanceController = {
       const userInfo = await UserInfoModel.findOne({ id_account: accountId });
       if (!userInfo) return res.status(400).json({ message: "User info không tồn tại" });
 
-      // Xác định ngày hôm nay VN
       const today = moment.tz("Asia/Ho_Chi_Minh").startOf("day").toDate();
       const tomorrow = moment(today).add(1, "day").toDate();
 
-      // Lấy worksheet hôm nay
       const worksheet = await WorkSheetModel.findOne({
         user_id: userInfo._id,
         date: { $gte: today, $lt: tomorrow },
@@ -248,16 +236,13 @@ const AttendanceController = {
       if (!worksheet.shifts.length)
         return res.status(400).json({ message: "Không có ca làm việc hợp lệ." });
 
-      // Thời gian hiện tại
       const now = moment.tz("Asia/Ho_Chi_Minh");
 
-      // Lấy ca cuối
       let lastShift = worksheet.shifts[worksheet.shifts.length - 1];
       if (typeof lastShift === "string" || lastShift instanceof mongoose.Types.ObjectId) {
         lastShift = await ShiftModel.findById(lastShift);
       }
 
-      // Tính phút về sớm dựa trên ca cuối
       const [lastEndH, lastEndM] = lastShift.end_time.split(":").map(Number);
       const lastShiftEnd = moment.tz(today, "Asia/Ho_Chi_Minh").hour(lastEndH).minute(lastEndM);
       const minuteEarly = Math.max(0, Math.floor((lastShiftEnd - now) / 60000));
@@ -280,7 +265,6 @@ const AttendanceController = {
         session
       });
 
-      // Cập nhật WorkDayStatus: pending → present
       await WorkDayStatusModel.updateMany(
         { worksheet_id: worksheet._id, status: "pending", isDeleted: false },
         {
@@ -355,16 +339,13 @@ const AttendanceController = {
   },
   getLichCong: async (req, res) => {
     try {
-      // Lấy user từ account
       const user = await UserInfoModel.findOne({ id_account: req.account._id });
       if (!user) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
 
-      // Lấy period từ query, mặc định = 0 (kỳ hiện tại)
-      const period = parseInt(req.query.period || 0);
+      const period = parseInt(req.query.period || 0, 10);
 
       const today = moment.tz("Asia/Ho_Chi_Minh");
 
-      // Xác định kỳ hiện tại dựa vào hôm nay
       let baseStart;
       let baseEnd;
 
@@ -376,7 +357,6 @@ const AttendanceController = {
         baseEnd = today.clone().date(25).endOf("day");
       }
 
-      // Dịch kỳ theo period
       const startDate = baseStart.clone().add(period, "month");
       const endDate = baseEnd.clone().add(period, "month");
 
@@ -492,8 +472,8 @@ const AttendanceController = {
       if (!user) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
 
       const now = moment.tz("Asia/Ho_Chi_Minh");
-      const month = parseInt(req.query.month);
-      const year = parseInt(req.query.year);
+      const month = parseInt(req.query.month, 10);
+      const year = parseInt(req.query.year, 10);
       const selected =
         month && year
           ? moment.tz({ year, month: month - 1, day: 1 }, "Asia/Ho_Chi_Minh")
@@ -553,8 +533,8 @@ const AttendanceController = {
     const TZ = "Asia/Ho_Chi_Minh";
     try {
       const { userId } = req.params;
-      const month = parseInt(req.query.month);
-      const year = parseInt(req.query.year);
+      const month = parseInt(req.query.month, 10);
+      const year = parseInt(req.query.year, 10);
 
       if (!mongoose.Types.ObjectId.isValid(userId))
         return res.status(400).json({ message: "userId không hợp lệ" });
@@ -617,8 +597,6 @@ const AttendanceController = {
             }
           ]
         }),
-        // Đơn quên chấm công còn hiệu lực (chờ duyệt hoặc đã duyệt) để hiển thị
-        // note "đã có đơn / chưa có đơn" cho ngày thiếu chấm công.
         RequestModel.find({
           user_id: userInfo._id,
           request_type: "forgot_checkin",
@@ -641,25 +619,24 @@ const AttendanceController = {
       }
 
       const reqMap = new Map();
-      const addReqToDay = (dateStr, req) => {
+      const addReqToDay = (dateStr, reqItem) => {
         if (!reqMap.has(dateStr)) reqMap.set(dateStr, []);
-        reqMap.get(dateStr).push(req);
+        reqMap.get(dateStr).push(reqItem);
       };
-      for (const req of requests) {
-        if (req.request_type === "leave" || req.request_type === "remote") {
-          const cursor = moment.tz(req.from_date, TZ).startOf("day");
-          const end = moment.tz(req.to_date, TZ).startOf("day");
+      for (const reqItem of requests) {
+        if (reqItem.request_type === "leave" || reqItem.request_type === "remote") {
+          const cursor = moment.tz(reqItem.from_date, TZ).startOf("day");
+          const end = moment.tz(reqItem.to_date, TZ).startOf("day");
           while (cursor.isSameOrBefore(end, "day")) {
             if (cursor.isBetween(periodStart, periodEnd, "day", "[]"))
-              addReqToDay(cursor.format("YYYY-MM-DD"), req);
+              addReqToDay(cursor.format("YYYY-MM-DD"), reqItem);
             cursor.add(1, "day");
           }
-        } else if (req.date) {
-          addReqToDay(moment.tz(req.date, TZ).format("YYYY-MM-DD"), req);
+        } else if (reqItem.date) {
+          addReqToDay(moment.tz(reqItem.date, TZ).format("YYYY-MM-DD"), reqItem);
         }
       }
 
-      // Đơn quên chấm công theo ngày (tối đa 1 đơn còn hiệu lực/ngày).
       const forgotReqMap = new Map();
       for (const r of forgotRequests) {
         if (r.date) forgotReqMap.set(moment.tz(r.date, TZ).format("YYYY-MM-DD"), r);
@@ -682,6 +659,8 @@ const AttendanceController = {
       let leave_paid_days = 0;
       let leave_unpaid_days = 0;
       let remote_days = 0;
+      let business_trip_days = 0;
+      let client_visit_days = 0;
       let late_days = 0;
       let total_minutes_late = 0;
       let early_days = 0;
@@ -720,6 +699,8 @@ const AttendanceController = {
           else if (s.status === "leave_paid") leave_paid_days += w;
           else if (s.status === "leave_unpaid") leave_unpaid_days += w;
           else if (s.status === "remote") remote_days += w;
+          else if (s.status === "business_trip") business_trip_days += w;
+          else if (s.status === "client_visit") client_visit_days += w;
         }
 
         return {
@@ -735,8 +716,7 @@ const AttendanceController = {
             period: s.period,
             status: s.status
           })),
-          // Note "đã có đơn / chưa có đơn" cho ngày thiếu chấm công:
-          // null = chưa có đơn; có object = đã có đơn (kèm trạng thái duyệt).
+
           forgot_request: (() => {
             const r = forgotReqMap.get(dateStr);
             if (!r) return null;
@@ -829,6 +809,8 @@ const AttendanceController = {
           leave_paid_days,
           leave_unpaid_days,
           remote_days,
+          business_trip_days,
+          client_visit_days,
           late_days,
           total_minutes_late,
           early_days,
@@ -845,13 +827,13 @@ const AttendanceController = {
   getPayrollStatsAll: async (req, res) => {
     const TZ = "Asia/Ho_Chi_Minh";
     try {
-      const month = parseInt(req.query.month);
-      const year = parseInt(req.query.year);
+      const month = parseInt(req.query.month, 10);
+      const year = parseInt(req.query.year, 10);
       if (!month || !year || month < 1 || month > 12)
         return res.status(400).json({ message: "month và year là bắt buộc (month: 1-12)" });
 
-      const page = Math.max(1, parseInt(req.query.page) || 1);
-      const limit = Math.max(1, Math.min(200, parseInt(req.query.limit) || 50));
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 50));
       const { department, q } = req.query;
 
       const refDate = moment.tz({ year, month: month - 1, day: 1 }, TZ);
@@ -974,6 +956,8 @@ const AttendanceController = {
         let leave_paid_days = 0;
         let leave_unpaid_days = 0;
         let remote_days = 0;
+        let business_trip_days = 0;
+        let client_visit_days = 0;
         for (const s of dss) {
           const w = s.period === "full" ? 1 : 0.5;
           if (s.status === "present") present_days += w;
@@ -982,6 +966,8 @@ const AttendanceController = {
           else if (s.status === "leave_paid") leave_paid_days += w;
           else if (s.status === "leave_unpaid") leave_unpaid_days += w;
           else if (s.status === "remote") remote_days += w;
+          else if (s.status === "business_trip") business_trip_days += w;
+          else if (s.status === "client_visit") client_visit_days += w;
         }
 
         return {
@@ -1002,6 +988,8 @@ const AttendanceController = {
           leave_paid_days,
           leave_unpaid_days,
           remote_days,
+          business_trip_days,
+          client_visit_days,
           late_days,
           total_minutes_late,
           early_days,
@@ -1031,8 +1019,8 @@ const AttendanceController = {
 
   getCalendar: async (req, res) => {
     try {
-      const month = parseInt(req.query.month);
-      const year = parseInt(req.query.year);
+      const month = parseInt(req.query.month, 10);
+      const year = parseInt(req.query.year, 10);
       if (!month || !year || month < 1 || month > 12)
         return res.status(400).json({ message: "month và year là bắt buộc (month: 1-12)" });
 
@@ -1326,8 +1314,8 @@ const AttendanceController = {
   getStandardWorkUnits: async (req, res) => {
     const TZ = "Asia/Ho_Chi_Minh";
     try {
-      const month = parseInt(req.query.month);
-      const year = parseInt(req.query.year);
+      const month = parseInt(req.query.month, 10);
+      const year = parseInt(req.query.year, 10);
       if (!month || !year || month < 1 || month > 12)
         return res.status(400).json({ message: "month và year là bắt buộc (month: 1-12)" });
 

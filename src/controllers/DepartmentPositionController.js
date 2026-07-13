@@ -6,233 +6,230 @@ const UserInfoModel = require("../models/UserInfoModel");
 const { ensureFolderForDept } = require("../jobs/ensureDeptFolders");
 
 const DepartmentPositionController = {
-    // POST /department/createDepartment
-    createDepartment: async (req, res) => {
-        try {
-            const { department_name, department_code, description, type, address, parent_id, manager_id } = req.body;
+  createDepartment: async (req, res) => {
+    try {
+      const {
+        department_name,
+        department_code,
+        description,
+        type,
+        address,
+        parent_id,
+        manager_id
+      } = req.body;
 
-            if (!department_name || !department_code)
-                return res.status(400).json({ message: "Tên và mã phòng ban là bắt buộc" });
+      if (!department_name || !department_code)
+        return res.status(400).json({ message: "Tên và mã phòng ban là bắt buộc" });
 
-            if (type && !DepartmentModel.schema.path("type").enumValues.includes(type))
-                return res.status(400).json({ message: "Loại phòng ban không hợp lệ" });
+      if (type && !DepartmentModel.schema.path("type").enumValues.includes(type))
+        return res.status(400).json({ message: "Loại phòng ban không hợp lệ" });
 
-            if (parent_id) {
-                const parent = await DepartmentModel.findOne({ _id: parent_id, isDeleted: false });
-                if (!parent)
-                    return res.status(404).json({ message: "Phòng ban cha không tồn tại" });
-            }
+      if (parent_id) {
+        const parent = await DepartmentModel.findOne({ _id: parent_id, isDeleted: false });
+        if (!parent) return res.status(404).json({ message: "Phòng ban cha không tồn tại" });
+      }
 
-            if (manager_id) {
-                const managerInfo = await UserInfoModel.findOne({ _id: manager_id, isDeleted: false });
-                if (!managerInfo)
-                    return res.status(404).json({ message: "Người quản lý không tồn tại" });
-            }
+      if (manager_id) {
+        const managerInfo = await UserInfoModel.findOne({ _id: manager_id, isDeleted: false });
+        if (!managerInfo) return res.status(404).json({ message: "Người quản lý không tồn tại" });
+      }
 
-            const newDept = await DepartmentModel.create({
-                department_name,
-                department_code,
-                description: description || "",
-                type: type || "department",
-                address: address || "",
-                parent: parent_id || null,
-                manager: manager_id || null,
-            });
+      const newDept = await DepartmentModel.create({
+        department_name,
+        department_code,
+        description: description || "",
+        type: type || "department",
+        address: address || "",
+        parent: parent_id || null,
+        manager: manager_id || null
+      });
 
-            if (LEAF_TYPES.includes(newDept.type)) {
-                ensureFolderForDept(department_code);
-            }
+      if (LEAF_TYPES.includes(newDept.type)) {
+        ensureFolderForDept(department_code);
+      }
 
-            return res.status(201).json({ message: "Tạo phòng ban thành công", data: newDept });
-        } catch (error) {
-            if (error.code === 11000)
-                return res.status(409).json({ message: "Mã phòng ban đã tồn tại" });
-            return res.status(500).json({ message: "Lỗi server", error: error.message });
+      return res.status(201).json({ message: "Tạo phòng ban thành công", data: newDept });
+    } catch (error) {
+      if (error.code === 11000) return res.status(409).json({ message: "Mã phòng ban đã tồn tại" });
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
+
+  getAllDepartments: async (req, res) => {
+    try {
+      const { flat, leaf_only } = req.query;
+
+      const filter = { isDeleted: false };
+      if (leaf_only === "true") filter.type = { $in: LEAF_TYPES };
+
+      const departments = await DepartmentModel.find(filter)
+        .populate("parent", "department_name department_code type")
+        .populate("manager", "full_name ma_nv")
+        .sort({ createdAt: 1 })
+        .lean();
+
+      if (flat === "true") {
+        return res
+          .status(200)
+          .json({ message: "Lấy danh sách phòng ban thành công", data: departments });
+      }
+
+      const nodeMap = {};
+      const roots = [];
+
+      for (const dept of departments) {
+        nodeMap[dept._id.toString()] = { ...dept, children: [] };
+      }
+
+      for (const dept of departments) {
+        const parentId = dept.parent?._id?.toString() || dept.parent?.toString();
+        if (parentId && nodeMap[parentId]) {
+          nodeMap[parentId].children.push(nodeMap[dept._id.toString()]);
+        } else {
+          roots.push(nodeMap[dept._id.toString()]);
         }
-    },
+      }
 
-    // GET /department/getAll?flat=true&leaf_only=true
-    // flat=true       → danh sách phẳng (dùng cho dropdown)
-    // leaf_only=true  → chỉ trả node lá (department + branch), dùng khi assign nhân viên
-    // mặc định        → cây phân cấp đầy đủ
-    getAllDepartments: async (req, res) => {
-        try {
-            const { flat, leaf_only } = req.query;
+      return res.status(200).json({ message: "Lấy danh sách phòng ban thành công", data: roots });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
 
-            const filter = { isDeleted: false };
-            if (leaf_only === "true") filter.type = { $in: LEAF_TYPES };
+  updateDepartment: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { department_name, description, type, address, parent_id, manager_id } = req.body;
 
-            const departments = await DepartmentModel.find(filter)
-                .populate("parent", "department_name department_code type")
-                .populate("manager", "full_name ma_nv")
-                .sort({ createdAt: 1 })
-                .lean();
+      const dept = await DepartmentModel.findOne({ _id: id, isDeleted: false });
+      if (!dept) return res.status(404).json({ message: "Phòng ban không tồn tại" });
 
-            if (flat === "true") {
-                return res.status(200).json({ message: "Lấy danh sách phòng ban thành công", data: departments });
-            }
+      if (department_name) dept.department_name = department_name;
+      if (description !== undefined) dept.description = description;
+      if (address !== undefined) dept.address = address;
 
-            // Build pure parent-child tree
-            const nodeMap = {};
-            const roots = [];
+      if (type !== undefined) {
+        if (!DepartmentModel.schema.path("type").enumValues.includes(type))
+          return res.status(400).json({ message: "Loại phòng ban không hợp lệ" });
+        dept.type = type;
+      }
 
-            for (const dept of departments) {
-                nodeMap[dept._id.toString()] = { ...dept, children: [] };
-            }
-
-            for (const dept of departments) {
-                const parentId = dept.parent?._id?.toString() || dept.parent?.toString();
-                if (parentId && nodeMap[parentId]) {
-                    nodeMap[parentId].children.push(nodeMap[dept._id.toString()]);
-                } else {
-                    roots.push(nodeMap[dept._id.toString()]);
-                }
-            }
-
-            return res.status(200).json({ message: "Lấy danh sách phòng ban thành công", data: roots });
-        } catch (error) {
-            return res.status(500).json({ message: "Lỗi server", error: error.message });
+      if (parent_id !== undefined) {
+        if (!parent_id) {
+          dept.parent = null;
+        } else {
+          if (parent_id === id)
+            return res.status(400).json({ message: "Phòng ban không thể là cha của chính nó" });
+          const parent = await DepartmentModel.findOne({ _id: parent_id, isDeleted: false });
+          if (!parent) return res.status(404).json({ message: "Phòng ban cha không tồn tại" });
+          dept.parent = parent_id;
         }
-    },
+      }
 
-    // PUT /department/update/:id
-    updateDepartment: async (req, res) => {
-        try {
-            const { id } = req.params;
-            const { department_name, description, type, address, parent_id, manager_id } = req.body;
-
-            const dept = await DepartmentModel.findOne({ _id: id, isDeleted: false });
-            if (!dept)
-                return res.status(404).json({ message: "Phòng ban không tồn tại" });
-
-            if (department_name) dept.department_name = department_name;
-            if (description !== undefined) dept.description = description;
-            if (address !== undefined) dept.address = address;
-
-            if (type !== undefined) {
-                if (!DepartmentModel.schema.path("type").enumValues.includes(type))
-                    return res.status(400).json({ message: "Loại phòng ban không hợp lệ" });
-                dept.type = type;
-            }
-
-            if (parent_id !== undefined) {
-                if (!parent_id) {
-                    dept.parent = null;
-                } else {
-                    if (parent_id === id)
-                        return res.status(400).json({ message: "Phòng ban không thể là cha của chính nó" });
-                    const parent = await DepartmentModel.findOne({ _id: parent_id, isDeleted: false });
-                    if (!parent)
-                        return res.status(404).json({ message: "Phòng ban cha không tồn tại" });
-                    dept.parent = parent_id;
-                }
-            }
-
-            if (manager_id !== undefined) {
-                if (!manager_id) {
-                    dept.manager = null;
-                } else {
-                    const managerInfo = await UserInfoModel.findOne({ _id: manager_id, isDeleted: false });
-                    if (!managerInfo)
-                        return res.status(404).json({ message: "Người quản lý không tồn tại" });
-                    dept.manager = manager_id;
-                }
-            }
-
-            await dept.save();
-            return res.status(200).json({ message: "Cập nhật phòng ban thành công", data: dept });
-        } catch (error) {
-            return res.status(500).json({ message: "Lỗi server", error: error.message });
+      if (manager_id !== undefined) {
+        if (!manager_id) {
+          dept.manager = null;
+        } else {
+          const managerInfo = await UserInfoModel.findOne({ _id: manager_id, isDeleted: false });
+          if (!managerInfo) return res.status(404).json({ message: "Người quản lý không tồn tại" });
+          dept.manager = manager_id;
         }
-    },
+      }
 
-    // DELETE /department/delete/:id
-    deleteDepartment: async (req, res) => {
-        try {
-            const { id } = req.params;
+      await dept.save();
+      return res.status(200).json({ message: "Cập nhật phòng ban thành công", data: dept });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
 
-            const dept = await DepartmentModel.findOne({ _id: id, isDeleted: false });
-            if (!dept)
-                return res.status(404).json({ message: "Phòng ban không tồn tại" });
+  deleteDepartment: async (req, res) => {
+    try {
+      const { id } = req.params;
 
-            const hasChildren = await DepartmentModel.exists({ parent: id, isDeleted: false });
-            if (hasChildren)
-                return res.status(409).json({ message: "Không thể xóa phòng ban đang có phòng ban con" });
+      const dept = await DepartmentModel.findOne({ _id: id, isDeleted: false });
+      if (!dept) return res.status(404).json({ message: "Phòng ban không tồn tại" });
 
-            const hasMember = await UserDepartmentPositionModel.exists({ department: id, isDeleted: false });
-            if (hasMember)
-                return res.status(409).json({ message: "Không thể xóa phòng ban đang có nhân viên" });
+      const hasChildren = await DepartmentModel.exists({ parent: id, isDeleted: false });
+      if (hasChildren)
+        return res.status(409).json({ message: "Không thể xóa phòng ban đang có phòng ban con" });
 
-            dept.isDeleted = true;
-            dept.is_active = false;
-            await dept.save();
+      const hasMember = await UserDepartmentPositionModel.exists({
+        department: id,
+        isDeleted: false
+      });
+      if (hasMember)
+        return res.status(409).json({ message: "Không thể xóa phòng ban đang có nhân viên" });
 
-            return res.status(200).json({ message: "Xóa phòng ban thành công" });
-        } catch (error) {
-            return res.status(500).json({ message: "Lỗi server", error: error.message });
-        }
-    },
+      dept.isDeleted = true;
+      dept.is_active = false;
+      await dept.save();
 
-    createPosition: async (req, res) => {
-        try {
-            const { position_name, description } = req.body;
-            if (!position_name)
-                return res.status(400).json({ message: "Tên vị trí là bắt buộc" });
+      return res.status(200).json({ message: "Xóa phòng ban thành công" });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
 
-            const newPosition = await PositionModel.create({ position_name, description });
-            return res.status(201).json({ message: "Tạo vị trí thành công", data: newPosition });
-        } catch (error) {
-            return res.status(500).json({ message: "Lỗi server", error: error.message });
-        }
-    },
+  createPosition: async (req, res) => {
+    try {
+      const { position_name, description } = req.body;
+      if (!position_name) return res.status(400).json({ message: "Tên vị trí là bắt buộc" });
 
-    getAllPositions: async (_req, res) => {
-        try {
-            const positions = await PositionModel.find({ isDeleted: false });
-            return res.status(200).json({ message: "Lấy danh sách vị trí thành công", data: positions });
-        } catch (error) {
-            return res.status(500).json({ message: "Lỗi server", error: error.message });
-        }
-    },
+      const newPosition = await PositionModel.create({ position_name, description });
+      return res.status(201).json({ message: "Tạo vị trí thành công", data: newPosition });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
 
-    updatePosition: async (req, res) => {
-        try {
-            const { id } = req.params;
-            const { position_name, description } = req.body;
+  getAllPositions: async (_req, res) => {
+    try {
+      const positions = await PositionModel.find({ isDeleted: false });
+      return res.status(200).json({ message: "Lấy danh sách vị trí thành công", data: positions });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
 
-            const position = await PositionModel.findOne({ _id: id, isDeleted: false });
-            if (!position)
-                return res.status(404).json({ message: "Chức vụ không tồn tại" });
+  updatePosition: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { position_name, description } = req.body;
 
-            if (position_name) position.position_name = position_name;
-            if (description !== undefined) position.description = description;
+      const position = await PositionModel.findOne({ _id: id, isDeleted: false });
+      if (!position) return res.status(404).json({ message: "Chức vụ không tồn tại" });
 
-            await position.save();
-            return res.status(200).json({ message: "Cập nhật chức vụ thành công", data: position });
-        } catch (error) {
-            return res.status(500).json({ message: "Lỗi server", error: error.message });
-        }
-    },
+      if (position_name) position.position_name = position_name;
+      if (description !== undefined) position.description = description;
 
-    deletePosition: async (req, res) => {
-        try {
-            const { id } = req.params;
+      await position.save();
+      return res.status(200).json({ message: "Cập nhật chức vụ thành công", data: position });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
 
-            const position = await PositionModel.findOne({ _id: id, isDeleted: false });
-            if (!position)
-                return res.status(404).json({ message: "Chức vụ không tồn tại" });
+  deletePosition: async (req, res) => {
+    try {
+      const { id } = req.params;
 
-            const inUse = await UserDepartmentPositionModel.exists({ position: id, isDeleted: false });
-            if (inUse)
-                return res.status(409).json({ message: "Không thể xóa chức vụ đang có nhân viên đảm nhiệm" });
+      const position = await PositionModel.findOne({ _id: id, isDeleted: false });
+      if (!position) return res.status(404).json({ message: "Chức vụ không tồn tại" });
 
-            position.isDeleted = true;
-            await position.save();
-            return res.status(200).json({ message: "Xóa chức vụ thành công" });
-        } catch (error) {
-            return res.status(500).json({ message: "Lỗi server", error: error.message });
-        }
-    },
+      const inUse = await UserDepartmentPositionModel.exists({ position: id, isDeleted: false });
+      if (inUse)
+        return res
+          .status(409)
+          .json({ message: "Không thể xóa chức vụ đang có nhân viên đảm nhiệm" });
+
+      position.isDeleted = true;
+      await position.save();
+      return res.status(200).json({ message: "Xóa chức vụ thành công" });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  }
 };
 
 module.exports = DepartmentPositionController;

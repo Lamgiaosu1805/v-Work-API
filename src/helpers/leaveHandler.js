@@ -100,11 +100,6 @@ async function validateAsync(payload, userInfo, session) {
   const fromDate = moment.tz(payload.from_date, TZ).startOf("day").toDate();
   const toDate = moment.tz(payload.to_date, TZ).startOf("day").toDate();
 
-  // RequestModel.from_date/to_date lưu qua Mongoose auto-cast chuỗi "YYYY-MM-DD" trực
-  // tiếp (new Date(string) = nửa đêm UTC) — KHÁC với fromDate/toDate ở trên (nửa đêm
-  // giờ VN, dùng cho HolidayModel — nơi date được lưu qua moment.tz(...).startOf("day")
-  // tường minh). Dùng nhầm fromDate/toDate (lệch 7 tiếng) để query candidates sẽ khiến
-  // đơn trùng ngày không bao giờ bị phát hiện — phải khớp đúng quy ước lưu của RequestModel.
   const rawFromDate = new Date(payload.from_date);
   const rawToDate = new Date(payload.to_date);
 
@@ -150,9 +145,6 @@ async function validateAsync(payload, userInfo, session) {
 async function onCreate(request, userInfo, session) {
   if (request.paid_days > 0) {
     try {
-      // allowNegative: true — pre-vetted bởi validate() qua projectedBalance
-      // (tính năng "ứng phép" cố ý: được trừ vượt số dư hiện tại, bù bằng
-      // cộng dồn tương lai chưa tới kỳ). KHÔNG được chặn âm ở đây.
       await adjustLeaveBalance({
         userId: userInfo._id,
         amount: -request.paid_days,
@@ -242,20 +234,62 @@ async function onApprove(request, session) {
     created.forEach((w) => sheetMap.set(moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id));
   }
 
-  for (const { date, status, period } of datesWithStatus) {
+  const AWAY_STATUSES = ["business_trip", "client_visit", "remote"];
+
+  for (const { date, status, period, weight } of datesWithStatus) {
     const worksheet_id = sheetMap.get(moment.tz(date, TZ).format("YYYY-MM-DD"));
-    await WorkDayStatusModel.findOneAndUpdate(
-      { user_id: request.user_id, date, period },
-      {
-        worksheet_id,
-        status,
-        $addToSet: { sources: { ref_id: request._id, ref_type: "request" } }
-      },
-      { upsert: true, session, new: true }
+
+    const priorStatuses = await WorkDayStatusModel.find(
+      { user_id: request.user_id, date, isDeleted: false },
+      { status: 1 }
+    ).session(session);
+    const wasAwayDay = priorStatuses.some((s) => AWAY_STATUSES.includes(s.status));
+    const existingWs = existing.find(
+      (w) => moment.tz(w.date, TZ).format("YYYY-MM-DD") === moment.tz(date, TZ).format("YYYY-MM-DD")
     );
+    const hasGenuineAttendance = !wasAwayDay && existingWs?.check_in && existingWs?.check_out;
+
+    await WorkDayStatusModel.deleteMany(
+      { user_id: request.user_id, date, isDeleted: false },
+      { session }
+    );
+    await WorkDayStatusModel.create(
+      [
+        {
+          user_id: request.user_id,
+          worksheet_id,
+          date,
+          period,
+          status,
+          sources: [{ ref_id: request._id, ref_type: "request" }]
+        }
+      ],
+      { session }
+    );
+
+    if (!hasGenuineAttendance) {
+      const wsUpdate = {
+        work_unit: status === "leave_paid" ? weight : 0,
+        minutes_late: 0,
+        minute_early: 0,
+        penalty_amount: 0
+      };
+      if (wasAwayDay) {
+        wsUpdate.check_in = null;
+        wsUpdate.check_out = null;
+      }
+      await WorkSheetModel.updateOne({ _id: worksheet_id }, wsUpdate, { session });
+    }
   }
 
-  for (const w of existing) {
+  const refreshed = await WorkSheetModel.find(
+    { user_id: request.user_id, date: { $gte: fromStart, $lte: toEnd }, isDeleted: false },
+    { date: 1, check_in: 1, check_out: 1, shifts: 1 }
+  )
+    .populate("shifts")
+    .session(session);
+
+  for (const w of refreshed) {
     if (!w.check_in || !w.check_out) continue;
     const lastShift = w.shifts?.length ? w.shifts[w.shifts.length - 1] : null;
     await resolveLeaveConflictOnAttendance({
@@ -272,9 +306,6 @@ async function onApprove(request, session) {
 
 async function onReject(request, session, isCancel = false) {
   if (request.paid_days > 0) {
-    // allowNegative: true — đây là hoàn phép (amount luôn dương), nhưng balance
-    // hiện tại có thể đang âm do "ứng phép" trước đó; một refund dương vẫn có
-    // thể cho kết quả âm và KHÔNG được phép bị chặn trong trường hợp đó.
     await adjustLeaveBalance({
       userId: request.user_id,
       amount: request.paid_days,
@@ -351,8 +382,6 @@ async function resolveLeaveConflictOnAttendance({
   }
 
   if (totalRefund > 0) {
-    // allowNegative: true — cùng lý do như onReject: refund dương vẫn có thể
-    // ra kết quả âm nếu balance đang âm do ứng phép, không được chặn.
     await adjustLeaveBalance({
       userId,
       amount: totalRefund,

@@ -10,29 +10,30 @@ const UserInfoModel = new mongoose.Schema(
     date_of_birth: { type: Date, required: true },
     address: { type: String, required: true },
     tinh_trang_hon_nhan: { type: Number, required: true }, // 0: Độc thân, 1: Đã kết hôn, 2: Khác
-    id_account: { type: mongoose.Schema.Types.ObjectId, ref: 'account', required: true },
+    id_account: { type: mongoose.Schema.Types.ObjectId, ref: "account", required: true },
     branch_id: { type: mongoose.Schema.Types.ObjectId, ref: "branch", default: null },
     ma_nv: { type: String, required: true, unique: true },
     employment_type: {
       type: String,
       enum: ["fulltime", "parttime"],
-      required: "true",
+      required: "true"
     },
-    leave_balance: { // phép đang có (số ngày, có thể là float: 0.5)
-      annual: { type: Number, default: 0 }, // phép năm hiện có
+    employment_status: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "employment_status",
+      default: null
     },
-    employment_status: { type: mongoose.Schema.Types.ObjectId, ref: "employment_status", default: null },
     start_date: { type: Date, default: null },
     probation_end_date: { type: Date, default: null },
     resignation_date: { type: Date, default: null },
     avatar: { type: String, default: null },
     cover_photo: { type: String, default: null },
-    ...BaseSchema.obj,
+    ...BaseSchema.obj
   },
   {
     timestamps: BaseSchema.options.timestamps,
     toJSON: BaseSchema.options.toJSON,
-    toObject: BaseSchema.options.toObject,
+    toObject: BaseSchema.options.toObject
   }
 );
 

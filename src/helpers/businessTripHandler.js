@@ -18,13 +18,13 @@ function validate(body) {
 async function validateAsync(payload, userInfo, session) {
   const overlap = await RequestModel.findOne({
     user_id: userInfo._id,
-    request_type: "remote",
+    request_type: "business_trip",
     status: { $in: ["pending", "approved"] },
     from_date: { $lte: new Date(payload.to_date) },
     to_date: { $gte: new Date(payload.from_date) },
     isDeleted: false
   }).session(session);
-  return overlap ? { status: 409, message: "Đã có đơn remote trong khoảng thời gian này" } : null;
+  return overlap ? { status: 409, message: "Đã có đơn công tác trong khoảng thời gian này" } : null;
 }
 
-module.exports = { validate, validateAsync, onApprove: createOnApprove("remote") };
+module.exports = { validate, validateAsync, onApprove: createOnApprove("business_trip") };

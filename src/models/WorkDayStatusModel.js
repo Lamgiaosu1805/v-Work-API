@@ -29,8 +29,6 @@ const WorkDayStatusSchema = new mongoose.Schema(
         "leave_paid",
         "leave_unpaid",
         "remote",
-        "business_trip",
-        "client_visit"
       ],
       required: true,
     },

@@ -24,11 +24,10 @@ async function ensurePendingStatus(userId, worksheetId, date) {
   );
 }
 
-async function createDailyWorkSheets(targetDate) {
+async function createDailyWorkSheets() {
   try {
-    const refMoment = targetDate ? moment.tz(targetDate, TZ) : moment.tz(TZ);
-    const today = refMoment.clone().startOf("day").toDate();
-    const dayOfWeek = refMoment.day() === 0 ? 7 : refMoment.day();
+    const today = moment.tz(TZ).startOf("day").toDate();
+    const dayOfWeek = moment.tz(TZ).day() === 0 ? 7 : moment.tz(TZ).day(); // 1=Mon...7=Sun
 
     if (dayOfWeek === 7) {
       console.log("[Cron] Hôm nay là Chủ Nhật, bỏ qua việc tạo worksheet.");
@@ -66,6 +65,7 @@ async function createDailyWorkSheets(targetDate) {
     );
     const parttimeUsers = users.filter((u) => !isOnHoliday(u) && u.employment_type === "parttime");
 
+    // ---- FULLTIME ----
     const [adminShift, morningShift] = await Promise.all([
       Shift.findOne({ name: "Ca hành chính" }),
       Shift.findOne({ name: "Ca sáng" })
@@ -86,6 +86,7 @@ async function createDailyWorkSheets(targetDate) {
       await ensurePendingStatus(user._id, worksheet._id, today);
     }
 
+    // ---- PARTTIME ----
     for (const user of parttimeUsers) {
       const workSchedule = await WorkSchedule.find({ userId: user._id, dayOfWeek }).populate(
         "shifts"

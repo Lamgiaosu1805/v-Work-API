@@ -7,6 +7,7 @@ const ALLOWED_CLIENTS = [
     },
     {
         api_key: process.env.VNIFTE_API_KEY,
+        allowed_ips: process.env.TIKLUY_ALLOWED_IPS?.split(",").map(ip => ip.trim()) ?? [],
         app_code: "vnifte",
     },
     // Thêm app khác vào đây

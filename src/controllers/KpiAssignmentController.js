@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const KpiAssignmentModel = require("../models/KpiAssignmentModel");
 const KpiMetricModel = require("../models/KpiMetricModel");
 const { KPI_ASSIGNMENT_STATUS } = require("../constants");
+const { decomposeAssignment } = require("../helpers/kpiDecompose");
 
 const { DRAFT, ACTIVE, SUPERSEDED } = KPI_ASSIGNMENT_STATUS;
 
@@ -159,6 +160,15 @@ const KpiAssignmentController = {
           .json({ message: "Assignment đã bị supersede, không thể activate lại" });
       }
 
+      const oldActive = await KpiAssignmentModel.findOne({
+        sale_id: assignment.sale_id,
+        year: assignment.year,
+        month: assignment.month,
+        status: ACTIVE
+      })
+        .session(session)
+        .lean();
+
       await KpiAssignmentModel.updateOne(
         {
           sale_id: assignment.sale_id,
@@ -174,13 +184,38 @@ const KpiAssignmentController = {
       assignment.activated_at = new Date();
       await assignment.save({ session });
 
+      const decomposeResult = await decomposeAssignment({
+        assignment,
+        previousItems: oldActive ? oldActive.items : [],
+        session
+      });
+
       await session.commitTransaction();
-      return res.status(200).json({ message: "Đã activate assignment", data: assignment });
+      return res
+        .status(200)
+        .json({ message: "Đã activate assignment", data: assignment, decompose: decomposeResult });
     } catch (err) {
       await session.abortTransaction();
       return res.status(500).json({ message: "Lỗi server", error: err.message });
     } finally {
       session.endSession();
+    }
+  },
+
+  decompose: async (req, res) => {
+    try {
+      const assignment = await KpiAssignmentModel.findOne({
+        _id: req.params.id,
+        isDeleted: false
+      }).lean();
+      if (!assignment) return res.status(404).json({ message: "Không tìm thấy assignment" });
+      if (assignment.status !== ACTIVE)
+        return res.status(409).json({ message: "Chỉ recompute được assignment đang active" });
+
+      const decomposeResult = await decomposeAssignment({ assignment, previousItems: [] });
+      return res.status(200).json({ message: "Đã recompute decompose", data: decomposeResult });
+    } catch (err) {
+      return res.status(500).json({ message: "Lỗi server", error: err.message });
     }
   },
 

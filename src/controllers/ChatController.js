@@ -26,7 +26,10 @@ const {
   addMembers,
   ensureConversationAccess,
   updateGroupConversationAvatar,
-  updateMemberNickname
+  updateMemberNickname,
+  getMessageById,
+  getConversationImages,
+  reactToMessage
 } = require("../services/chatService");
 
 const CONTENT_TYPE_MAP = {
@@ -39,7 +42,6 @@ const CONTENT_TYPE_MAP = {
 
 const uploadDir =
   process.env.NODE_ENV === "production" ? process.env.UPLOAD_DIR_PROD : process.env.UPLOAD_DIR_DEV;
-
 const AVATAR_PREFIX = "group-avatar";
 const avatarDir = path.resolve(
   process.env.NODE_ENV === "production"
@@ -331,14 +333,24 @@ const ChatController = {
           }
         : null;
 
+      let mentions = [];
+      try {
+        mentions = req.body.mentions ? JSON.parse(req.body.mentions) : [];
+      } catch {
+        mentions = [];
+      }
+
       session.startTransaction();
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
+
       const message = await sendMessage({
         conversationId: req.params.conversationId,
         senderUserInfoId: currentUserInfo._id,
         content: req.body.content,
         type: attachment ? "image" : req.body.type,
         attachment,
+        replyToMessageId: req.body.replyToMessageId || null,
+        mentions,
         session
       });
       await session.commitTransaction();
@@ -712,6 +724,79 @@ const ChatController = {
       return res.status(200).json({
         message: "Đổi biệt danh thành công",
         data: signAvatarsDeep(conversation)
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  getMessageById: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const message = await getMessageById({
+        conversationId: req.params.conversationId,
+        messageId: req.params.messageId,
+        userInfoId: currentUserInfo._id
+      });
+
+      if (!message) {
+        return res.status(404).json({ message: "Tin nhắn không tồn tại." });
+      }
+
+      return res.status(200).json({
+        message: "Lấy tin nhắn thành công",
+        data: signAvatarsDeep(message)
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  getConversationImages: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+
+      const result = await getConversationImages({
+        conversationId: req.params.conversationId,
+        userInfoId: currentUserInfo._id,
+        page,
+        limit
+      });
+
+      return res.status(200).json({
+        message: "Lấy danh sách ảnh thành công",
+        ...signAvatarsDeep(result)
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  reactToMessage: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const { message, action } = await reactToMessage({
+        conversationId: req.params.conversationId,
+        messageId: req.params.messageId,
+        userInfoId: currentUserInfo._id,
+        type: req.body.type
+      });
+
+      const io = req.app.get("io");
+      if (io) {
+        io.to(`conversation:${String(req.params.conversationId)}`).emit("message:reaction", {
+          conversationId: String(req.params.conversationId),
+          message: signAvatarsDeep(message),
+          action
+        });
+      }
+
+      return res.status(200).json({
+        message: "Cập nhật reaction thành công",
+        data: signAvatarsDeep(message)
       });
     } catch (error) {
       return handleChatError(res, error);

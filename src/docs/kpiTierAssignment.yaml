@@ -1,0 +1,195 @@
+components:
+  schemas:
+    # --- Response schema ---
+
+    KpiTierAssignment:
+      type: object
+      description: |
+        Bản ghi gán bậc KPI cho 1 Sale trong 1 TTKD, có hiệu lực theo khoảng thời gian.
+        1 Sale chỉ có **1 bản ghi active** (effective_to=null) tại 1 thời điểm trong 1 TTKD
+        (ADR-11 — không phân theo metric_code như kpi_tier_config).
+      properties:
+        _id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9d3"
+        sale_id:
+          type: object
+          description: "Populated từ user_info (full_name, code)"
+          properties:
+            _id:       { type: string }
+            full_name: { type: string, example: "Nguyễn Văn A" }
+            code:      { type: string, example: "NV0123" }
+        ttkd_id:
+          type: object
+          description: "Populated từ department (department_name, department_code)"
+          properties:
+            _id:             { type: string }
+            department_name: { type: string, example: "TTKD Hà Nội" }
+            department_code: { type: string, example: "TTKD-HN" }
+        tier_level:
+          type: integer
+          minimum: 1
+          example: 3
+          description: |
+            Bậc được gán. Không kiểm tra khớp với kpi_tier_config — nhiều Sale
+            có thể cùng chung 1 tier_level trong cùng TTKD (weight áp dụng độc lập
+            per Sale, không chia đều — xem kpi_tier_config.weight).
+        assigned_by:
+          type: object
+          description: "Populated từ account (username). Người thực hiện gán/đổi bậc."
+          properties:
+            _id:      { type: string }
+            username: { type: string, example: "gdttkd.hn" }
+        effective_from:
+          type: string
+          format: date-time
+          description: Thời điểm bậc này bắt đầu có hiệu lực (= thời điểm gọi API assign)
+        effective_to:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+          description: |
+            null = đang có hiệu lực (bậc hiện tại).
+            Có giá trị = đã bị thay thế bởi lần gán bậc mới hơn — giữ lại làm lịch sử.
+        isDeleted:  { type: boolean, example: false }
+        createdAt:  { type: string, format: date-time }
+        updatedAt:  { type: string, format: date-time }
+
+    # --- Request DTO ---
+
+    KpiTierAssignmentBody:
+      type: object
+      required: [sale_id, ttkd_id, tier_level]
+      description: |
+        Gán bậc mới hoặc đổi bậc cho Sale. Không có endpoint update riêng —
+        gọi lại API này để đổi bậc, server tự đóng bản ghi active cũ (nếu có)
+        và tạo bản ghi mới.
+      properties:
+        sale_id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9a1"
+          description: user_info._id của Sale được gán bậc
+        ttkd_id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9b0"
+          description: "department._id của TTKD. Account phải thuộc TTKD này (admin bypass)."
+        tier_level:
+          type: integer
+          minimum: 1
+          example: 3
+          description: Số nguyên >= 1. Không validate khớp với kpi_tier_config.
+
+paths:
+  /kpi/tier-assignments:
+    get:
+      tags: [KPI Tier Assignment]
+      summary: Danh sách gán bậc
+      description: |
+        Yêu cầu quyền `kpi.dashboard.view`.
+        **Non-admin:** tự filter về TTKD mình. Truyền `ttkd_id` để lọc cụ thể (phải thuộc).
+        **Admin:** thấy tất cả. `ttkd_id` là filter tùy chọn.
+        Mặc định trả cả lịch sử (active + đã hết hiệu lực). Dùng `active_only=true`
+        để chỉ lấy bậc đang áp dụng. Sort theo effective_from giảm dần.
+      parameters:
+        - in: query
+          name: sale_id
+          schema: { type: string }
+          description: Lọc theo Sale (user_info._id)
+        - in: query
+          name: ttkd_id
+          schema: { type: string }
+          description: "Admin: filter theo TTKD. Non-admin: phải là TTKD của mình."
+        - in: query
+          name: active_only
+          schema: { type: string, enum: ["true", "false"] }
+          example: "true"
+          description: "true = chỉ lấy bản ghi đang hiệu lực (effective_to=null)"
+      responses:
+        "200":
+          description: Danh sách gán bậc
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/KpiTierAssignment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+    post:
+      tags: [KPI Tier Assignment]
+      summary: Gán / đổi bậc cho Sale
+      description: |
+        Yêu cầu quyền `kpi.tier.config`.
+        **Atomic (transaction):**
+        1. Đóng bản ghi đang active của (sale_id, ttkd_id) — set `effective_to = now`
+           (nếu Sale chưa có bậc nào thì bỏ qua bước này).
+        2. Tạo bản ghi mới với `effective_from = now`, `effective_to = null`.
+
+        Lịch sử các lần gán trước vẫn được giữ lại (không xóa) để audit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiTierAssignmentBody" }
+      responses:
+        "201":
+          description: Đã gán bậc cho Sale
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã gán bậc cho Sale" }
+                  data: { $ref: "#/components/schemas/KpiTierAssignment" }
+        "400": { description: "Thiếu trường / tier_level không hợp lệ / sale_id không tồn tại" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền tier.config hoặc account không thuộc TTKD này" }
+
+  /kpi/tier-assignments/{id}:
+    get:
+      tags: [KPI Tier Assignment]
+      summary: Chi tiết 1 bản ghi gán bậc
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Chi tiết gán bậc
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data: { $ref: "#/components/schemas/KpiTierAssignment" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    delete:
+      tags: [KPI Tier Assignment]
+      summary: Xóa mềm 1 bản ghi gán bậc
+      description: |
+        Yêu cầu quyền `kpi.tier.config`.
+        Dùng khi gán nhầm. Xóa bản ghi active → Sale trở về trạng thái chưa có bậc
+        trong TTKD đó (không tự phục hồi bản ghi trước).
+        Ownership check từ document trong DB (không trust body).
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Đã xóa gán bậc }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền tier.config hoặc account không thuộc TTKD này" }
+        "404": { $ref: "#/components/responses/NotFound" }

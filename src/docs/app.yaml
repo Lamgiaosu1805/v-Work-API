@@ -1,0 +1,23 @@
+paths:
+  /app/create:
+    post:
+      tags: [App]
+      summary: Tạo app config (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, code]
+              properties:
+                name: { type: string }
+                code: { type: string }
+                description: { type: string }
+                logo_url: { type: string }
+      responses:
+        "201": { description: Tạo thành công }
+        "400": { description: Thiếu name hoặc code / code không hợp lệ }
+        "409": { description: Code đã tồn tại }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

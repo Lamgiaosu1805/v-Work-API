@@ -1,0 +1,51 @@
+paths:
+  /omicall/call-hooks:
+    post:
+      tags: [Omicall]
+      summary: Nhận webhook sự kiện cuộc gọi từ Omicall
+      description: >
+        Endpoint public để Omicall POST vào khi có sự kiện cuộc gọi (ringing, answered, hangup, CDR...).
+        Payload được log ra console và lưu tạm vào Redis (list, tối đa 50 bản ghi gần nhất) để phục vụ test/inspect.
+        Luôn trả 200 để tránh Omicall retry.
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Payload nguyên bản do Omicall gửi, cấu trúc thay đổi theo state (ringing/answered/hangup/CDR).
+              example:
+                call_uuid: "ad97a435-659e-49b4-ae83-4484c0c3f4c6"
+                from_number: "2022"
+                to_number: "0966060xxx"
+                extension: "2022"
+                hotline: "02873022488"
+                state: "ringing"
+                direction: "outbound"
+                event_time: 1748310172250
+                date_time: 1748310172296
+                source: "webhookEvent"
+                unique_id: "c5885d6d-3fb1-4393-9e1e-8b325b771191"
+      responses:
+        "200": { description: Đã nhận (luôn trả OK) }
+    get:
+      tags: [Omicall]
+      summary: Xem lại các payload webhook gần nhất (phục vụ test)
+      security: []
+      responses:
+        "200":
+          description: Danh sách payload gần nhất (mới nhất trước)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: OK }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        receivedAt: { type: string, format: date-time }
+                        body: { type: object }
+                        query: { type: object }

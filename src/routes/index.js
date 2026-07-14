@@ -28,6 +28,13 @@ const transactionManagementRouter = require("./transactionManagement");
 const rbacRouter = require("./rbac");
 const kpiMetricRouter = require("./kpiMetric");
 const dashboardRouter = require("./dashboard");
+const kpiAssignmentRouter = require("./kpiAssignment");
+const kpiYearPlanRouter = require("./kpiYearPlan");
+const kpiTierConfigRouter = require("./kpiTierConfig");
+const kpiTierAssignmentRouter = require("./kpiTierAssignment");
+const omicallRouter = require("./omicall");
+const kpiPeriodTargetRouter = require("./kpiPeriodTarget");
+const kpiAdjustmentRouter = require("./kpiAdjustment");
 
 const route = (app) => {
   app.use(`/posts`, postRouter);
@@ -60,6 +67,13 @@ const route = (app) => {
   app.use(`/rbac`, rbacRouter);
   app.use(`/kpi/metrics`, kpiMetricRouter);
   app.use(`/dashboard`, dashboardRouter);
+  app.use(`/kpi/assignments`, kpiAssignmentRouter);
+  app.use(`/kpi/year-plans`, kpiYearPlanRouter);
+  app.use(`/kpi/tier-configs`, kpiTierConfigRouter);
+  app.use(`/kpi/tier-assignments`, kpiTierAssignmentRouter);
+  app.use(`/omicall`, omicallRouter);
+  app.use(`/kpi/period-targets`, kpiPeriodTargetRouter);
+  app.use(`/kpi/adjustments`, kpiAdjustmentRouter);
 };
 
 module.exports = route;

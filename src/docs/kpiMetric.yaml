@@ -1,0 +1,185 @@
+components:
+  schemas:
+    KpiMetric:
+      type: object
+      properties:
+        _id:          { type: string, example: "665f1a2b3c4d5e6f7a8b9c0d" }
+        code:         { type: string, example: "investment_revenue" }
+        name:         { type: string, example: "Doanh số đầu tư" }
+        group:        { type: string, enum: [output, input] }
+        unit:         { type: string, example: "VND" }
+        source:       { type: string, enum: [auto, manual] }
+        auto_source:
+          type: string
+          nullable: true
+          enum: [investment_revenue, fluctuation_net, cif, ekyc, active_investor]
+          example: "investment_revenue"
+        description:  { type: string, example: "" }
+        order:        { type: integer, example: 1 }
+        is_active:    { type: boolean, example: true }
+        isDeleted:    { type: boolean, example: false }
+        createdAt:    { type: string, format: date-time }
+        updatedAt:    { type: string, format: date-time }
+
+    KpiMetricCreateBody:
+      type: object
+      required: [code, name, group, source]
+      properties:
+        code:
+          type: string
+          example: "investment_revenue"
+          description: "Immutable sau khi tạo — dùng làm khóa nối cho các bảng KPI khác"
+        name:       { type: string, example: "Doanh số đầu tư" }
+        group:      { type: string, enum: [output, input] }
+        unit:       { type: string, example: "VND" }
+        source:     { type: string, enum: [auto, manual] }
+        auto_source:
+          type: string
+          nullable: true
+          enum: [investment_revenue, fluctuation_net, cif, ekyc, active_investor]
+          description: "Bắt buộc khi source=auto. Bị ép null khi source=manual."
+        description: { type: string, example: "" }
+        order:       { type: integer, example: 1 }
+        is_active:   { type: boolean, default: true }
+
+    KpiMetricUpdateBody:
+      type: object
+      description: "Tất cả field đều optional. Không được sửa 'code'."
+      properties:
+        name:       { type: string, example: "Doanh số đầu tư" }
+        group:      { type: string, enum: [output, input] }
+        unit:       { type: string, example: "VND" }
+        source:     { type: string, enum: [auto, manual] }
+        auto_source:
+          type: string
+          nullable: true
+          enum: [investment_revenue, fluctuation_net, cif, ekyc, active_investor]
+          description: "source và auto_source luôn validate cùng nhau khi có ít nhất 1 cái thay đổi"
+        description: { type: string }
+        order:       { type: integer }
+        is_active:   { type: boolean }
+
+paths:
+  /kpi/metrics:
+    get:
+      tags: [KPI Metric]
+      summary: Danh sách chỉ tiêu KPI
+      description: "Mọi user đã đăng nhập đều đọc được (Sale cần xem để render form)."
+      parameters:
+        - in: query
+          name: group
+          schema: { type: string, enum: [output, input] }
+          description: Lọc theo nhóm chỉ tiêu
+        - in: query
+          name: source
+          schema: { type: string, enum: [auto, manual] }
+          description: Lọc theo nguồn lấy actual
+        - in: query
+          name: is_active
+          schema: { type: boolean }
+          description: "true = đang hoạt động, false = tạm ngưng"
+      responses:
+        "200":
+          description: Danh sách metric, sắp xếp theo order tăng dần
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/KpiMetric" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+    post:
+      tags: [KPI Metric]
+      summary: Tạo chỉ tiêu KPI mới (F01)
+      description: "Yêu cầu quyền `kpi.metric.manage`. `code` immutable sau khi tạo."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiMetricCreateBody" }
+      responses:
+        "201":
+          description: Đã tạo metric
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã tạo metric" }
+                  data: { $ref: "#/components/schemas/KpiMetric" }
+        "400": { description: "Thiếu trường bắt buộc / source-auto_source không hợp lệ" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: "Metric code đã tồn tại" }
+
+  /kpi/metrics/{id}:
+    get:
+      tags: [KPI Metric]
+      summary: Chi tiết 1 chỉ tiêu KPI
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Chi tiết metric
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data: { $ref: "#/components/schemas/KpiMetric" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    patch:
+      tags: [KPI Metric]
+      summary: Cập nhật chỉ tiêu KPI
+      description: "Yêu cầu quyền `kpi.metric.manage`. Không được đổi `code`."
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiMetricUpdateBody" }
+      responses:
+        "200":
+          description: Đã cập nhật metric
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã cập nhật metric" }
+                  data: { $ref: "#/components/schemas/KpiMetric" }
+        "400": { description: "Cố sửa code / source-auto_source không hợp lệ / id sai" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    delete:
+      tags: [KPI Metric]
+      summary: Xóa mềm chỉ tiêu KPI
+      description: "Yêu cầu quyền `kpi.metric.manage`. Soft delete — dữ liệu lịch sử vẫn giữ."
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Đã xóa metric }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }

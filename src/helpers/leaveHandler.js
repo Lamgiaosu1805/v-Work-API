@@ -20,11 +20,11 @@ async function validate(body, userInfo) {
 
   if (!from_date || !from_period || !to_date || !to_period || !leave_type)
     return {
-      error: { status: 400, message: "Thông tin đầu vào không hợp lệ" },
+      error: { status: 400, message: "Thông tin đầu vào không hợp lệ" }
     };
   if (!["paid", "unpaid"].includes(leave_type))
     return {
-      error: { status: 400, message: "Thông tin đầu vào không hợp lệ" },
+      error: { status: 400, message: "Thông tin đầu vào không hợp lệ" }
     };
   if (
     !["morning", "afternoon"].includes(from_period) ||
@@ -40,8 +40,8 @@ async function validate(body, userInfo) {
     return {
       error: {
         status: 400,
-        message: `Chỉ được tạo đơn trong vòng ${RETROACTIVE_LIMIT_DAYS} ngày gần nhất`,
-      },
+        message: `Chỉ được tạo đơn trong vòng ${RETROACTIVE_LIMIT_DAYS} ngày gần nhất`
+      }
     };
 
   if (fromMoment.isSame(today, "day")) {
@@ -54,7 +54,7 @@ async function validate(body, userInfo) {
   const total_days = calcTotalDays(from_date, from_period, to_date, to_period);
   if (total_days === null || total_days === 0)
     return {
-      error: { status: 400, message: "Khoảng thời gian nghỉ không hợp lệ" },
+      error: { status: 400, message: "Khoảng thời gian nghỉ không hợp lệ" }
     };
 
   const balance = await getLeaveBalance(userInfo._id);
@@ -63,7 +63,7 @@ async function validate(body, userInfo) {
 
   if (leave_type === "paid" && projectedBalance <= 0)
     return {
-      error: { status: 400, message: "Bạn không còn ngày nghỉ phép có lương" },
+      error: { status: 400, message: "Bạn không còn ngày nghỉ phép có lương" }
     };
 
   const paid_days = leave_type === "paid" ? Math.min(total_days, Math.max(0, projectedBalance)) : 0;
@@ -78,8 +78,8 @@ async function validate(body, userInfo) {
       total_days,
       leave_type,
       paid_days,
-      unpaid_days,
-    },
+      unpaid_days
+    }
   };
 }
 
@@ -91,7 +91,10 @@ async function validateAsync(payload, userInfo, session) {
   if (payload.leave_type === "paid" && userInfo.employment_status) {
     const empStatus = await EmploymentStatusModel.findById(userInfo.employment_status);
     if (empStatus && !empStatus.can_use_annual_leave)
-      return { status: 403, message: "Loại hợp đồng hiện tại chưa được sử dụng ngày phép có lương" };
+      return {
+        status: 403,
+        message: "Loại hợp đồng hiện tại chưa được sử dụng ngày phép có lương"
+      };
   }
 
   const fromDate = moment.tz(payload.from_date, TZ).startOf("day").toDate();
@@ -114,12 +117,11 @@ async function validateAsync(payload, userInfo, session) {
   const overlap = candidates.find((r) => {
     return newFrom <= toSlot(r.to_date, r.to_period) && toSlot(r.from_date, r.from_period) <= newTo;
   });
-  if (overlap)
-    return { status: 409, message: "Đã có đơn nghỉ trong khoảng thời gian này" };
+  if (overlap) return { status: 409, message: "Đã có đơn nghỉ trong khoảng thời gian này" };
 
   const holidays = await HolidayModel.find({
     date: { $gte: fromDate, $lte: toDate },
-    isDeleted: false,
+    isDeleted: false
   }).session(session);
 
   const userBranchId = userInfo.branch_id?.toString();
@@ -133,7 +135,7 @@ async function validateAsync(payload, userInfo, session) {
     const names = workingHolidays.map((h) => h.name).join(", ");
     return {
       status: 400,
-      message: `Khoảng thời gian nghỉ chứa ngày lễ: ${names}. Vui lòng tách đơn.`,
+      message: `Khoảng thời gian nghỉ chứa ngày lễ: ${names}. Vui lòng tách đơn.`
     };
   }
 
@@ -162,7 +164,7 @@ async function onCreate(request, userInfo, session) {
 
 async function resolveShiftsForDates(userId, dates, session) {
   const userInfo = await UserInfoModel.findById(userId, {
-    employment_type: 1,
+    employment_type: 1
   }).session(session);
   const isParttime = userInfo?.employment_type === "parttime";
 
@@ -187,7 +189,7 @@ async function resolveShiftsForDates(userId, dates, session) {
   } else {
     const [adminShift, morningShift] = await Promise.all([
       ShiftModel.findOne({ name: "Ca hành chính" }).session(session),
-      ShiftModel.findOne({ name: "Ca sáng" }).session(session),
+      ShiftModel.findOne({ name: "Ca sáng" }).session(session)
     ]);
     for (const { key, dayOfWeek } of dated) {
       const shift = dayOfWeek === 6 ? morningShift : adminShift;
@@ -213,11 +215,11 @@ async function onApprove(request, session) {
     .populate("shifts")
     .session(session);
   const sheetMap = new Map(
-    existing.map((w) => [moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id]),
+    existing.map((w) => [moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id])
   );
 
   const missing = datesWithStatus.filter(
-    (d) => !sheetMap.has(moment.tz(d.date, TZ).format("YYYY-MM-DD")),
+    (d) => !sheetMap.has(moment.tz(d.date, TZ).format("YYYY-MM-DD"))
   );
   if (missing.length) {
     const shiftMap = await resolveShiftsForDates(request.user_id, missing, session);
@@ -225,9 +227,9 @@ async function onApprove(request, session) {
       missing.map(({ date }) => ({
         user_id: request.user_id,
         date,
-        shifts: shiftMap.get(moment.tz(date, TZ).format("YYYY-MM-DD")) || [],
+        shifts: shiftMap.get(moment.tz(date, TZ).format("YYYY-MM-DD")) || []
       })),
-      { session },
+      { session }
     );
     created.forEach((w) => sheetMap.set(moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id));
   }
@@ -323,9 +325,8 @@ async function resolveLeaveConflictOnAttendance({
   checkInTime,
   checkOutTime,
   lastShiftEnd,
-  session,
+  session
 }) {
-
   if (!checkInTime || !checkOutTime) return;
 
   const dateStart = moment.tz(date, TZ).startOf("day").toDate();
@@ -335,7 +336,7 @@ async function resolveLeaveConflictOnAttendance({
     user_id: userId,
     date: { $gte: dateStart, $lte: dateEnd },
     status: { $in: ["leave_paid", "leave_unpaid"] },
-    isDeleted: false,
+    isDeleted: false
   }).session(session);
 
   if (!leaveStatuses.length) return;
@@ -369,9 +370,9 @@ async function resolveLeaveConflictOnAttendance({
       {
         status: "present",
         worksheet_id: worksheetId,
-        $addToSet: { sources: { ref_id: worksheetId, ref_type: "attendance" } },
+        $addToSet: { sources: { ref_id: worksheetId, ref_type: "attendance" } }
       },
-      { session },
+      { session }
     );
 
     if (ls.status === "leave_paid") {
@@ -393,4 +394,11 @@ async function resolveLeaveConflictOnAttendance({
   }
 }
 
-module.exports = { validate, validateAsync, onCreate, onApprove, onReject, resolveLeaveConflictOnAttendance };
+module.exports = {
+  validate,
+  validateAsync,
+  onCreate,
+  onApprove,
+  onReject,
+  resolveLeaveConflictOnAttendance
+};

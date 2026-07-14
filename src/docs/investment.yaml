@@ -1,0 +1,125 @@
+paths:
+  /investments/upsert:
+    post:
+      tags: [Investment]
+      summary: Tạo / cập nhật khoản đầu tư (app nội bộ)
+      description: Xác thực qua API key + IP whitelist (verifyInternalRequest).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Upsert thành công }
+
+  /investments/bulk-sync:
+    post:
+      tags: [Investment]
+      summary: Đồng bộ hàng loạt khoản đầu tư (app nội bộ)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [app_code, investments]
+              properties:
+                app_code: { type: string }
+                investments: { type: array, items: { type: object } }
+      responses:
+        "200": { description: Đồng bộ thành công }
+
+  /investments/agent-commission:
+    get:
+      tags: [Investment]
+      summary: Hoa hồng đại lý (app nội bộ)
+      security: []
+      responses:
+        "200": { description: Dữ liệu hoa hồng đại lý }
+
+  /investments/my-commission:
+    get:
+      tags: [Investment]
+      summary: Hoa hồng của tôi (CRM)
+      parameters:
+        - { in: query, name: month, schema: { type: integer } }
+        - { in: query, name: year, schema: { type: integer } }
+      responses:
+        "200": { description: Hoa hồng của tôi }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /investments/staff-commission:
+    get:
+      tags: [Investment]
+      summary: Hoa hồng nhân viên (manager CRM)
+      parameters:
+        - { in: query, name: month, schema: { type: integer } }
+        - { in: query, name: year, schema: { type: integer } }
+        - { in: query, name: sale_id, schema: { type: string } }
+      responses:
+        "200": { description: Hoa hồng nhân viên }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /investments/sales-chart:
+    get:
+      tags: [Investment]
+      summary: Biểu đồ doanh số (CRM)
+      parameters:
+        - { in: query, name: period, schema: { type: string, default: month } }
+        - { in: query, name: branch_id, schema: { type: string } }
+      responses:
+        "200": { description: Dữ liệu biểu đồ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /investments/list:
+    get:
+      tags: [Investment]
+      summary: Danh sách khoản đầu tư (CRM)
+      description: Lọc server-side theo role — sale chỉ thấy đầu tư của mình, manager/admin thấy tất cả.
+      parameters:
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, default: 20 } }
+        - { in: query, name: status, schema: { type: string, enum: [active, matured, cancelled, renewed, early_terminated] } }
+        - { in: query, name: date_from, schema: { type: string, format: date } }
+        - { in: query, name: date_to, schema: { type: string, format: date } }
+        - { in: query, name: q, schema: { type: string }, description: "Tìm theo SĐT / tên KH" }
+      responses:
+        "200": { description: Danh sách khoản đầu tư (phân trang) }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /investments/expiring:
+    get:
+      tags: [Investment]
+      summary: Khoản đầu tư sắp đáo hạn (CRM)
+      parameters:
+        - { in: query, name: days, schema: { type: integer, default: 30, maximum: 90 } }
+      responses:
+        "200": { description: Danh sách sắp đáo hạn }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /investments/leaderboard:
+    get:
+      tags: [Investment]
+      summary: Bảng xếp hạng doanh số (CRM)
+      parameters:
+        - { in: query, name: period, schema: { type: string, default: month } }
+      responses:
+        "200": { description: Bảng xếp hạng }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /investments/conversion:
+    get:
+      tags: [Investment]
+      summary: Tỉ lệ chuyển đổi (CRM)
+      responses:
+        "200": { description: Dữ liệu chuyển đổi }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }

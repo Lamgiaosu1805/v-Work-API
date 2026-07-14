@@ -38,15 +38,10 @@ async function autoRejectLeaveRequests() {
       const session = await mongoose.startSession();
       session.startTransaction();
       try {
-        const updated = await RequestModel.findOneAndUpdate(
-          { _id: request._id, status: "pending", isDeleted: false },
-          {
-            status: "rejected",
-            reviewed_at: new Date(),
-            reviewer_note: `Tự động từ chối do quá ${AUTO_REJECT_AFTER_DAYS} ngày không được duyệt`
-          },
-          { new: true, session }
-        );
+        request.status = "rejected";
+        request.reviewed_at = new Date();
+        request.reviewer_note = `Tự động từ chối do quá ${AUTO_REJECT_AFTER_DAYS} ngày không được duyệt`;
+        await request.save({ session });
 
         if (request.paid_days > 0) {
           // allowNegative: true — refund dương vẫn có thể ra kết quả âm nếu
@@ -65,11 +60,11 @@ async function autoRejectLeaveRequests() {
         await session.commitTransaction();
         session.endSession();
 
-        UserInfoModel.findById(updated.user_id)
+        UserInfoModel.findById(request.user_id)
           .select("id_account")
           .then((userInfo) => {
             if (!userInfo) return;
-            const fromStr = moment.tz(updated.from_date, TZ).format("DD/MM/YYYY");
+            const fromStr = moment.tz(request.from_date, TZ).format("DD/MM/YYYY");
             const body = `Đơn xin nghỉ từ ${fromStr} đã bị tự động từ chối do quá ${AUTO_REJECT_AFTER_DAYS} ngày không được duyệt`;
             return notificationService.createNotification({
               account_id: userInfo.id_account,

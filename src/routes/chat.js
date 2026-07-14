@@ -22,10 +22,29 @@ router.post(
   processChatImage,
   ChatController.sendMessage
 );
+
+router.post(
+  "/conversations/:conversationId/messages/:messageId/react",
+  authenticate,
+  ChatController.reactToMessage
+);
+
 router.get(
   "/conversations/:conversationId/messages/:messageId/image",
   authenticate,
   ChatController.getMessageImage
+);
+
+router.get(
+  "/conversations/:conversationId/messages/:messageId",
+  authenticate,
+  ChatController.getMessageById
+);
+
+router.get(
+  "/conversations/:conversationId/images",
+  authenticate,
+  ChatController.getConversationImages
 );
 
 router.patch(
@@ -33,6 +52,7 @@ router.patch(
   authenticate,
   ChatController.updateGroupConversationName
 );
+
 router.patch(
   "/conversations/:conversationId/group-avatar",
   authenticate,
@@ -40,6 +60,7 @@ router.patch(
   processChatImage,
   ChatController.updateGroupConversationAvatar
 );
+
 router.delete("/conversations/:conversationId", authenticate, ChatController.deleteConversation);
 router.post("/conversations/:conversationId/members", authenticate, ChatController.addMembers);
 router.delete("/conversations/:conversationId/members/me", authenticate, ChatController.leaveGroup);

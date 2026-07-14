@@ -1,0 +1,31 @@
+paths:
+  /referral/track:
+    post:
+      tags: [Referral]
+      summary: Ghi nhận lượt giới thiệu
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200": { description: Đã ghi nhận }
+
+  /referral/resolve:
+    get:
+      tags: [Referral]
+      summary: Resolve thông tin giới thiệu
+      security: []
+      responses:
+        "200": { description: Thông tin resolve }
+
+  /referral/check:
+    get:
+      tags: [Referral]
+      summary: Kiểm tra giới thiệu (app nội bộ)
+      description: Xác thực qua API key + IP whitelist (verifyInternalRequest), không dùng Bearer token.
+      security: []
+      responses:
+        "200": { description: Kết quả kiểm tra }
+        "401": { description: API key / IP không hợp lệ }

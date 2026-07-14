@@ -6,36 +6,33 @@ const MessageModel = require("../models/MessageModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AccountModel = require("../models/AccountModel");
 const { ChatError } = require("../helpers/socketHandler");
+const {
+  toPlainObject,
+  normalizeObjectIds,
+  removeAttachmentFiles,
+  normalizeMentions
+} = require("../utils/chatUtils");
 
-function removeAttachmentFiles(attachment) {
-  if (!attachment) return;
+const REPLY_POPULATE = {
+  path: "replyTo",
+  select: "content type senderId attachment recalled isDeleted deletedFor",
+  populate: {
+    path: "senderId",
+    select: "full_name avatar ma_nv id_account"
+  }
+};
 
-  const baseDir =
-    process.env.NODE_ENV === "production"
-      ? process.env.UPLOAD_DIR_PROD
-      : process.env.UPLOAD_DIR_DEV;
+const MENTIONS_POPULATE = {
+  path: "mentions.userId",
+  select: "full_name avatar ma_nv id_account"
+};
 
-  [attachment.url, attachment.thumbnailUrl].filter(Boolean).forEach((relativePath) => {
-    try {
-      const filePath = path.resolve(baseDir, relativePath);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    } catch (error) {
-      console.error("removeAttachmentFiles error:", error?.message || error);
-    }
-  });
-}
+const REACTIONS_POPULATE = {
+  path: "reactions.userId",
+  select: "full_name avatar ma_nv id_account"
+};
 
-function normalizeObjectIds(values) {
-  if (!Array.isArray(values)) return [];
-
-  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
-}
-
-function toPlainObject(doc) {
-  if (!doc) return doc;
-  if (typeof doc.toObject === "function") return doc.toObject();
-  return doc;
-}
+const REACTION_TYPES = ["like", "love", "haha", "wow", "sad", "angry"];
 
 function formatConversation(conversation, currentUserInfoId) {
   const plainConversation = toPlainObject(conversation);
@@ -199,6 +196,8 @@ async function createMessageDocument({
   content,
   type = "text",
   attachment = null,
+  replyTo = null,
+  mentions = [],
   seenBy = [],
   session
 }) {
@@ -212,6 +211,14 @@ async function createMessageDocument({
 
   if (attachment) {
     payload.attachment = attachment;
+  }
+
+  if (replyTo) {
+    payload.replyTo = replyTo;
+  }
+
+  if (Array.isArray(mentions) && mentions.length > 0) {
+    payload.mentions = mentions;
   }
 
   const createdMessages = session
@@ -326,7 +333,6 @@ async function updateGroupConversationAvatar({ conversationId, userInfoId, imgPa
     type: "group",
     isDeleted: false
   });
-
   if (!exists) {
     throw new ChatError("Conversation không tồn tại hoặc bạn không có quyền truy cập", 404);
   }
@@ -410,6 +416,9 @@ async function getConversationMessages({ conversationId, userInfoId, page = 1, l
   const total = await MessageModel.countDocuments(filter);
   const messages = await MessageModel.find(filter)
     .populate("senderId", "full_name avatar ma_nv id_account")
+    .populate(REPLY_POPULATE)
+    .populate(MENTIONS_POPULATE)
+    .populate(REACTIONS_POPULATE)
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
@@ -434,6 +443,8 @@ async function sendMessage({
   content,
   type = "text",
   attachment = null,
+  replyToMessageId = null,
+  mentions = [],
   session
 }) {
   if (!session) {
@@ -455,12 +466,42 @@ async function sendMessage({
     throw new ChatError("Thiếu file ảnh", 400);
   }
 
+  let replyTo = null;
+  if (replyToMessageId) {
+    const originalMessage = await MessageModel.findOne({
+      _id: replyToMessageId,
+      conversationId,
+      isDeleted: false
+    })
+      .select("_id")
+      .session(session);
+
+    if (!originalMessage) {
+      throw new ChatError("Tin nhắn được trả lời không tồn tại", 404);
+    }
+    replyTo = originalMessage._id;
+  }
+
+  let normalizedMentions = [];
+  if (Array.isArray(mentions) && mentions.length > 0) {
+    const conversationDoc = await ConversationModel.findOne({ _id: conversationId })
+      .select("members type")
+      .session(session)
+      .lean();
+
+    if (conversationDoc) {
+      normalizedMentions = normalizeMentions(mentions, conversationDoc);
+    }
+  }
+
   const message = await createMessageDocument({
     conversationId,
     senderUserInfoId,
     content: normalizedContent,
     type,
     attachment,
+    mentions: normalizedMentions,
+    replyTo,
     seenBy: [senderUserInfoId],
     session
   });
@@ -477,10 +518,11 @@ async function sendMessage({
     { session }
   );
 
-  const query = MessageModel.findById(message._id).populate(
-    "senderId",
-    "full_name avatar ma_nv id_account"
-  );
+  const query = MessageModel.findById(message._id)
+    .populate("senderId", "full_name avatar ma_nv id_account")
+    .populate(REPLY_POPULATE)
+    .populate(MENTIONS_POPULATE);
+
   if (session) {
     query.session(session);
   }
@@ -798,6 +840,119 @@ async function updateMemberNickname({
   return loadConversationById(conversationId, actorUserInfoId);
 }
 
+async function getMessageById({ conversationId, messageId, userInfoId }) {
+  await ensureConversationAccess(conversationId, userInfoId);
+
+  const message = await MessageModel.findOne({
+    _id: messageId,
+    conversationId,
+    isDeleted: false,
+    deletedFor: { $ne: userInfoId }
+  })
+    .populate("senderId", "full_name avatar")
+    .populate(REPLY_POPULATE)
+    .populate(MENTIONS_POPULATE)
+    .lean();
+
+  return message;
+}
+
+async function getConversationImages({ conversationId, userInfoId, page = 1, limit = 50 }) {
+  await ensureConversationAccess(conversationId, userInfoId);
+
+  const filter = {
+    conversationId,
+    type: "image",
+    isDeleted: false,
+    "recalled.at": null,
+    deletedFor: {
+      $ne: userInfoId
+    }
+  };
+
+  const total = await MessageModel.countDocuments(filter);
+
+  const images = await MessageModel.find(filter)
+    .populate("senderId", "full_name avatar ma_nv id_account")
+    .select(
+      `
+      _id
+      senderId
+      attachment
+      createdAt
+      content
+      replyTo
+    `
+    )
+    .sort({
+      createdAt: -1
+    })
+    .skip((page - 1) * limit)
+    .limit(limit)
+    .lean();
+
+  return {
+    data: images,
+    pagination: {
+      total,
+      page,
+      limit,
+      total_pages: Math.ceil(total / limit)
+    }
+  };
+}
+
+async function reactToMessage({ conversationId, messageId, userInfoId, type }) {
+  await ensureConversationAccess(conversationId, userInfoId);
+
+  if (!REACTION_TYPES.includes(type)) {
+    throw new ChatError("Loại reaction không hợp lệ", 400);
+  }
+
+  const message = await MessageModel.findOne({
+    _id: messageId,
+    conversationId,
+    isDeleted: false,
+    "recalled.at": null
+  }).select("reactions");
+
+  if (!message) {
+    throw new ChatError("Tin nhắn không tồn tại hoặc đã bị thu hồi", 404);
+  }
+
+  const existing = message.reactions.find((r) => String(r.userId) === String(userInfoId));
+
+  let action;
+  if (existing && existing.type === type) {
+    await MessageModel.updateOne(
+      { _id: messageId },
+      { $pull: { reactions: { userId: userInfoId } } }
+    );
+    action = "removed";
+  } else if (existing) {
+    await MessageModel.updateOne(
+      { _id: messageId, "reactions.userId": userInfoId },
+      { $set: { "reactions.$.type": type } }
+    );
+    action = "updated";
+  } else {
+    await MessageModel.updateOne(
+      { _id: messageId },
+      { $push: { reactions: { userId: userInfoId, type } } }
+    );
+    action = "added";
+  }
+
+  const updated = await MessageModel.findById(messageId)
+    .populate("senderId", "full_name avatar ma_nv id_account")
+    .populate(REPLY_POPULATE)
+    .populate(MENTIONS_POPULATE)
+    .populate(REACTIONS_POPULATE)
+    .lean();
+
+  return { message: updated, action };
+}
+
 module.exports = {
   getCurrentUserInfo,
   createPrivateConversation,
@@ -811,6 +966,7 @@ module.exports = {
   recallMessage,
   deleteMessageForSelf,
   updateGroupConversationName,
+  getMessageById,
   addMembers,
   kickMember,
   promoteMember,
@@ -819,5 +975,7 @@ module.exports = {
   createMessageDocument,
   formatConversation,
   updateGroupConversationAvatar,
-  updateMemberNickname
+  updateMemberNickname,
+  getConversationImages,
+  reactToMessage
 };

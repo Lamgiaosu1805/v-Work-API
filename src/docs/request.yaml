@@ -2,36 +2,47 @@ paths:
   /requests/eligible-reviewers:
     get:
       tags: [Request]
-      summary: Danh sách người có thể duyệt đơn
+      summary: Preview người sẽ tự động được chọn làm quản lý trực tiếp nếu tạo đơn ngay bây giờ
+      description: >-
+        Không dùng để chọn người duyệt lúc tạo đơn (assigned_reviewer đã bỏ hẳn khỏi API tạo đơn) —
+        chỉ để FE hiển thị trước "đơn của bạn sẽ được chuyển tới X". Trả về 1 người (hoặc null),
+        không phải danh sách.
       responses:
-        "200": { description: Danh sách người duyệt }
+        "200": { description: Người duyệt gần nhất (hoặc null nếu chưa có ai trong chuỗi) }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /requests:
     post:
       tags: [Request]
       summary: Tạo đơn từ
+      description: >-
+        Người duyệt được tự động xác định qua cây phân cấp phòng ban (permission
+        hrm.request.review + cùng chi nhánh) khi có người tìm/duyệt đơn — không cần truyền lúc
+        tạo. Đơn luôn tạo thành công kể cả khi chưa tìm được ai duyệt.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [request_type, assigned_reviewer]
+              required: [request_type]
               properties:
                 request_type: { type: string, description: "Loại đơn (nghỉ phép, điều chỉnh công...)" }
-                assigned_reviewer: { type: string, description: "ID người duyệt" }
                 reason: { type: string }
       responses:
         "201": { description: Tạo đơn thành công }
-        "400": { description: Loại đơn / người duyệt không hợp lệ / chưa gán chi nhánh }
+        "400": { description: Loại đơn không hợp lệ }
         "404": { description: Không tìm thấy thông tin nhân viên }
         "401": { $ref: "#/components/responses/Unauthorized" }
     get:
       tags: [Request]
       summary: Danh sách đơn (theo quyền duyệt)
+      description: >-
+        Admin/HR (hrm.request.view_all) thấy tất cả. Người có hrm.request.review thấy đơn của
+        nhân viên thuộc phạm vi phòng ban mình quản lý (tính động qua cây phân cấp).
       responses:
         "200": { description: Danh sách đơn }
+        "403": { description: Không có quyền quản lý tính năng này }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /requests/my:
@@ -64,7 +75,9 @@ paths:
       responses:
         "200": { description: Đã xử lý đơn }
         "400": { description: ID không hợp lệ }
+        "403": { description: Không được chỉ định duyệt đơn này / không thể tự duyệt đơn của mình }
         "404": { description: Đơn không tồn tại }
+        "409": { description: Đơn không ở trạng thái chờ duyệt }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /requests/cancel/{id}:

@@ -23,6 +23,7 @@ const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
 const { sign, serializeUser } = require("../helpers/staticUrl");
 const { getEffectivePermissions } = require("../helpers/rbac");
+const AppModel = require("../models/AppModel");
 
 const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 
@@ -548,17 +549,23 @@ const UserController = {
   generateMyQR: async (req, res) => {
     try {
       const accountId = req.account._id;
+      const appCode = String(req.query.app_code || "tikluy").toLowerCase();
 
       const userInfo = await UserInfoModel.findOne({ id_account: accountId });
       if (!userInfo) {
         return res.status(404).json({ message: "User not found" });
       }
 
+      const app = await AppModel.findOne({ code: appCode, is_active: true }).lean();
+      if (!app) {
+        return res.status(404).json({ message: "App không tồn tại." });
+      }
+
       const { ma_nv } = userInfo;
       const { phone_number } = userInfo;
 
       const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-      const landingUrl = `${BASE_URL}/refer?ref=${`${phone_number}-${ma_nv}`}&type=sale`;
+      const landingUrl = `${BASE_URL}/refer?ref=${`${phone_number}-${ma_nv}`}&type=sale&app_code=${appCode}`;
 
       const qrImageBase64 = await QRCode.toDataURL(landingUrl, {
         errorCorrectionLevel: "H",
@@ -573,6 +580,7 @@ const UserController = {
       return res.status(200).json({
         sale_name: userInfo.full_name,
         ma_nv,
+        app_code: appCode,
         landing_url: landingUrl,
         qr_image: qrImageBase64
       });

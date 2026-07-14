@@ -76,36 +76,47 @@
       <div class="spinner" id="spinner"></div>
       <h2 id="title">Đang chuẩn bị...</h2>
       <p id="msg">Vui lòng chờ trong giây lát</p>
-      <a id="btn-store" class="btn" style="display: none" href="#"
-        >Tải ứng dụng</a
-      >
+      <a id="btn-store" class="btn" style="display: none" href="#">Tải ứng dụng</a>
     </div>
 
     <script>
-      const STORE_IOS = "https://apps.apple.com/us/app/tikluy/id6504506939";
-      const STORE_ANDROID =
-        "https://play.google.com/store/apps/details?id=com.tikluy";
-      const DEEP_LINK = "tikluy://open-account";
+      const STORES = {
+        tikluy: {
+          ios: "https://apps.apple.com/us/app/tikluy/id6504506939",
+          android: "https://play.google.com/store/apps/details?id=com.tikluy",
+          deepLink: "tikluy://open-account"
+        },
+        vnfite: {
+          ios: "https://apps.apple.com/us/app/vnfite-fintech-p2p/id1610082008",
+          android: "https://play.google.com/store/apps/details?id=com.vnfite.vnfiteapp",
+          deepLink: "vnfite://open-account"
+        }
+      };
 
       const params = new URLSearchParams(window.location.search);
       const ref = params.get("ref");
       const type = params.get("type");
+      const appCode = params.get("app_code");
       const ua = navigator.userAgent;
       const isIOS = /iPhone|iPad|iPod/.test(ua);
       const isAndroid = /Android/.test(ua);
 
+      const appConfig = appCode === "vnfite" ? STORES.vnfite : STORES.tikluy;
+
       let savedToken = null;
 
-      const storeUrl = isIOS ? STORE_IOS : STORE_ANDROID;
+      const storeUrl = isIOS ? appConfig.ios : appConfig.android;
       const deepLink = ref
-        ? `${DEEP_LINK}?ref=${ref}&type=${type ?? ""}`
-        : DEEP_LINK;
+        ? `${appConfig.deepLink}?ref=${ref}&type=${type ?? ""}&app_code=${appCode ?? "tikluy"}`
+        : appConfig.deepLink;
 
       // Ghi token vào clipboard
       async function copyToken() {
         if (!savedToken) return;
         try {
-          await navigator.clipboard.writeText(`tikluy_ref:${savedToken}`);
+          await navigator.clipboard.writeText(
+            `${appCode === "vnfite" ? "vnfite" : "tikluy"}_ref:${savedToken}`
+          );
         } catch (e) {
           console.log("Clipboard write failed:", e);
         }
@@ -114,10 +125,9 @@
       // Hiện UI tải app
       function showDownloadUI() {
         document.getElementById("spinner").style.display = "none";
-        document.getElementById("title").textContent =
-          "Tải ứng dụng để tiếp tục";
+        document.getElementById("title").textContent = "Tải ứng dụng để tiếp tục";
         document.getElementById("msg").textContent =
-          "Nhấn nút bên dưới để tải TikLuy về điện thoại của bạn";
+          `Nhấn nút bên dưới để tải ${appCode === "vnfite" ? "Vnfite" : "TikLuy"} về điện thoại của bạn`;
 
         const btn = document.getElementById("btn-store");
         btn.textContent = isIOS ? "Tải trên App Store" : "Tải trên Google Play";
@@ -137,7 +147,7 @@
           const res = await fetch("/referral/track", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ref, type }),
+            body: JSON.stringify({ ref, type })
           });
           const data = await res.json();
           savedToken = data.token ?? null;
@@ -149,10 +159,8 @@
         if (!isIOS && !isAndroid) {
           // PC → hiện thông báo dùng điện thoại
           document.getElementById("spinner").style.display = "none";
-          document.getElementById("title").textContent =
-            "Quét mã bằng điện thoại";
-          document.getElementById("msg").textContent =
-            "Vui lòng dùng điện thoại để quét mã QR này";
+          document.getElementById("title").textContent = "Quét mã bằng điện thoại";
+          document.getElementById("msg").textContent = "Vui lòng dùng điện thoại để quét mã QR này";
           return;
         }
 

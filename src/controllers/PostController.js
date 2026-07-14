@@ -6,7 +6,6 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const DepartmentModel = require("../models/DepartmentModel");
 const pushNotification = require("../helpers/pushNotification");
 const { serializePost, serializeComment, signReactions } = require("../helpers/staticUrl");
-const { create } = require("../models/AgentModel");
 
 async function getAuthorInfo(accountId) {
   const userInfo = await UserInfoModel.findOne({ id_account: accountId });

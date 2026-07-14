@@ -17,6 +17,7 @@ router.get("/:id", canView,   KpiAssignmentController.getById);
 router.post("/",              canManage, KpiAssignmentController.create);
 router.patch("/:id",          canManage, KpiAssignmentController.update);
 router.post("/:id/activate",  canManage, KpiAssignmentController.activate);
+router.post("/:id/decompose", canManage, KpiAssignmentController.decompose);
 router.delete("/:id",         canManage, KpiAssignmentController.remove);
 
 module.exports = router;

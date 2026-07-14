@@ -8,7 +8,13 @@ const CommentSchema = new mongoose.Schema(
     author_name: { type: String, required: true },
     author_avatar: { type: String, default: null },
     // content: { type: String, required: true, maxlength: 500 },
-    content: { type: String, maxlength: 500 },
+    content: {
+      type: String,
+      maxlength: 500,
+      required() {
+        return !this.images || this.images.length === 0;
+      }
+    },
     images: [{ type: String }], // Mảng chứa đường dẫn hình ảnh
     ...BaseSchema.obj
   },

@@ -327,6 +327,7 @@ const PostController = {
     }
   },
 
+  // POST /posts/:id/comments
   createCommentWithImages: async (req, res) => {
     const uploadedFiles = req.files || [];
 

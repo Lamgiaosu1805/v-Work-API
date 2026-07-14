@@ -328,60 +328,43 @@ const PostController = {
   },
 
   createCommentWithImages: async (req, res) => {
+    const uploadedFiles = req.files || [];
+
     try {
       const { id: postId } = req.params;
       const { content } = req.body;
 
-      // --- BẮT ĐẦU PHẦN XỬ LÝ CHUYỂN ẢNH THÀNH BASE64 ---
-      let base64Images = [];
-
-      // Nếu có file được tải lên thông qua middleware upload.array("images")
-      if (req.files && req.files.length > 0) {
-        base64Images = req.files.map((file) => {
-          // Đọc file từ thư mục tạm thành dữ liệu nhị phân (Buffer)
-          const fileBuffer = fs.readFileSync(file.path);
-
-          // Chuyển đổi Buffer sang chuỗi Base64 string
-          const base64String = fileBuffer.toString("base64");
-
-          // Tạo chuỗi Data URL chuẩn để Frontend hiển thị được trực tiếp trong thẻ <img src="...">
-          const dataUrl = `data:${file.mimetype};base64,${base64String}`;
-
-          // Xóa file tạm trên server ngay sau khi chuyển đổi xong để tránh làm đầy bộ nhớ ổ cứng
-          try {
-            fs.unlinkSync(file.path);
-          } catch (unlinkError) {
-            console.error("Lỗi khi xóa file tạm:", unlinkError);
-          }
-
-          return dataUrl; // Trả về chuỗi base64 cực dài
-        });
-      }
-      // --- KẾT THÚC PHẦN XỬ LÝ ---
-
-      // Chỉnh sửa lại validate: Nội dung không được để trống TRỪ KHI có gửi kèm ảnh
       const hasContent = content && content.trim();
-      const hasImages = base64Images.length > 0;
+      const hasImages = uploadedFiles.length > 0;
 
       if (!hasContent && !hasImages) {
+        uploadedFiles.forEach((f) => {
+          if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
+        });
         return res
           .status(400)
           .json({ message: "Nội dung bình luận hoặc hình ảnh không được để trống" });
       }
 
       const post = await PostModel.findOne({ _id: postId, isDeleted: false });
-      if (!post) return res.status(404).json({ message: "Không tìm thấy bài viết" });
+      if (!post) {
+        uploadedFiles.forEach((f) => {
+          if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
+        });
+        return res.status(404).json({ message: "Không tìm thấy bài viết" });
+      }
 
       const { author_name, author_avatar } = await getAuthorInfo(req.account._id);
 
-      // Tạo bình luận mới: Thêm trường `images` chứa mảng các chuỗi Base64
+      const images = uploadedFiles.map((f) => `feed/${f.filename}`);
+
       const comment = await CommentModel.create({
         post_id: postId,
         author_id: req.account._id,
         author_name,
         author_avatar,
         content: content ? content.trim() : "",
-        images: base64Images // <--- Đưa mảng chuỗi Base64 vào DB ở đây!
+        images
       });
 
       post.comments_count = (post.comments_count || 0) + 1;
@@ -411,6 +394,16 @@ const PostController = {
 
       return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
     } catch (error) {
+      uploadedFiles.forEach((file) => {
+        try {
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+            console.log(`[Rollback] Đã xóa file rác comment thành công: ${file.path}`);
+          }
+        } catch (unlinkError) {
+          console.error(`[Rollback] Không thể xóa file lỗi:`, unlinkError);
+        }
+      });
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
   },

@@ -20,6 +20,7 @@ router.post(
   "/:id/comments",
   authenticate,
   upload.array("images", 5),
+  processImages,
   PostController.createCommentWithImages
 );
 router.delete("/:id/comments/:commentId", authenticate, PostController.deleteComment);

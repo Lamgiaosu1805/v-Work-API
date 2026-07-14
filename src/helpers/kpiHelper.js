@@ -51,4 +51,16 @@ async function getSaleTtkdId(saleInfoId) {
   return ttkd?._id ?? null;
 }
 
-module.exports = { getAccountTtkdIds, getSaleInfoIdsInTtkds, getSaleTtkdId };
+async function getUserInfoIdFromAccount(accountId) {
+  const userInfo = await UserInfoModel.findOne({ id_account: accountId, isDeleted: false })
+    .select("_id")
+    .lean();
+  return userInfo ? userInfo._id : null;
+}
+
+module.exports = {
+  getAccountTtkdIds,
+  getSaleInfoIdsInTtkds,
+  getSaleTtkdId,
+  getUserInfoIdFromAccount
+};

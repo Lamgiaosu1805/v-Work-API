@@ -1,0 +1,285 @@
+components:
+  schemas:
+    # --- Response schema ---
+
+    KpiDailyReport:
+      type: object
+      description: |
+        F04 — 1 bản ghi Input KPI Sale tự khai báo cho 1 ngày (unique theo sale_id + date).
+        `items[]` gộp nhiều metric_code (chỉ nhóm "input") trong cùng 1 ngày.
+      properties:
+        _id:
+          type: string
+          example: "6686a1f2e4b0c3d5a7f8e9f5"
+        sale_id:
+          type: object
+          description: "Populated từ user_info (full_name, code). Server tự resolve từ req.account, không nhận từ body."
+          properties:
+            _id:       { type: string }
+            full_name: { type: string, example: "Nguyễn Văn A" }
+            code:      { type: string, example: "NV0123" }
+        ttkd_id:
+          type: object
+          description: "Populated từ department. Server tự resolve theo TTKD hiện tại của Sale."
+          properties:
+            _id:             { type: string }
+            department_name: { type: string, example: "TTKD Hà Nội" }
+            department_code: { type: string, example: "TTKD-HN" }
+        date:
+          type: string
+          format: date
+          example: "2026-07-20"
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              metric_code: { type: string, example: "telesale_call" }
+              value:       { type: number, example: 15, minimum: 0 }
+        status:
+          type: string
+          enum: [draft, submitted]
+          example: "draft"
+        submitted_at:
+          type: string
+          format: date-time
+          nullable: true
+        note:
+          type: string
+          example: ""
+        isDeleted: { type: boolean, example: false }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    # --- Request DTOs ---
+
+    KpiDailyReportUpsertBody:
+      type: object
+      required: [date, items]
+      properties:
+        date:
+          type: string
+          format: date
+          example: "2026-07-20"
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [metric_code, value]
+            properties:
+              metric_code:
+                type: string
+                example: "telesale_call"
+                description: "Phải thuộc kpi_metric với group=\"input\", is_active=true"
+              value:
+                type: number
+                minimum: 0
+                example: 15
+        note:
+          type: string
+          example: "Đã gọi hết KH tiềm năng trong danh sách"
+
+    KpiDailyReportApplySummary:
+      type: object
+      description: Các period bị tác động khi submit/update (chỉ trả về khi có thay đổi actual)
+      properties:
+        applied:
+          type: array
+          items:
+            type: object
+            properties:
+              metric_code: { type: string, example: "telesale_call" }
+              scopeType:   { type: string, enum: [sale, ttkd] }
+              scopeId:     { type: string }
+              periodType:  { type: string, enum: [day, month] }
+              periodKey:   { type: string, example: "2026-07-20" }
+              delta:       { type: number, example: 5 }
+        skipped:
+          type: array
+          description: Period bị bỏ qua vì is_closed=true (không ghi đè dữ liệu đã chốt)
+          items:
+            type: object
+            properties:
+              metric_code: { type: string }
+              scopeType:   { type: string }
+              scopeId:     { type: string }
+              periodType:  { type: string }
+              periodKey:   { type: string }
+              delta:       { type: number }
+
+paths:
+  /kpi/daily-reports:
+    get:
+      tags: [KPI Daily Report]
+      summary: Danh sách báo cáo ngày
+      description: |
+        Yêu cầu quyền `kpi.dashboard.view`.
+        **Non-admin:** tự động filter về TTKD mình. Truyền `ttkd_id` để lọc cụ thể (phải thuộc).
+        **Admin:** thấy tất cả.
+      parameters:
+        - in: query
+          name: sale_id
+          schema: { type: string }
+        - in: query
+          name: ttkd_id
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { type: string, enum: [draft, submitted] }
+        - in: query
+          name: date
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Danh sách báo cáo ngày
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/KpiDailyReport" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+    post:
+      tags: [KPI Daily Report]
+      summary: Tạo/cập nhật báo cáo ngày (draft)
+      description: |
+        Yêu cầu quyền `kpi.report.submit`. `sale_id`/`ttkd_id` server tự resolve từ tài khoản
+        đang đăng nhập — không self-declare hộ người khác được ở phase này.
+
+        Nếu đã có báo cáo `draft` cho đúng ngày này → **cập nhật thay vì tạo mới** (upsert theo
+        unique index `sale_id + date`). Nếu báo cáo ngày đó đã ở trạng thái `submitted` → trả **409**,
+        phải dùng `PATCH /kpi/daily-reports/{id}` để sửa.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KpiDailyReportUpsertBody" }
+      responses:
+        "201": { description: "Đã tạo báo cáo (draft)" }
+        "200": { description: "Đã cập nhật báo cáo (draft) đã có sẵn cho ngày này" }
+        "400": { description: "Thiếu trường / metric_code không phải Input KPI đang active / value âm" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: "Báo cáo ngày này đã submitted — dùng PATCH để sửa" }
+
+  /kpi/daily-reports/{id}:
+    get:
+      tags: [KPI Daily Report]
+      summary: Chi tiết 1 báo cáo ngày
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Chi tiết báo cáo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "OK" }
+                  data: { $ref: "#/components/schemas/KpiDailyReport" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    patch:
+      tags: [KPI Daily Report]
+      summary: Sửa báo cáo ngày (cả khi đã submitted)
+      description: |
+        Yêu cầu quyền `kpi.report.submit`, và chỉ chính chủ report (hoặc admin).
+
+        - Nếu report đang `draft`: ghi đè thẳng `items`, **chưa** đụng tới `kpi_period_target`.
+        - Nếu report đang `submitted`: server tính **delta = giá trị mới − giá trị cũ** theo từng
+          `metric_code` (metric mới thêm coi cũ=0, metric bị bỏ khỏi items coi mới=0), rồi cộng/trừ
+          delta đó vào `kpi_period_target.actual` (transaction, cả scope=sale và scope=ttkd, cả
+          period_type=day và month). Không đổi `status`/`submitted_at`.
+        - Tôn trọng `is_closed`: period nào đã chốt sẽ bị bỏ qua (xem `KpiDailyReportApplySummary.skipped`),
+          không throw lỗi cả request.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items: { $ref: "#/components/schemas/KpiDailyReportUpsertBody/properties/items" }
+                note: { type: string }
+      responses:
+        "200":
+          description: Đã cập nhật báo cáo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: "#/components/schemas/KpiDailyReport" }
+                  apply: { $ref: "#/components/schemas/KpiDailyReportApplySummary" }
+        "400": { description: "Thiếu items / metric không hợp lệ" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền hoặc không phải chủ report" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    delete:
+      tags: [KPI Daily Report]
+      summary: Xóa báo cáo (chỉ khi còn draft)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: "Đã xóa báo cáo" }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền hoặc không phải chủ report" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Chỉ xóa được báo cáo ở trạng thái draft" }
+
+  /kpi/daily-reports/{id}/submit:
+    post:
+      tags: [KPI Daily Report]
+      summary: Submit báo cáo ngày (draft → submitted)
+      description: |
+        Yêu cầu quyền `kpi.report.submit`, chỉ chính chủ report (hoặc admin), chỉ khi đang `draft`.
+
+        **Atomic (transaction):** đây là lúc `actual` được cộng vào `kpi_period_target` lần đầu
+        (toàn bộ `items[].value` coi như delta dương từ 0), cho cả scope=sale và scope=ttkd,
+        cả period_type=day (theo `date`) và month. Tôn trọng `is_closed` (bỏ qua period đã chốt).
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Đã submit báo cáo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Đã submit báo cáo" }
+                  data: { $ref: "#/components/schemas/KpiDailyReport" }
+                  apply: { $ref: "#/components/schemas/KpiDailyReportApplySummary" }
+        "400": { description: "Báo cáo chưa có items" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không có quyền hoặc không phải chủ report" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Báo cáo đã submitted" }

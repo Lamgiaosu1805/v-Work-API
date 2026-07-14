@@ -4,6 +4,7 @@ const deptScope = require("./deptScope");
 const permissionEffect = require("./permissionEffect");
 const permissions = require("./permissions");
 const kpi = require("./kpi");
+const leaveBalanceReason = require("./leaveBalanceReason");
 
 module.exports = {
   ...roles,
@@ -11,5 +12,6 @@ module.exports = {
   ...deptScope,
   ...permissionEffect,
   ...permissions,
-  ...kpi
+  ...kpi,
+  ...leaveBalanceReason
 };

@@ -7,6 +7,12 @@ const heicConvert = require("heic-convert");
 const AccountModel = require("../models/AccountModel");
 const EmploymentStatusModel = require("../models/EmploymentStatusModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
+const {
+  adjustLeaveBalance,
+  getLeaveBalance,
+  LeaveBalanceError
+} = require("../helpers/leaveBalance");
+const { LEAVE_BALANCE_REASON } = require("../constants");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
@@ -16,6 +22,8 @@ const DepartmentModel = require("../models/DepartmentModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
 const { sign, serializeUser } = require("../helpers/staticUrl");
+const { getEffectivePermissions } = require("../helpers/rbac");
+const AppModel = require("../models/AppModel");
 
 const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 
@@ -63,7 +71,6 @@ const UserController = {
 
       let { userDepartments = [], schedules = [] } = req.body;
 
-      // Parse nếu là string
       if (typeof userDepartments === "string") {
         try {
           userDepartments = JSON.parse(userDepartments);
@@ -84,7 +91,6 @@ const UserController = {
         }
       }
 
-      // Nếu là parttime, schedules bắt buộc phải có
       if (employment_type === "parttime") {
         if (!Array.isArray(schedules) || schedules.length === 0) {
           await session.abortTransaction();
@@ -92,7 +98,6 @@ const UserController = {
           return res.status(400).json({ message: "Schedules bắt buộc cho parttime" });
         }
 
-        // Validate từng item và tính tổng số buổi
         let totalShifts = 0;
         for (const item of schedules) {
           if (
@@ -125,7 +130,6 @@ const UserController = {
         return res.status(400).json({ message: "Vui lòng nhập thông tin chi nhánh" });
       }
 
-      // Kiểm tra trùng CCCD
       const existingUser = await UserInfoModel.findOne({ cccd }).session(session);
       if (existingUser) {
         await session.abortTransaction();
@@ -133,7 +137,6 @@ const UserController = {
         return res.status(400).json({ message: "Thông tin đã tồn tại" });
       }
 
-      // Sinh mã nhân viên và tài khoản
       const stt = await UserInfoModel.countDocuments().session(session);
       const maNV = Utils.getMaNV((stt + 1).toString());
       const username = await Utils.generateUsername(full_name);
@@ -141,12 +144,10 @@ const UserController = {
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
 
-      // Tạo tài khoản
       const [account] = await AccountModel.create([{ username, password: hashedPassword }], {
         session
       });
 
-      // Tạo thông tin người dùng
       const [userInfo] = await UserInfoModel.create(
         [
           {
@@ -161,14 +162,12 @@ const UserController = {
             ma_nv: maNV,
             employment_type,
             branch_id: branch_id || null,
-            employment_status: employment_status || null,
-            leave_balance: { annual: 0 }
+            employment_status: employment_status || null
           }
         ],
         { session }
       );
 
-      // Lưu tài liệu người dùng (nếu có upload)
       const files = req.files || {};
       const documents = [];
 
@@ -187,7 +186,6 @@ const UserController = {
         await UserDocumentModel.create([{ user_id: userInfo._id, documents }], { session });
       }
 
-      // Lưu danh sách phòng ban – vị trí
       if (userDepartments.length > 0) {
         const invalidItem = userDepartments.find(
           (item) => !item.department_id || !item.position_id
@@ -201,7 +199,6 @@ const UserController = {
           });
         }
 
-        // Chỉ cho phép gán vào node lá (department/branch)
         const deptIds = userDepartments.map((i) => i.department_id);
         const depts = await DepartmentModel.find({ _id: { $in: deptIds }, isDeleted: false })
           .select("type")
@@ -224,7 +221,6 @@ const UserController = {
         await UserDepartmentPositionModel.insertMany(udpDocs, { session });
       }
 
-      // Nếu là parttime → tạo WorkSchedule
       if (employment_type === "parttime") {
         const scheduleDocs = schedules.map((item) => ({
           userId: userInfo._id,
@@ -359,7 +355,11 @@ const UserController = {
     try {
       const { account } = req;
 
-      const user = await UserInfoModel.findOne({ id_account: account._id });
+      const [user, effectivePermissions] = await Promise.all([
+        UserInfoModel.findOne({ id_account: account._id }),
+        getEffectivePermissions(account._id)
+      ]);
+      const permissions = [...effectivePermissions];
 
       if (!user) {
         return res.status(200).json({
@@ -368,6 +368,7 @@ const UserController = {
           role: account.role,
           module_access: account.module_access || [],
           dept_scope: account.dept_scope,
+          permissions,
           full_name: null,
           avatar: null,
           ma_nv: null,
@@ -393,6 +394,7 @@ const UserController = {
         role: account.role,
         module_access: account.module_access || [],
         dept_scope: account.dept_scope,
+        permissions,
         ...user.toObject(),
         avatar: sign(user.avatar),
         cover_photo: sign(user.cover_photo),
@@ -458,7 +460,6 @@ const UserController = {
         filter._id = { $in: deptUserIds };
       }
 
-      // Lọc theo module_access: tìm account có module đó rồi map sang user_info
       if (module) {
         const accountIds = await AccountModel.find({
           $or: [{ role: "admin" }, { module_access: module }],
@@ -491,7 +492,6 @@ const UserController = {
         }).distinct("user");
 
         if (filter._id) {
-          // Giao với dept-scope đã có
           const deptSet = new Set(udpIds.map(String));
           filter._id.$in = filter._id.$in.filter((id) => deptSet.has(String(id)));
         } else {
@@ -549,17 +549,23 @@ const UserController = {
   generateMyQR: async (req, res) => {
     try {
       const accountId = req.account._id;
+      const appCode = String(req.query.app_code || "tikluy").toLowerCase();
 
       const userInfo = await UserInfoModel.findOne({ id_account: accountId });
       if (!userInfo) {
         return res.status(404).json({ message: "User not found" });
       }
 
+      const app = await AppModel.findOne({ code: appCode, is_active: true }).lean();
+      if (!app) {
+        return res.status(404).json({ message: "App không tồn tại." });
+      }
+
       const { ma_nv } = userInfo;
       const { phone_number } = userInfo;
 
       const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-      const landingUrl = `${BASE_URL}/refer?ref=${`${phone_number}-${ma_nv}`}&type=sale`;
+      const landingUrl = `${BASE_URL}/refer?ref=${`${phone_number}-${ma_nv}`}&type=sale&app_code=${appCode}`;
 
       const qrImageBase64 = await QRCode.toDataURL(landingUrl, {
         errorCorrectionLevel: "H",
@@ -574,6 +580,7 @@ const UserController = {
       return res.status(200).json({
         sale_name: userInfo.full_name,
         ma_nv,
+        app_code: appCode,
         landing_url: landingUrl,
         qr_image: qrImageBase64
       });
@@ -595,7 +602,6 @@ const UserController = {
         return res.status(404).json({ message: "Không tìm thấy user" });
       }
 
-      // Nếu không phải admin/hrm, kiểm tra user được xem phải cùng phòng ban
       const isFullAccess =
         req.account.role === "admin" || req.account.module_access?.includes("hrm");
 
@@ -701,14 +707,15 @@ const UserController = {
         }
       }
 
-      if (req.body.leave_balance_annual !== undefined) {
-        const val = Number(req.body.leave_balance_annual);
-        if (Number.isNaN(val) || val < 0) {
+      const hasLeaveBalanceDelta = req.body.leave_balance_annual_delta !== undefined;
+      let leaveBalanceDelta = null;
+      if (hasLeaveBalanceDelta) {
+        leaveBalanceDelta = Number(req.body.leave_balance_annual_delta);
+        if (Number.isNaN(leaveBalanceDelta) || leaveBalanceDelta === 0) {
           await session.abortTransaction();
           session.endSession();
-          return res.status(400).json({ message: "leave_balance_annual không hợp lệ" });
+          return res.status(400).json({ message: "leave_balance_annual_delta không hợp lệ" });
         }
-        updates["leave_balance.annual"] = val;
       }
 
       const hasFiles = Object.keys(req.files || {}).length > 0;
@@ -721,7 +728,8 @@ const UserController = {
         !hasFiles &&
         !hasDepartments &&
         !hasSchedules &&
-        !hasDeletedAttachments
+        !hasDeletedAttachments &&
+        !hasLeaveBalanceDelta
       ) {
         await session.abortTransaction();
         session.endSession();
@@ -746,7 +754,28 @@ const UserController = {
           "-id_account -__v"
         );
       }
-      // Update departments
+
+      if (hasLeaveBalanceDelta) {
+        try {
+          await adjustLeaveBalance({
+            userId: id,
+            amount: leaveBalanceDelta,
+            reason: LEAVE_BALANCE_REASON.HR_MANUAL_ADJUSTMENT,
+            note: req.body.leave_balance_note || "",
+            createdBy: req.account._id,
+            allowNegative: false,
+            session
+          });
+        } catch (e) {
+          await session.abortTransaction();
+          session.endSession();
+          if (e instanceof LeaveBalanceError)
+            return res.status(e.status).json({ message: e.message });
+          console.error("Error adjusting leave balance in updateUser:", e);
+          return res.status(500).json({ message: "Lỗi server", error: e.message });
+        }
+      }
+
       if (hasDepartments) {
         let userDepartmentsData = req.body.userDepartments;
         if (typeof userDepartmentsData === "string") {
@@ -765,7 +794,6 @@ const UserController = {
             session.endSession();
             return res.status(400).json({ message: "Vui lòng chọn vị trí phòng ban" });
           }
-          // Chỉ cho phép gán vào node lá
           const deptIds = userDepartmentsData.map((i) => i.department_id);
           const depts = await DepartmentModel.find({ _id: { $in: deptIds }, isDeleted: false })
             .select("type")
@@ -790,7 +818,6 @@ const UserController = {
         }
       }
 
-      // Update schedules
       if (hasSchedules) {
         let schedulesData = req.body.schedules;
         if (typeof schedulesData === "string") {
@@ -890,12 +917,16 @@ const UserController = {
       await session.commitTransaction();
       session.endSession();
 
+      const leaveBalance = await getLeaveBalance(id);
+
       return res.status(200).json({
         message: "Cập nhật thông tin user thành công",
-        data: updated
+        data: { ...updated.toObject(), leave_balance: leaveBalance }
       });
     } catch (error) {
-      await session.abortTransaction();
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
       session.endSession();
       console.error("Error in updateUser:", error);
       return res.status(500).json({ message: "Internal server error", error: error.message });
@@ -978,7 +1009,6 @@ const UserController = {
     }
   },
 
-  // GET /user/profile/:accountId  — trang cá nhân (không cần quyền HRM)
   getProfile: async (req, res) => {
     try {
       const { accountId } = req.params;
@@ -1010,7 +1040,6 @@ const UserController = {
         employment_type: userInfo.employment_type,
         sex: userInfo.sex,
         date_of_birth: userInfo.date_of_birth ?? null,
-        // Thông tin nhạy cảm chỉ trả cho chính mình
         ...(isSelf && {
           phone_number: userInfo.phone_number,
           address: userInfo.address
@@ -1043,8 +1072,16 @@ const UserController = {
         EmploymentStatusModel.findOne({ _id: employment_status_id, isDeleted: false })
       ]);
 
-      if (!userInfo) return res.status(404).json({ message: "Không tìm thấy nhân viên" });
-      if (!newStatus) return res.status(404).json({ message: "Không tìm thấy loại hợp đồng" });
+      if (!userInfo) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({ message: "Không tìm thấy nhân viên" });
+      }
+      if (!newStatus) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({ message: "Không tìm thấy loại hợp đồng" });
+      }
 
       const effectiveMoment = new Date(effective_date);
 
@@ -1055,10 +1092,15 @@ const UserController = {
             (effectiveMoment.getMonth() - startMoment.getMonth())
         );
         if (months > 0) {
-          userInfo.leave_balance = {
-            ...userInfo.leave_balance,
-            annual: (userInfo.leave_balance?.annual ?? 0) + months * MONTHLY_ACCRUAL
-          };
+          await adjustLeaveBalance({
+            userId: userInfo._id,
+            amount: months * MONTHLY_ACCRUAL,
+            reason: LEAVE_BALANCE_REASON.RETROACTIVE_PROMOTION_BACKPAY,
+            refType: "system",
+            note: `Cộng bù ${months} tháng do đổi loại hợp đồng`,
+            allowNegative: true,
+            session
+          });
         }
       }
 

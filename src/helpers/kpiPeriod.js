@@ -1,3 +1,7 @@
+const moment = require("moment-timezone");
+
+const TZ = "Asia/Ho_Chi_Minh";
+
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
@@ -18,4 +22,15 @@ function monthRange(year, month) {
   };
 }
 
-module.exports = { pad2, monthKey, dayKey, monthRange };
+function weekKey(date) {
+  const m = moment.tz(date, TZ);
+  return `${m.isoWeekYear()}-W${pad2(m.isoWeek())}`;
+}
+
+function weekRange(weekKeyStr) {
+  const [year, week] = weekKeyStr.split("-W");
+  const start = moment.tz(TZ).isoWeekYear(Number(year)).isoWeek(Number(week)).startOf("isoWeek");
+  return { start: start.toDate(), end: start.clone().add(7, "days").toDate() };
+}
+
+module.exports = { pad2, monthKey, dayKey, monthRange, weekKey, weekRange };

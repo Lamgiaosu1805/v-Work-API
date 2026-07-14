@@ -1,4 +1,5 @@
 const fs = require("fs");
+const mongoose = require("mongoose");
 const PostModel = require("../models/PostModel");
 const CommentModel = require("../models/CommentModel");
 const UserInfoModel = require("../models/UserInfoModel");
@@ -330,6 +331,9 @@ const PostController = {
   createCommentWithImages: async (req, res) => {
     const uploadedFiles = req.files || [];
 
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
       const { id: postId } = req.params;
       const { content } = req.body;
@@ -341,16 +345,18 @@ const PostController = {
         uploadedFiles.forEach((f) => {
           if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
         });
+        await session.endSession();
         return res
           .status(400)
           .json({ message: "Nội dung bình luận hoặc hình ảnh không được để trống" });
       }
 
-      const post = await PostModel.findOne({ _id: postId, isDeleted: false });
+      const post = await PostModel.findOne({ _id: postId, isDeleted: false }).session(session);
       if (!post) {
         uploadedFiles.forEach((f) => {
           if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
         });
+        await session.endSession();
         return res.status(404).json({ message: "Không tìm thấy bài viết" });
       }
 
@@ -358,17 +364,26 @@ const PostController = {
 
       const images = uploadedFiles.map((f) => `feed/${f.filename}`);
 
-      const comment = await CommentModel.create({
-        post_id: postId,
-        author_id: req.account._id,
-        author_name,
-        author_avatar,
-        content: content ? content.trim() : "",
-        images
-      });
+      const [comment] = await CommentModel.create(
+        [
+          {
+            post_id: postId,
+            author_id: req.account._id,
+            author_name,
+            author_avatar,
+            content: content ? content.trim() : "",
+            images
+          }
+        ],
+        { session }
+      );
 
       post.comments_count = (post.comments_count || 0) + 1;
-      await post.save();
+      await post.save({ session });
+
+      // 🔥 COMMIT TRANSACTION: Lưu đồng thời toàn bộ thay đổi trên vào DB
+      await session.commitTransaction();
+      await session.endSession();
 
       const signedComment = serializeComment(comment);
       const io = req.app.get("io");
@@ -394,6 +409,8 @@ const PostController = {
 
       return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
     } catch (error) {
+      await session.abortTransaction();
+      await session.endSession();
       uploadedFiles.forEach((file) => {
         try {
           if (fs.existsSync(file.path)) {

@@ -77,6 +77,7 @@ const definition = {
     { name: "Chat", description: "Nhắn tin nội bộ" },
     { name: "KPI Metric", description: "F01 — Danh mục chỉ tiêu KPI (động)" },
     { name: "KPI Assignment", description: "F03 — Combo KPI tháng (Trưởng phòng giao cho Sale)" },
+    { name: "KPI Daily Report", description: "F04 — Sale tự khai báo Input KPI hàng ngày" },
     { name: "Omicall", description: "Webhook nhận sự kiện cuộc gọi từ Omicall (test)" }
   ]
 };

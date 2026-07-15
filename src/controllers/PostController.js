@@ -345,6 +345,13 @@ const PostController = {
         .json({ message: "Nội dung bình luận hoặc hình ảnh không được để trống" });
     }
 
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+      uploadedFiles.forEach((f) => {
+        if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
+      });
+      return res.status(400).json({ message: "ID bài viết không hợp lệ" });
+    }
+
     let session;
     let isCommitted = false;
 
@@ -381,8 +388,21 @@ const PostController = {
         { session }
       );
 
-      post.comments_count = (post.comments_count || 0) + 1;
-      await post.save({ session });
+      const updatedPost = await PostModel.findOneAndUpdate(
+        { _id: postId, isDeleted: false },
+        { $inc: { comments_count: 1 } },
+        { session, new: true }
+      );
+
+      if (!updatedPost) {
+        await session.abortTransaction();
+        await session.endSession();
+
+        uploadedFiles.forEach((f) => {
+          if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
+        });
+        return res.status(404).json({ message: "Không tìm thấy bài viết" });
+      }
 
       await session.commitTransaction();
       await session.endSession();
@@ -396,11 +416,11 @@ const PostController = {
         io.to(`post:${postId}`).emit("new_comment", { comment: signedComment });
         io.to("feed").emit("comment_count_updated", {
           post_id: postId,
-          comments_count: post.comments_count
+          comments_count: updatedPost.comments_count
         });
       }
 
-      const isNotSameUser = post.author_id.toString() !== req.account._id;
+      const isNotSameUser = post.author_id.toString() !== req.account._id.toString();
       if (isNotSameUser) {
         pushNotification
           .sendToAccount({
@@ -409,7 +429,9 @@ const PostController = {
             body: `${author_name} đã bình luận bài viết của bạn`,
             data: { type: "new_comment", post_id: postId }
           })
-          .catch(() => {});
+          .catch((err) => {
+            console.error("[Notification] Gửi thất bại:", err);
+          });
       }
 
       return res.status(200).json({ message: "Bình luận thành công", data: signedComment });

@@ -48,7 +48,14 @@ const fileFilter = (req, file, cb) => {
 };
 
 async function processImages(req, _res, next) {
-  if (!req.files?.length) return next();
+  let files = [];
+  if (req.files?.length) {
+    files = req.files;
+  } else if (req.file) {
+    files = [req.file];
+  }
+
+  if (!files.length) return next();
 
   try {
     await Promise.all(

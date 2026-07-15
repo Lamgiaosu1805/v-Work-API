@@ -7,6 +7,7 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const DepartmentModel = require("../models/DepartmentModel");
 const pushNotification = require("../helpers/pushNotification");
 const { serializePost, serializeComment, signReactions } = require("../helpers/staticUrl");
+const cleanupUploadedFiles = require("../utils/cleanupUploadedFiles");
 
 async function getAuthorInfo(accountId) {
   const userInfo = await UserInfoModel.findOne({ id_account: accountId });
@@ -329,66 +330,65 @@ const PostController = {
 
   // POST /posts/:id/comments
   createCommentWithImages: async (req, res) => {
-    const uploadedFiles = req.files || [];
+    const uploadedFile = req.file || null; // ✅ single file, không còn mảng
     const { id: postId } = req.params;
     const { content } = req.body;
 
     const hasContent = content && content.trim();
-    const hasImages = uploadedFiles.length > 0;
+    const hasImage = !!uploadedFile;
 
-    if (!hasContent && !hasImages) {
-      uploadedFiles.forEach((f) => {
-        if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
-      });
+    if (!hasContent && !hasImage) {
+      cleanupUploadedFiles(uploadedFile, "empty-content");
       return res
         .status(400)
         .json({ message: "Nội dung bình luận hoặc hình ảnh không được để trống" });
     }
 
     if (!mongoose.Types.ObjectId.isValid(postId)) {
-      uploadedFiles.forEach((f) => {
-        if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
-      });
+      cleanupUploadedFiles(uploadedFile, "invalid-id");
       return res.status(400).json({ message: "ID bài viết không hợp lệ" });
     }
 
     let session;
     let isCommitted = false;
+    let signedComment;
+    let updatedPost;
+    let post;
+    let commenter_name;
 
     try {
-      const { author_name, author_avatar } = await getAuthorInfo(req.account._id);
+      const authorInfo = await getAuthorInfo(req.account._id);
+      commenter_name = authorInfo.author_name;
+      const { author_avatar } = authorInfo;
 
       session = await mongoose.startSession();
       session.startTransaction();
 
-      const post = await PostModel.findOne({ _id: postId, isDeleted: false }).session(session);
+      post = await PostModel.findOne({ _id: postId, isDeleted: false }).session(session);
       if (!post) {
         await session.abortTransaction();
         await session.endSession();
-
-        uploadedFiles.forEach((f) => {
-          if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
-        });
+        cleanupUploadedFiles(uploadedFile, "post-not-found");
         return res.status(404).json({ message: "Không tìm thấy bài viết" });
       }
 
-      const images = uploadedFiles.map((f) => `feed/${f.filename}`);
+      const image = uploadedFile ? `feed/${uploadedFile.filename}` : null;
 
       const [comment] = await CommentModel.create(
         [
           {
             post_id: postId,
             author_id: req.account._id,
-            author_name,
+            commenter_name,
             author_avatar,
             content: content ? content.trim() : "",
-            images
+            image
           }
         ],
         { session }
       );
 
-      const updatedPost = await PostModel.findOneAndUpdate(
+      updatedPost = await PostModel.findOneAndUpdate(
         { _id: postId, isDeleted: false },
         { $inc: { comments_count: 1 } },
         { session, new: true }
@@ -397,20 +397,32 @@ const PostController = {
       if (!updatedPost) {
         await session.abortTransaction();
         await session.endSession();
-
-        uploadedFiles.forEach((f) => {
-          if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
-        });
+        cleanupUploadedFiles(uploadedFile, "post-not-found-2");
         return res.status(404).json({ message: "Không tìm thấy bài viết" });
       }
 
       await session.commitTransaction();
       await session.endSession();
-
       isCommitted = true;
 
-      const signedComment = serializeComment(comment);
+      signedComment = serializeComment(comment);
+    } catch (error) {
+      console.error("Đã xảy ra lỗi khi tạo bình luận:", error);
 
+      if (session && !isCommitted) {
+        try {
+          await session.abortTransaction();
+          await session.endSession();
+        } catch (abortError) {
+          console.error("Không thể abort transaction:", abortError);
+        }
+      }
+
+      cleanupUploadedFiles(uploadedFile, "create-comment-failed");
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+
+    try {
       const io = req.app.get("io");
       if (io) {
         io.to(`post:${postId}`).emit("new_comment", { comment: signedComment });
@@ -426,49 +438,23 @@ const PostController = {
           .sendToAccount({
             account_id: post.author_id,
             title: "Bình luận mới",
-            body: `${author_name} đã bình luận bài viết của bạn`,
+            body: `${commenter_name} đã bình luận bài viết của bạn`,
             data: { type: "new_comment", post_id: postId }
           })
           .catch((err) => {
             console.error("[Notification] Gửi thất bại:", err);
           });
       }
-
-      return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
-    } catch (error) {
-      console.error("Đã xảy ra lỗi:", error);
-
-      if (session && !isCommitted) {
-        try {
-          await session.abortTransaction();
-          await session.endSession();
-        } catch (abortError) {
-          console.error("Không thể abort transaction:", abortError);
-        }
-      }
-
-      if (!isCommitted) {
-        uploadedFiles.forEach((file) => {
-          try {
-            if (fs.existsSync(file.path)) {
-              fs.unlinkSync(file.path);
-              console.log(`[Rollback] Đã xóa file rác comment thành công: ${file.path}`);
-            }
-          } catch (unlinkError) {
-            console.error(`[Rollback] Không thể xóa file lỗi:`, unlinkError);
-          }
-        });
-      }
-
-      if (isCommitted) {
-        return res.status(200).json({
-          message: "Bình luận thành công (lỗi đồng bộ realtime)",
-          error: error.message
-        });
-      }
-
-      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    } catch (realtimeError) {
+      console.error("Lỗi đồng bộ realtime:", realtimeError);
+      return res.status(200).json({
+        message: "Bình luận thành công (lỗi đồng bộ realtime)",
+        data: signedComment,
+        error: realtimeError.message
+      });
     }
+
+    return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
   },
 
   // DELETE /posts/:id/comments/:commentId

@@ -12,10 +12,10 @@ const CommentSchema = new mongoose.Schema(
       type: String,
       maxlength: 500,
       required() {
-        return !this.images || this.images.length === 0;
+        return !this.image;
       }
     },
-    images: [{ type: String }], // Mảng chứa đường dẫn hình ảnh
+    image: { type: String, default: null },
     ...BaseSchema.obj
   },
   {
@@ -25,5 +25,14 @@ const CommentSchema = new mongoose.Schema(
     collection: "comments"
   }
 );
+CommentSchema.pre("validate", function (next) {
+  const hasContent = this.content && this.content.trim().length > 0;
+  const hasImage = !!this.image;
+
+  if (!hasContent && !hasImage) {
+    this.invalidate("content", "Nội dung bình luận hoặc hình ảnh không được để trống");
+  }
+  next();
+});
 
 module.exports = mongoose.model("comment", CommentSchema);

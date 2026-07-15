@@ -19,7 +19,7 @@ router.get("/:id/comments", authenticate, PostController.getComments);
 router.post(
   "/:id/comments",
   authenticate,
-  upload.array("images", 5),
+  upload.single("image"),
   processImages,
   PostController.createCommentWithImages
 );

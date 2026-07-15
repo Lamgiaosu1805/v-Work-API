@@ -453,7 +453,7 @@ async function sendMessage({
   }
   await ensureConversationAccess(conversationId, senderUserInfoId);
 
-  const allowedTypes = ["text", "image", "audio"];
+  const allowedTypes = ["text", "image", "audio", "file"];
   if (!allowedTypes.includes(type)) {
     throw new ChatError("Loại tin nhắn không hợp lệ", 400);
   }
@@ -465,6 +465,10 @@ async function sendMessage({
 
   if (type === "image" && !attachment) {
     throw new ChatError("Thiếu file ảnh", 400);
+  }
+
+  if (type === "file" && !attachment) {
+    throw new ChatError("Thiếu file đính kèm", 400);
   }
 
   let replyTo = null;

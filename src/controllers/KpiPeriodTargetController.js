@@ -1,6 +1,6 @@
 const KpiPeriodTargetModel = require("../models/KpiPeriodTargetModel");
 const { getAccountTtkdIds, getSaleInfoIdsInTtkds } = require("../helpers/kpiHelper");
-const { syncInvestmentRevenue } = require("../helpers/kpiSync");
+const { syncInvestmentRevenue, syncCifEkyc } = require("../helpers/kpiSync");
 const { runDailyRollover } = require("../helpers/kpiRollover");
 const { KPI_SCOPE_TYPE } = require("../constants");
 
@@ -112,13 +112,21 @@ const KpiPeriodTargetController = {
         if (!belongs) return res.status(403).json({ message: "Không có quyền đồng bộ TTKD này" });
       }
 
-      const summary = await syncInvestmentRevenue({
+      const revenueSummary = await syncInvestmentRevenue({
+        year: Number(year),
+        month: Number(month),
+        ttkdId: ttkd_id || null
+      });
+      const cifEkycSummary = await syncCifEkyc({
         year: Number(year),
         month: Number(month),
         ttkdId: ttkd_id || null
       });
 
-      return res.status(200).json({ message: "Đồng bộ hoàn tất", data: summary });
+      return res.status(200).json({
+        message: "Đồng bộ hoàn tất",
+        data: { investment_revenue: revenueSummary, cif_ekyc: cifEkycSummary }
+      });
     } catch (err) {
       return res.status(500).json({ message: "Lỗi server", error: err.message });
     }

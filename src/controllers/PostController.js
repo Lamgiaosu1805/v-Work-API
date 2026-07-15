@@ -367,7 +367,6 @@ const PostController = {
 
       const images = uploadedFiles.map((f) => `feed/${f.filename}`);
 
-      // Tạo comment mới (gắn session)
       const [comment] = await CommentModel.create(
         [
           {

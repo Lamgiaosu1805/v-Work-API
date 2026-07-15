@@ -85,22 +85,23 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       tags: [Post]
-      summary: Tạo bình luận
+      summary: Tạo bình luận (kèm tối đa 1 ảnh)
       parameters:
         - { in: path, name: id, required: true, schema: { type: string } }
       requestBody:
         required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
               type: object
-              required: [content]
               properties:
-                content: { type: string }
+                content: { type: string, description: "Bắt buộc nếu không có image" }
+                image: { type: string, format: binary }
       responses:
         "201": { description: Tạo bình luận thành công }
-        "400": { $ref: "#/components/responses/InvalidId" }
+        "400": { description: "Thiếu content/image hoặc id không hợp lệ" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /posts/{id}/comments/{commentId}:
     delete:

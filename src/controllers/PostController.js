@@ -1,3 +1,5 @@
+const fs = require("fs");
+const mongoose = require("mongoose");
 const PostModel = require("../models/PostModel");
 const CommentModel = require("../models/CommentModel");
 const UserInfoModel = require("../models/UserInfoModel");
@@ -5,6 +7,7 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const DepartmentModel = require("../models/DepartmentModel");
 const pushNotification = require("../helpers/pushNotification");
 const { serializePost, serializeComment, signReactions } = require("../helpers/staticUrl");
+const cleanupUploadedFiles = require("../utils/cleanupUploadedFiles");
 
 async function getAuthorInfo(accountId) {
   const userInfo = await UserInfoModel.findOne({ id_account: accountId });
@@ -13,7 +16,7 @@ async function getAuthorInfo(accountId) {
   let author_dept = null;
   const membership = await UserDepartmentPositionModel.findOne({
     user: userInfo._id,
-    isDeleted: false,
+    isDeleted: false
   }).populate("department", "department_name");
   if (membership?.department?.department_name) {
     author_dept = membership.department.department_name;
@@ -22,7 +25,7 @@ async function getAuthorInfo(accountId) {
   return {
     author_name: userInfo.full_name,
     author_avatar: userInfo.avatar ?? null,
-    author_dept,
+    author_dept
   };
 }
 
@@ -41,8 +44,8 @@ const PostController = {
   // GET /posts
   getPosts: async (req, res) => {
     try {
-      const page = Math.max(1, parseInt(req.query.page) || 1);
-      const limit = Math.min(50, parseInt(req.query.limit) || 15);
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(50, parseInt(req.query.limit, 10) || 15);
       const { dept_id, type, author_id } = req.query;
 
       const filter = { isDeleted: false };
@@ -58,10 +61,14 @@ const PostController = {
         .lean();
 
       // Thu thập tất cả user_id: tác giả bài + người dùng đã react
-      const allIds = [...new Set([
-        ...posts.map((p) => String(p.author_id)),
-        ...posts.flatMap((p) => (p.reactions ?? []).map((r) => String(r.user_id))),
-      ].filter(Boolean))];
+      const allIds = [
+        ...new Set(
+          [
+            ...posts.map((p) => String(p.author_id)),
+            ...posts.flatMap((p) => (p.reactions ?? []).map((r) => String(r.user_id)))
+          ].filter(Boolean)
+        )
+      ];
       let avatarMap = {};
       if (allIds.length) {
         const infos = await UserInfoModel.find(
@@ -85,8 +92,8 @@ const PostController = {
           total,
           page,
           limit,
-          total_pages: Math.ceil(total / limit),
-        },
+          total_pages: Math.ceil(total / limit)
+        }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -124,7 +131,7 @@ const PostController = {
         images,
         type,
         visibility,
-        dept_id: dept_id || null,
+        dept_id: dept_id || null
       });
 
       const signedPost = serializePost(post);
@@ -175,7 +182,7 @@ const PostController = {
 
       return res.status(200).json({
         message: "Thành công",
-        data: { reactions: signedReactions },
+        data: { reactions: signedReactions }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -224,7 +231,7 @@ const PostController = {
 
       return res.status(200).json({
         message: post.pinned ? "Đã ghim bài viết" : "Đã bỏ ghim bài viết",
-        data: { pinned: post.pinned },
+        data: { pinned: post.pinned }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -235,8 +242,8 @@ const PostController = {
   getComments: async (req, res) => {
     try {
       const { id } = req.params;
-      const page = Math.max(1, parseInt(req.query.page) || 1);
-      const limit = Math.min(100, parseInt(req.query.limit) || 20);
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(100, parseInt(req.query.limit, 10) || 20);
 
       const sortDir = req.query.sort === "desc" ? -1 : 1;
       const filter = { post_id: id, isDeleted: false };
@@ -248,7 +255,9 @@ const PostController = {
         .lean();
 
       const avatarMap = await buildAvatarMap(comments);
-      comments.forEach((c) => { c.author_avatar = avatarMap[String(c.author_id)] ?? c.author_avatar; });
+      comments.forEach((c) => {
+        c.author_avatar = avatarMap[String(c.author_id)] ?? c.author_avatar;
+      });
 
       return res.status(200).json({
         message: "Thành công",
@@ -257,8 +266,8 @@ const PostController = {
           total,
           page,
           limit,
-          total_pages: Math.ceil(total / limit),
-        },
+          total_pages: Math.ceil(total / limit)
+        }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -285,7 +294,7 @@ const PostController = {
         author_id: req.account._id,
         author_name,
         author_avatar,
-        content: content.trim(),
+        content: content.trim()
       });
 
       post.comments_count = (post.comments_count || 0) + 1;
@@ -295,7 +304,10 @@ const PostController = {
       const io = req.app.get("io");
       if (io) {
         io.to(`post:${postId}`).emit("new_comment", { comment: signedComment });
-        io.to("feed").emit("comment_count_updated", { post_id: postId, comments_count: post.comments_count });
+        io.to("feed").emit("comment_count_updated", {
+          post_id: postId,
+          comments_count: post.comments_count
+        });
       }
 
       const isNotSameUser = post.author_id.toString() !== req.account._id;
@@ -305,7 +317,7 @@ const PostController = {
             account_id: post.author_id,
             title: "Bình luận mới",
             body: `${author_name} đã bình luận bài viết của bạn`,
-            data: { type: "new_comment", post_id: postId },
+            data: { type: "new_comment", post_id: postId }
           })
           .catch(() => {});
       }
@@ -316,13 +328,146 @@ const PostController = {
     }
   },
 
+  // POST /posts/:id/comments
+  createCommentWithImages: async (req, res) => {
+    const uploadedFile = req.file || null; // ✅ single file, không còn mảng
+    const { id: postId } = req.params;
+    const { content } = req.body;
+
+    const hasContent = content && content.trim();
+    const hasImage = !!uploadedFile;
+
+    if (!hasContent && !hasImage) {
+      cleanupUploadedFiles(uploadedFile, "empty-content");
+      return res
+        .status(400)
+        .json({ message: "Nội dung bình luận hoặc hình ảnh không được để trống" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+      cleanupUploadedFiles(uploadedFile, "invalid-id");
+      return res.status(400).json({ message: "ID bài viết không hợp lệ" });
+    }
+
+    let session;
+    let isCommitted = false;
+    let signedComment;
+    let updatedPost;
+    let post;
+    let commenter_name;
+
+    try {
+      const authorInfo = await getAuthorInfo(req.account._id);
+      commenter_name = authorInfo.author_name;
+      const { author_avatar } = authorInfo;
+
+      session = await mongoose.startSession();
+      session.startTransaction();
+
+      post = await PostModel.findOne({ _id: postId, isDeleted: false }).session(session);
+      if (!post) {
+        await session.abortTransaction();
+        await session.endSession();
+        cleanupUploadedFiles(uploadedFile, "post-not-found");
+        return res.status(404).json({ message: "Không tìm thấy bài viết" });
+      }
+
+      const image = uploadedFile ? `feed/${uploadedFile.filename}` : null;
+
+      const [comment] = await CommentModel.create(
+        [
+          {
+            post_id: postId,
+            author_id: req.account._id,
+            author_name: commenter_name,
+            author_avatar,
+            content: content ? content.trim() : "",
+            image
+          }
+        ],
+        { session }
+      );
+
+      updatedPost = await PostModel.findOneAndUpdate(
+        { _id: postId, isDeleted: false },
+        { $inc: { comments_count: 1 } },
+        { session, new: true }
+      );
+
+      if (!updatedPost) {
+        await session.abortTransaction();
+        await session.endSession();
+        cleanupUploadedFiles(uploadedFile, "post-not-found-2");
+        return res.status(404).json({ message: "Không tìm thấy bài viết" });
+      }
+
+      await session.commitTransaction();
+      await session.endSession();
+      isCommitted = true;
+
+      signedComment = serializeComment(comment);
+    } catch (error) {
+      console.error("Đã xảy ra lỗi khi tạo bình luận:", error);
+
+      if (session && !isCommitted) {
+        try {
+          await session.abortTransaction();
+          await session.endSession();
+        } catch (abortError) {
+          console.error("Không thể abort transaction:", abortError);
+        }
+      }
+
+      cleanupUploadedFiles(uploadedFile, "create-comment-failed");
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+
+    try {
+      const io = req.app.get("io");
+      if (io) {
+        io.to(`post:${postId}`).emit("new_comment", { comment: signedComment });
+        io.to("feed").emit("comment_count_updated", {
+          post_id: postId,
+          comments_count: updatedPost.comments_count
+        });
+      }
+
+      const isNotSameUser = post.author_id.toString() !== req.account._id.toString();
+      if (isNotSameUser) {
+        pushNotification
+          .sendToAccount({
+            account_id: post.author_id,
+            title: "Bình luận mới",
+            body: `${commenter_name} đã bình luận bài viết của bạn`,
+            data: { type: "new_comment", post_id: postId }
+          })
+          .catch((err) => {
+            console.error("[Notification] Gửi thất bại:", err);
+          });
+      }
+    } catch (realtimeError) {
+      console.error("Lỗi đồng bộ realtime:", realtimeError);
+      return res.status(200).json({
+        message: "Bình luận thành công (lỗi đồng bộ realtime)",
+        data: signedComment,
+        error: realtimeError.message
+      });
+    }
+
+    return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
+  },
+
   // DELETE /posts/:id/comments/:commentId
   deleteComment: async (req, res) => {
     try {
       const { id: postId, commentId } = req.params;
       const { _id: accountId, role } = req.account;
 
-      const comment = await CommentModel.findOne({ _id: commentId, post_id: postId, isDeleted: false });
+      const comment = await CommentModel.findOne({
+        _id: commentId,
+        post_id: postId,
+        isDeleted: false
+      });
       if (!comment) return res.status(404).json({ message: "Không tìm thấy bình luận" });
 
       const isAuthor = comment.author_id.toString() === accountId;
@@ -342,7 +487,7 @@ const PostController = {
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
-  },
+  }
 };
 
 module.exports = PostController;

@@ -8,6 +8,7 @@ const DepartmentModel = require("../models/DepartmentModel");
 const pushNotification = require("../helpers/pushNotification");
 const { serializePost, serializeComment, signReactions } = require("../helpers/staticUrl");
 const cleanupUploadedFiles = require("../utils/cleanupUploadedFiles");
+const deletePhysicalFile = require("../utils/deletePhysicalFile");
 
 async function getAuthorInfo(accountId) {
   const userInfo = await UserInfoModel.findOne({ id_account: accountId });
@@ -189,6 +190,96 @@ const PostController = {
     }
   },
 
+  // PATCH /posts/:id/edit
+  editPost: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { content, visibility, dept_id, keep_images } = req.body;
+      const accountId = req.account._id.toString();
+
+      const post = await PostModel.findOne({ _id: id, isDeleted: false });
+      if (!post) {
+        if (req.files && req.files.length > 0) {
+          req.files.forEach((f) => cleanupUploadedFiles(f, "post-not-found"));
+        }
+        return res.status(404).json({ message: "Không tìm thấy bài viết" });
+      }
+
+      if (post.author_id.toString() !== accountId) {
+        if (req.files && req.files.length > 0) {
+          req.files.forEach((f) => cleanupUploadedFiles(f, "permission-denied"));
+        }
+        return res.status(403).json({ message: "Bạn không có quyền chỉnh sửa bài viết này" });
+      }
+
+      if (content !== undefined && (!content || !content.trim())) {
+        if (req.files && req.files.length > 0) {
+          req.files.forEach((f) => cleanupUploadedFiles(f, "empty-content"));
+        }
+        return res.status(400).json({ message: "Nội dung bài viết không được để trống" });
+      }
+
+      if (content !== undefined) post.content = content.trim();
+      if (visibility !== undefined) post.visibility = visibility;
+      if (dept_id !== undefined) post.dept_id = dept_id || null;
+
+      const newImages = (req.files || []).map((f) => `feed/${f.filename}`);
+
+      if ((req.files && req.files.length > 0) || keep_images !== undefined) {
+        let finalImages = [];
+
+        if (keep_images) {
+          try {
+            const parsedKeepImages =
+              typeof keep_images === "string" ? JSON.parse(keep_images) : keep_images;
+
+            if (Array.isArray(parsedKeepImages)) {
+              finalImages = post.images.filter((img) => parsedKeepImages.includes(img));
+            }
+          } catch (e) {
+            finalImages = post.images;
+          }
+        } else if (req.files && req.files.length > 0) {
+          finalImages = [];
+        } else {
+          finalImages = post.images;
+        }
+
+        const deletedImages = post.images.filter((img) => !finalImages.includes(img));
+
+        deletedImages.forEach((img) => {
+          deletePhysicalFile(img);
+        });
+        // -----------------------------------------------------
+
+        post.images = [...finalImages, ...newImages];
+      }
+
+      await post.save();
+
+      const { author_avatar } = await getAuthorInfo(accountId);
+      post.author_avatar = author_avatar ?? post.author_avatar;
+
+      const signedPost = serializePost(post);
+
+      const io = req.app.get("io");
+      if (io) {
+        io.to("feed").emit("post_updated", { post: signedPost });
+        io.to(`post:${id}`).emit("post_updated", { post: signedPost });
+      }
+
+      return res.status(200).json({
+        message: "Cập nhật bài viết thành công",
+        data: signedPost
+      });
+    } catch (error) {
+      if (req.files && req.files.length > 0) {
+        req.files.forEach((f) => cleanupUploadedFiles(f, "server-error"));
+      }
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
+
   // DELETE /posts/:id
   deletePost: async (req, res) => {
     try {
@@ -275,62 +366,8 @@ const PostController = {
   },
 
   // POST /posts/:id/comments
-  createComment: async (req, res) => {
-    try {
-      const { id: postId } = req.params;
-      const { content } = req.body;
-
-      if (!content || !content.trim()) {
-        return res.status(400).json({ message: "Nội dung bình luận không được để trống" });
-      }
-
-      const post = await PostModel.findOne({ _id: postId, isDeleted: false });
-      if (!post) return res.status(404).json({ message: "Không tìm thấy bài viết" });
-
-      const { author_name, author_avatar } = await getAuthorInfo(req.account._id);
-
-      const comment = await CommentModel.create({
-        post_id: postId,
-        author_id: req.account._id,
-        author_name,
-        author_avatar,
-        content: content.trim()
-      });
-
-      post.comments_count = (post.comments_count || 0) + 1;
-      await post.save();
-
-      const signedComment = serializeComment(comment);
-      const io = req.app.get("io");
-      if (io) {
-        io.to(`post:${postId}`).emit("new_comment", { comment: signedComment });
-        io.to("feed").emit("comment_count_updated", {
-          post_id: postId,
-          comments_count: post.comments_count
-        });
-      }
-
-      const isNotSameUser = post.author_id.toString() !== req.account._id;
-      if (isNotSameUser) {
-        pushNotification
-          .sendToAccount({
-            account_id: post.author_id,
-            title: "Bình luận mới",
-            body: `${author_name} đã bình luận bài viết của bạn`,
-            data: { type: "new_comment", post_id: postId }
-          })
-          .catch(() => {});
-      }
-
-      return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
-    } catch (error) {
-      return res.status(500).json({ message: "Lỗi server", error: error.message });
-    }
-  },
-
-  // POST /posts/:id/comments
   createCommentWithImages: async (req, res) => {
-    const uploadedFile = req.file || null; // ✅ single file, không còn mảng
+    const uploadedFile = req.file || null;
     const { id: postId } = req.params;
     const { content } = req.body;
 

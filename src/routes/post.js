@@ -15,7 +15,7 @@ router.post("/:id/react", authenticate, PostController.reactPost);
 router.delete("/:id", authenticate, PostController.deletePost);
 router.patch("/:id/pin", authenticate, canManage("workplace"), PostController.pinPost);
 router.get("/:id/comments", authenticate, PostController.getComments);
-// router.post("/:id/comments", authenticate, PostController.createComment);
+
 router.post(
   "/:id/comments",
   authenticate,
@@ -24,5 +24,12 @@ router.post(
   PostController.createCommentWithImages
 );
 router.delete("/:id/comments/:commentId", authenticate, PostController.deleteComment);
+router.patch(
+  "/:id/edit",
+  authenticate,
+  upload.array("images", 20),
+  processImages,
+  PostController.editPost
+);
 
 module.exports = router;

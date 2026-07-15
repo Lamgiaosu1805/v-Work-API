@@ -333,7 +333,6 @@ const PostController = {
     const { id: postId } = req.params;
     const { content } = req.body;
 
-    // 1. KIỂM TRA ĐẦU VÀO (Chưa cần mở transaction để tránh giữ kết nối DB lâu)
     const hasContent = content && content.trim();
     const hasImages = uploadedFiles.length > 0;
 
@@ -347,6 +346,7 @@ const PostController = {
     }
 
     let session;
+    let isCommitted = false;
 
     try {
       const { author_name, author_avatar } = await getAuthorInfo(req.account._id);
@@ -382,18 +382,16 @@ const PostController = {
         { session }
       );
 
-      // Tăng số lượng comment (gắn session)
       post.comments_count = (post.comments_count || 0) + 1;
       await post.save({ session });
 
-      // 🔥 XÁC NHẬN LƯU VÀO DB THẬT & ĐÓNG SESSION
       await session.commitTransaction();
       await session.endSession();
 
-      // 3. THỰC HIỆN CÁC TÁC VỤ NGOÀI (Sau khi Transaction thành công hoàn toàn)
+      isCommitted = true;
+
       const signedComment = serializeComment(comment);
 
-      // Bắn realtime
       const io = req.app.get("io");
       if (io) {
         io.to(`post:${postId}`).emit("new_comment", { comment: signedComment });
@@ -403,7 +401,6 @@ const PostController = {
         });
       }
 
-      // Gửi push notification
       const isNotSameUser = post.author_id.toString() !== req.account._id;
       if (isNotSameUser) {
         pushNotification
@@ -418,27 +415,41 @@ const PostController = {
 
       return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
     } catch (error) {
-      // 4. CỨU HỘ: NẾU BẤT KỲ BƯỚC NÀO TRONG TRY BỊ LỖI
-      if (session) {
-        await session.abortTransaction();
-        await session.endSession();
+      console.error("Đã xảy ra lỗi:", error);
+
+      if (session && !isCommitted) {
+        try {
+          await session.abortTransaction();
+          await session.endSession();
+        } catch (abortError) {
+          console.error("Không thể abort transaction:", abortError);
+        }
       }
 
-      // Dọn dẹp file rác trên ổ cứng của server
-      uploadedFiles.forEach((file) => {
-        try {
-          if (fs.existsSync(file.path)) {
-            fs.unlinkSync(file.path);
-            console.log(`[Rollback] Đã xóa file rác comment thành công: ${file.path}`);
+      if (!isCommitted) {
+        uploadedFiles.forEach((file) => {
+          try {
+            if (fs.existsSync(file.path)) {
+              fs.unlinkSync(file.path);
+              console.log(`[Rollback] Đã xóa file rác comment thành công: ${file.path}`);
+            }
+          } catch (unlinkError) {
+            console.error(`[Rollback] Không thể xóa file lỗi:`, unlinkError);
           }
-        } catch (unlinkError) {
-          console.error(`[Rollback] Không thể xóa file lỗi:`, unlinkError);
-        }
-      });
+        });
+      }
+
+      if (isCommitted) {
+        return res.status(200).json({
+          message: "Bình luận thành công (lỗi đồng bộ realtime)",
+          error: error.message
+        });
+      }
 
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
   },
+
   // DELETE /posts/:id/comments/:commentId
   deleteComment: async (req, res) => {
     try {

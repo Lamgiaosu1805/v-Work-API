@@ -2,11 +2,22 @@ const InvestmentModel = require("../models/InvestmentModel");
 const CustomerModel = require("../models/CustomerModel");
 const DepartmentModel = require("../models/DepartmentModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
+const KpiMetricModel = require("../models/KpiMetricModel");
 const KpiPeriodTargetModel = require("../models/KpiPeriodTargetModel");
 const { KPI_AUTO_SOURCE, KPI_SCOPE_TYPE, KPI_PERIOD_TYPE } = require("../constants");
 const { monthKey, dayKey, monthRange } = require("./kpiPeriod");
 
-const METRIC = KPI_AUTO_SOURCE.INVESTMENT_REVENUE;
+async function resolveMetricCode(autoSource) {
+  const metric = await KpiMetricModel.findOne({
+    auto_source: autoSource,
+    source: "auto",
+    is_active: true,
+    isDeleted: false
+  })
+    .select("code")
+    .lean();
+  return metric ? metric.code : null;
+}
 
 function resolveSourceBucket(commission) {
   if (!commission) return "bld";
@@ -83,9 +94,14 @@ async function syncInvestmentRevenue({ year, month, ttkdId = null }) {
   const { start, end } = monthRange(year, month);
   const mKey = monthKey(year, month);
 
+  const metricCode = await resolveMetricCode(KPI_AUTO_SOURCE.INVESTMENT_REVENUE);
+  if (!metricCode) {
+    return { metric: null, period: mKey, investments_processed: 0, records_updated: 0 };
+  }
+
   const { branchIds, saleToTtkd } = await buildSaleToTtkdMap(ttkdId);
   if (!branchIds.length) {
-    return { metric: METRIC, period: mKey, investments_processed: 0, records_updated: 0 };
+    return { metric: metricCode, period: mKey, investments_processed: 0, records_updated: 0 };
   }
 
   const investments = await InvestmentModel.find({
@@ -133,7 +149,7 @@ async function syncInvestmentRevenue({ year, month, ttkdId = null }) {
     const wrote = await upsertActual({
       scopeType: e.scopeType,
       scopeId: e.scopeId,
-      metricCode: METRIC,
+      metricCode,
       periodType: e.periodType,
       periodKey: e.periodKey,
       actual: e.total,
@@ -143,7 +159,7 @@ async function syncInvestmentRevenue({ year, month, ttkdId = null }) {
   }
 
   return {
-    metric: METRIC,
+    metric: metricCode,
     period: mKey,
     ttkd_id: ttkdId ? String(ttkdId) : "all",
     investments_processed: processed,
@@ -154,7 +170,15 @@ async function syncInvestmentRevenue({ year, month, ttkdId = null }) {
 async function syncCifEkyc({ year, month, ttkdId = null }) {
   const { start, end } = monthRange(year, month);
   const mKey = monthKey(year, month);
-  const metrics = [KPI_AUTO_SOURCE.CIF, KPI_AUTO_SOURCE.EKYC];
+
+  const [cifCode, ekycCode] = await Promise.all([
+    resolveMetricCode(KPI_AUTO_SOURCE.CIF),
+    resolveMetricCode(KPI_AUTO_SOURCE.EKYC)
+  ]);
+  const metrics = [cifCode, ekycCode].filter(Boolean);
+  if (!metrics.length) {
+    return { metrics, period: mKey, customers_processed: 0, records_updated: 0 };
+  }
 
   const { branchIds, saleToTtkd } = await buildSaleToTtkdMap(ttkdId);
   if (!branchIds.length) {
@@ -207,13 +231,13 @@ async function syncCifEkyc({ year, month, ttkdId = null }) {
     let touched = false;
 
     const cif = c.cif_commission;
-    if (cif?.sale_id && cif.granted_at >= start && cif.granted_at < end) {
-      touched = bumpEvent(KPI_AUTO_SOURCE.CIF, cif.sale_id, cif.granted_at) || touched;
+    if (cifCode && cif?.sale_id && cif.granted_at >= start && cif.granted_at < end) {
+      touched = bumpEvent(cifCode, cif.sale_id, cif.granted_at) || touched;
     }
 
     const ekyc = c.ekyc_commission;
-    if (ekyc?.sale_id && ekyc.granted_at >= start && ekyc.granted_at < end) {
-      touched = bumpEvent(KPI_AUTO_SOURCE.EKYC, ekyc.sale_id, ekyc.granted_at) || touched;
+    if (ekycCode && ekyc?.sale_id && ekyc.granted_at >= start && ekyc.granted_at < end) {
+      touched = bumpEvent(ekycCode, ekyc.sale_id, ekyc.granted_at) || touched;
     }
 
     if (touched) processed++;

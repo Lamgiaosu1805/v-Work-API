@@ -32,7 +32,7 @@ function serializePost(post) {
 function serializeComment(comment) {
   if (!comment) return comment;
   const c = toPlain(comment);
-  c.images = (comment.images || []).map((img) => sign(img));
+  c.image = sign(c.image);
   c.author_avatar = sign(c.author_avatar);
   return c;
 }

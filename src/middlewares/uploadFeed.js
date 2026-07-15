@@ -59,7 +59,7 @@ async function processImages(req, _res, next) {
 
   try {
     await Promise.all(
-      req.files.map(async (file) => {
+      files.map(async (file) => {
         if (GIF_TYPES.has(file.mimetype)) return;
 
         let inputBuffer;

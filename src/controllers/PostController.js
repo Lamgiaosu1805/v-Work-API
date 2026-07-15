@@ -379,7 +379,7 @@ const PostController = {
           {
             post_id: postId,
             author_id: req.account._id,
-            commenter_name,
+            author_name: commenter_name,
             author_avatar,
             content: content ? content.trim() : "",
             image

@@ -1,6 +1,7 @@
 const KpiPeriodTargetModel = require("../models/KpiPeriodTargetModel");
 const { getAccountTtkdIds, getSaleInfoIdsInTtkds } = require("../helpers/kpiHelper");
 const { syncInvestmentRevenue } = require("../helpers/kpiSync");
+const { runDailyRollover } = require("../helpers/kpiRollover");
 const { KPI_SCOPE_TYPE } = require("../constants");
 
 async function canAccessRecord(account, record) {
@@ -118,6 +119,21 @@ const KpiPeriodTargetController = {
       });
 
       return res.status(200).json({ message: "Đồng bộ hoàn tất", data: summary });
+    } catch (err) {
+      return res.status(500).json({ message: "Lỗi server", error: err.message });
+    }
+  },
+
+  rollover: async (req, res) => {
+    try {
+      const { date } = req.body;
+      const parsedDate = date ? new Date(date) : new Date();
+      if (Number.isNaN(parsedDate.getTime()))
+        return res.status(400).json({ message: "date không hợp lệ" });
+
+      const summary = await runDailyRollover({ date: parsedDate, closedBy: req.account._id });
+
+      return res.status(200).json({ message: "Đã tính rollover", data: summary });
     } catch (err) {
       return res.status(500).json({ message: "Lỗi server", error: err.message });
     }

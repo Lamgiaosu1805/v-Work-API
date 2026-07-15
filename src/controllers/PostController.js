@@ -330,40 +330,44 @@ const PostController = {
   // POST /posts/:id/comments
   createCommentWithImages: async (req, res) => {
     const uploadedFiles = req.files || [];
+    const { id: postId } = req.params;
+    const { content } = req.body;
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    // 1. KIỂM TRA ĐẦU VÀO (Chưa cần mở transaction để tránh giữ kết nối DB lâu)
+    const hasContent = content && content.trim();
+    const hasImages = uploadedFiles.length > 0;
+
+    if (!hasContent && !hasImages) {
+      uploadedFiles.forEach((f) => {
+        if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
+      });
+      return res
+        .status(400)
+        .json({ message: "Nội dung bình luận hoặc hình ảnh không được để trống" });
+    }
+
+    let session;
 
     try {
-      const { id: postId } = req.params;
-      const { content } = req.body;
+      const { author_name, author_avatar } = await getAuthorInfo(req.account._id);
 
-      const hasContent = content && content.trim();
-      const hasImages = uploadedFiles.length > 0;
-
-      if (!hasContent && !hasImages) {
-        uploadedFiles.forEach((f) => {
-          if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
-        });
-        await session.endSession();
-        return res
-          .status(400)
-          .json({ message: "Nội dung bình luận hoặc hình ảnh không được để trống" });
-      }
+      session = await mongoose.startSession();
+      session.startTransaction();
 
       const post = await PostModel.findOne({ _id: postId, isDeleted: false }).session(session);
       if (!post) {
+        await session.abortTransaction();
+        await session.endSession();
+
         uploadedFiles.forEach((f) => {
           if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
         });
-        await session.endSession();
         return res.status(404).json({ message: "Không tìm thấy bài viết" });
       }
 
-      const { author_name, author_avatar } = await getAuthorInfo(req.account._id);
-
       const images = uploadedFiles.map((f) => `feed/${f.filename}`);
 
+      // Tạo comment mới (gắn session)
       const [comment] = await CommentModel.create(
         [
           {
@@ -378,14 +382,18 @@ const PostController = {
         { session }
       );
 
+      // Tăng số lượng comment (gắn session)
       post.comments_count = (post.comments_count || 0) + 1;
       await post.save({ session });
 
-      // 🔥 COMMIT TRANSACTION: Lưu đồng thời toàn bộ thay đổi trên vào DB
+      // 🔥 XÁC NHẬN LƯU VÀO DB THẬT & ĐÓNG SESSION
       await session.commitTransaction();
       await session.endSession();
 
+      // 3. THỰC HIỆN CÁC TÁC VỤ NGOÀI (Sau khi Transaction thành công hoàn toàn)
       const signedComment = serializeComment(comment);
+
+      // Bắn realtime
       const io = req.app.get("io");
       if (io) {
         io.to(`post:${postId}`).emit("new_comment", { comment: signedComment });
@@ -395,6 +403,7 @@ const PostController = {
         });
       }
 
+      // Gửi push notification
       const isNotSameUser = post.author_id.toString() !== req.account._id;
       if (isNotSameUser) {
         pushNotification
@@ -409,8 +418,13 @@ const PostController = {
 
       return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
     } catch (error) {
-      await session.abortTransaction();
-      await session.endSession();
+      // 4. CỨU HỘ: NẾU BẤT KỲ BƯỚC NÀO TRONG TRY BỊ LỖI
+      if (session) {
+        await session.abortTransaction();
+        await session.endSession();
+      }
+
+      // Dọn dẹp file rác trên ổ cứng của server
       uploadedFiles.forEach((file) => {
         try {
           if (fs.existsSync(file.path)) {
@@ -421,10 +435,10 @@ const PostController = {
           console.error(`[Rollback] Không thể xóa file lỗi:`, unlinkError);
         }
       });
+
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
   },
-
   // DELETE /posts/:id/comments/:commentId
   deleteComment: async (req, res) => {
     try {

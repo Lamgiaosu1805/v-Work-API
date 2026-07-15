@@ -14,6 +14,7 @@ const canClose = requirePermission(PERMISSION.KPI_MONTHEND_CLOSE);
 router.get("/",             canView,  KpiPeriodTargetController.list);
 router.get("/:id",          canView,  KpiPeriodTargetController.getById);
 router.post("/sync",        canClose, KpiPeriodTargetController.sync);
+router.post("/rollover",    canClose, KpiPeriodTargetController.rollover);
 router.post("/:id/close",   canClose, KpiPeriodTargetController.close);
 
 module.exports = router;

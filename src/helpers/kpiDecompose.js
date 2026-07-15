@@ -1,7 +1,7 @@
 const KpiPeriodTargetModel = require("../models/KpiPeriodTargetModel");
 const HolidayModel = require("../models/HolidayModel");
 const { KPI_PERIOD_TYPE, KPI_SCOPE_TYPE } = require("../constants");
-const { dayKey, monthRange, weekKey, weekRange } = require("./kpiPeriod");
+const { dayKey, monthKey, monthRange, weekKey, weekRange } = require("./kpiPeriod");
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -41,7 +41,16 @@ function computeDayTargets(monthTarget, workingDays) {
   return results;
 }
 
-async function upsertPeriodTarget({ scopeType, scopeId, metricCode, periodType, periodKey, baseTarget, session }) {
+async function upsertPeriodTarget({
+  scopeType,
+  scopeId,
+  metricCode,
+  periodType,
+  periodKey,
+  baseTarget,
+  rolloverIn,
+  session
+}) {
   const key = {
     scope_type: scopeType,
     scope_id: scopeId,
@@ -57,7 +66,8 @@ async function upsertPeriodTarget({ scopeType, scopeId, metricCode, periodType, 
   if (existing) {
     if (existing.is_closed) return existing;
     existing.base_target = baseTarget;
-    existing.effective_target = round2(baseTarget + (existing.rollover_in || 0));
+    existing.rollover_in = rolloverIn !== undefined ? rolloverIn : existing.rollover_in || 0;
+    existing.effective_target = round2(baseTarget + existing.rollover_in);
     existing.achievement_pct =
       existing.effective_target > 0
         ? round2((existing.actual / existing.effective_target) * 100)
@@ -66,13 +76,14 @@ async function upsertPeriodTarget({ scopeType, scopeId, metricCode, periodType, 
     return existing;
   }
 
+  const rolloverInValue = rolloverIn !== undefined ? rolloverIn : 0;
   const created = await KpiPeriodTargetModel.create(
     [
       {
         ...key,
         base_target: baseTarget,
-        rollover_in: 0,
-        effective_target: baseTarget,
+        rollover_in: rolloverInValue,
+        effective_target: round2(baseTarget + rolloverInValue),
         actual: 0,
         achievement_pct: 0
       }
@@ -94,9 +105,7 @@ async function upsertDayTarget({ scopeType, scopeId, metricCode, date, baseTarge
   });
 }
 
-async function rollupWeekTarget({ scopeType, scopeId, metricCode, wKey, session }) {
-  const { start, end } = weekRange(wKey);
-
+async function sumDayRows({ scopeType, scopeId, metricCode, start, end, session }) {
   const query = KpiPeriodTargetModel.find({
     scope_type: scopeType,
     scope_id: scopeId,
@@ -104,11 +113,26 @@ async function rollupWeekTarget({ scopeType, scopeId, metricCode, wKey, session 
     period_type: KPI_PERIOD_TYPE.DAY,
     period_key: { $gte: dayKey(start), $lt: dayKey(end) },
     isDeleted: false
-  }).select("base_target");
+  }).select("base_target rollover_in");
   if (session) query.session(session);
   const dayRows = await query.lean();
 
-  const weekSum = round2(dayRows.reduce((acc, r) => acc + (r.base_target || 0), 0));
+  return {
+    baseSum: round2(dayRows.reduce((acc, r) => acc + (r.base_target || 0), 0)),
+    rolloverSum: round2(dayRows.reduce((acc, r) => acc + (r.rollover_in || 0), 0))
+  };
+}
+
+async function rollupWeekTarget({ scopeType, scopeId, metricCode, wKey, session }) {
+  const { start, end } = weekRange(wKey);
+  const { baseSum, rolloverSum } = await sumDayRows({
+    scopeType,
+    scopeId,
+    metricCode,
+    start,
+    end,
+    session
+  });
 
   return upsertPeriodTarget({
     scopeType,
@@ -116,7 +140,31 @@ async function rollupWeekTarget({ scopeType, scopeId, metricCode, wKey, session 
     metricCode,
     periodType: KPI_PERIOD_TYPE.WEEK,
     periodKey: wKey,
-    baseTarget: weekSum,
+    baseTarget: baseSum,
+    rolloverIn: rolloverSum,
+    session
+  });
+}
+
+async function rollupMonthTarget({ scopeType, scopeId, metricCode, year, month, session }) {
+  const { start, end } = monthRange(year, month);
+  const { baseSum, rolloverSum } = await sumDayRows({
+    scopeType,
+    scopeId,
+    metricCode,
+    start,
+    end,
+    session
+  });
+
+  return upsertPeriodTarget({
+    scopeType,
+    scopeId,
+    metricCode,
+    periodType: KPI_PERIOD_TYPE.MONTH,
+    periodKey: monthKey(year, month),
+    baseTarget: baseSum,
+    rolloverIn: rolloverSum,
     session
   });
 }
@@ -151,7 +199,14 @@ async function decomposeAssignment({ assignment, previousItems = [], session = n
   for (const metricCode of removedCodes) {
     const zeroDayTargets = computeDayTargets(0, workingDays);
     for (const dt of zeroDayTargets) {
-      await upsertDayTarget({ scopeType, scopeId, metricCode, date: dt.date, baseTarget: 0, session });
+      await upsertDayTarget({
+        scopeType,
+        scopeId,
+        metricCode,
+        date: dt.date,
+        baseTarget: 0,
+        session
+      });
       touchedWeekKeys.add(weekKey(dt.date));
     }
   }
@@ -165,7 +220,20 @@ async function decomposeAssignment({ assignment, previousItems = [], session = n
     }
   }
 
-  return { metrics: metricSummaries, weeks: weekSummaries };
+  const monthSummaries = [];
+  for (const metricCode of allTouchedCodes) {
+    const m = await rollupMonthTarget({
+      scopeType,
+      scopeId,
+      metricCode,
+      year: assignment.year,
+      month: assignment.month,
+      session
+    });
+    monthSummaries.push({ metric_code: metricCode, base_target: m.base_target });
+  }
+
+  return { metrics: metricSummaries, weeks: weekSummaries, month: monthSummaries };
 }
 
 module.exports = {
@@ -173,5 +241,6 @@ module.exports = {
   computeDayTargets,
   upsertDayTarget,
   rollupWeekTarget,
+  rollupMonthTarget,
   decomposeAssignment
 };

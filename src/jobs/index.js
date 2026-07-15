@@ -6,6 +6,7 @@ const { registerAccrueMonthlyLeaveJob } = require("./accrueMonthlyLeave");
 const { registerAutoRejectLeaveRequestsJob } = require("./autoRejectLeaveRequests");
 const { registerChurnDetectionJob } = require("./churnDetectionJob");
 const { registerKpiSyncJob } = require("./kpiSyncJob");
+const { registerKpiRolloverJob } = require("./kpiRolloverJob");
 
 function startCronJobs() {
   registerGenWorkSheetJob();
@@ -16,6 +17,7 @@ function startCronJobs() {
   registerAutoRejectLeaveRequestsJob();
   registerChurnDetectionJob();
   registerKpiSyncJob();
+  registerKpiRolloverJob();
 }
 
 module.exports = { startCronJobs };

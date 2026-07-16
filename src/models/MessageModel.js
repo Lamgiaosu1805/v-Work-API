@@ -15,7 +15,7 @@ const MessageModel = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["text", "image", "audio", "system"],
+      enum: ["text", "image", "audio", "file", "system"],
       default: "text"
     },
     content: {
@@ -31,6 +31,35 @@ const MessageModel = new mongoose.Schema(
       height: { type: Number, default: null },
       originalName: { type: String, default: null }
     },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "message",
+      default: null
+    },
+    mentions: [
+      {
+        type: {
+          type: String,
+          enum: ["user", "all"],
+          required: true
+        },
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "user_info",
+          default: null
+        }
+      }
+    ],
+    reactions: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", required: true },
+        type: {
+          type: String,
+          enum: ["like", "love", "haha", "wow", "sad", "angry"],
+          default: "like"
+        }
+      }
+    ],
     seenBy: [
       {
         type: mongoose.Schema.Types.ObjectId,

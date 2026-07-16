@@ -26,7 +26,10 @@ const {
   addMembers,
   ensureConversationAccess,
   updateGroupConversationAvatar,
-  updateMemberNickname
+  updateMemberNickname,
+  getMessageById,
+  getConversationImages,
+  reactToMessage
 } = require("../services/chatService");
 
 const CONTENT_TYPE_MAP = {
@@ -331,14 +334,24 @@ const ChatController = {
           }
         : null;
 
+      let mentions = [];
+      try {
+        mentions = req.body.mentions ? JSON.parse(req.body.mentions) : [];
+      } catch {
+        mentions = [];
+      }
+
       session.startTransaction();
       const currentUserInfo = await getCurrentUserInfo(req.account._id);
+
       const message = await sendMessage({
         conversationId: req.params.conversationId,
         senderUserInfoId: currentUserInfo._id,
         content: req.body.content,
         type: attachment ? "image" : req.body.type,
         attachment,
+        replyToMessageId: req.body.replyToMessageId || null,
+        mentions,
         session
       });
       await session.commitTransaction();
@@ -713,6 +726,188 @@ const ChatController = {
         message: "Đổi biệt danh thành công",
         data: signAvatarsDeep(conversation)
       });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  getMessageById: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const message = await getMessageById({
+        conversationId: req.params.conversationId,
+        messageId: req.params.messageId,
+        userInfoId: currentUserInfo._id
+      });
+
+      if (!message) {
+        return res.status(404).json({ message: "Tin nhắn không tồn tại." });
+      }
+
+      return res.status(200).json({
+        message: "Lấy tin nhắn thành công",
+        data: signAvatarsDeep(message)
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  getConversationImages: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+
+      const result = await getConversationImages({
+        conversationId: req.params.conversationId,
+        userInfoId: currentUserInfo._id,
+        page,
+        limit
+      });
+
+      return res.status(200).json({
+        message: "Lấy danh sách ảnh thành công",
+        ...signAvatarsDeep(result)
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  reactToMessage: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      const { message, action } = await reactToMessage({
+        conversationId: req.params.conversationId,
+        messageId: req.params.messageId,
+        userInfoId: currentUserInfo._id,
+        type: req.body.type
+      });
+
+      const io = req.app.get("io");
+      if (io) {
+        io.to(`conversation:${String(req.params.conversationId)}`).emit("message:reaction", {
+          conversationId: String(req.params.conversationId),
+          message: signAvatarsDeep(message),
+          action
+        });
+      }
+
+      return res.status(200).json({
+        message: "Cập nhật reaction thành công",
+        data: signAvatarsDeep(message)
+      });
+    } catch (error) {
+      return handleChatError(res, error);
+    }
+  },
+
+  sendFile: async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "Không có file được upload" });
+      }
+
+      const attachment = {
+        url: `chat/${req.params.conversationId}/${req.file.filename}`,
+        thumbnailUrl: null,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        width: null,
+        height: null,
+        originalName: req.file.originalname
+      };
+
+      session.startTransaction();
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+
+      const message = await sendMessage({
+        conversationId: req.params.conversationId,
+        senderUserInfoId: currentUserInfo._id,
+        content: req.body.content,
+        type: "file",
+        attachment,
+        replyToMessageId: req.body.replyToMessageId || null,
+        mentions: [],
+        session
+      });
+      await session.commitTransaction();
+
+      res.status(201).json({
+        message: "Gửi file thành công",
+        data: signAvatarsDeep(message),
+        clientMessageId: req.body.clientMessageId ?? null
+      });
+
+      const io = req.app.get("io");
+      broadcastNewMessage({
+        req,
+        currentUserInfo,
+        message,
+        clientMessageId: req.body.clientMessageId
+      })
+        .then(({ conversation }) =>
+          sendChatMessageNotification({
+            io,
+            conversationId: message.conversationId,
+            senderUserInfoId: currentUserInfo._id,
+            senderName: currentUserInfo.full_name,
+            message,
+            conversation
+          })
+        )
+        .catch((err) => console.error("[sendFile] post-processing error:", err));
+    } catch (error) {
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+        if (req.file) {
+          const chatDir = getChatDir(req.params.conversationId);
+          const filePath = path.join(chatDir, req.file.filename);
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        }
+      }
+      return handleChatError(res, error);
+    } finally {
+      session.endSession();
+    }
+  },
+
+  getMessageFile: async (req, res) => {
+    try {
+      const currentUserInfo = await getCurrentUserInfo(req.account._id);
+      await ensureConversationAccess(req.params.conversationId, currentUserInfo._id);
+
+      const message = await MessageModel.findOne({
+        _id: req.params.messageId,
+        conversationId: req.params.conversationId,
+        type: "file",
+        isDeleted: false,
+        "recalled.at": null
+      }).lean();
+
+      if (!message?.attachment?.url) {
+        return res.status(404).json({ message: "Không tìm thấy file" });
+      }
+
+      const baseDir =
+        process.env.NODE_ENV === "production"
+          ? process.env.UPLOAD_DIR_PROD
+          : process.env.UPLOAD_DIR_DEV;
+      const filePath = path.resolve(baseDir, message.attachment.url);
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ message: "File không tồn tại trên server" });
+      }
+
+      res.setHeader("Content-Type", message.attachment.mimeType ?? "application/octet-stream");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${encodeURIComponent(message.attachment.originalName ?? "file")}"`
+      );
+      return res.sendFile(filePath);
     } catch (error) {
       return handleChatError(res, error);
     }

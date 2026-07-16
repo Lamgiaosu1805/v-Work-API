@@ -8,7 +8,8 @@ const {
   sendMessage,
   markConversationSeen,
   deleteConversation,
-  recallMessage
+  recallMessage,
+  reactToMessage
 } = require("../services/chatService");
 const { getSocketToken, resolveSocketUser } = require("../helpers/socketAuth");
 
@@ -21,6 +22,8 @@ async function sendMessageWithRetry({ payload, socket, maxRetries = 3, attempt =
       senderUserInfoId: socket.data.userInfoId,
       content: payload.content,
       type: payload.type,
+      replyToMessageId: payload.replyToMessageId || null,
+      mentions: payload.mentions || [],
       session
     });
     await session.commitTransaction();
@@ -198,6 +201,24 @@ module.exports = function setupChatSocket(io) {
         .catch((err) => console.error("[chat:deleteMessage] post-processing error:", err));
 
       return { data: result };
+    });
+
+    onAuthed(socket, "chat:react", async (payload) => {
+      const { conversationId, messageId, type } = payload;
+      const { message, action } = await reactToMessage({
+        conversationId,
+        messageId,
+        userInfoId: socket.data.userInfoId,
+        type
+      });
+
+      io.to(`conversation:${String(conversationId)}`).emit("message:reaction", {
+        conversationId: String(conversationId),
+        message,
+        action
+      });
+
+      return { data: { message, action } };
     });
   });
 };

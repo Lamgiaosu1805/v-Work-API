@@ -7,7 +7,6 @@ const CommentSchema = new mongoose.Schema(
     author_id: { type: mongoose.Schema.Types.ObjectId, ref: "account", required: true },
     author_name: { type: String, required: true },
     author_avatar: { type: String, default: null },
-    // content: { type: String, required: true, maxlength: 500 },
     content: {
       type: String,
       maxlength: 500,

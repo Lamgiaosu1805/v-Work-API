@@ -1,11 +1,8 @@
 const fs = require("fs");
 const path = require("path");
 
-/**
- * Xóa file vật lý trên server dựa vào đường dẫn tương đối
- * @param {string} relativeFilePaths
- */
 function deletePhysicalFile(relativeFilePath) {
+  // @param {string} relativeFilePaths
   if (!relativeFilePath) return;
 
   const absolutePath = path.join(__dirname, "../../uploads/public", relativeFilePath);

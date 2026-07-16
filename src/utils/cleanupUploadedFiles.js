@@ -1,15 +1,10 @@
 const fs = require("fs");
 
-/**
- * Xóa các file đã upload khi có lỗi xảy ra (rollback file rác).
- * Bọc try-catch để lỗi xóa file không làm crash toàn bộ flow xử lý chính.
- * @param {Array|Object} files - có thể là 1 file (req.file) hoặc mảng file (req.files)
- * @param {string} context - nhãn để log biết đang cleanup ở đâu (dễ debug)
- */
 function cleanupUploadedFiles(files, context = "") {
+  // @param {Array|Object} files
+  // @param {string} context
   if (!files) return;
 
-  // Chuẩn hóa: luôn xử lý dưới dạng mảng, dù truyền vào 1 file hay nhiều file
   const fileList = Array.isArray(files) ? files : [files];
 
   fileList.forEach((file) => {

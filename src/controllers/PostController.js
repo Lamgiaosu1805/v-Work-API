@@ -197,6 +197,13 @@ const PostController = {
       const { content, visibility, dept_id, keep_images } = req.body;
       const accountId = req.account._id.toString();
 
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        if (req.files && req.files.length > 0) {
+          req.files.forEach((f) => cleanupUploadedFiles(f, "invalid-id"));
+        }
+        return res.status(400).json({ message: "ID bài viết không hợp lệ" });
+      }
+
       const post = await PostModel.findOne({ _id: id, isDeleted: false });
       if (!post) {
         if (req.files && req.files.length > 0) {
@@ -224,6 +231,7 @@ const PostController = {
       if (dept_id !== undefined) post.dept_id = dept_id || null;
 
       const newImages = (req.files || []).map((f) => `feed/${f.filename}`);
+      let deletedImages = [];
 
       if ((req.files && req.files.length > 0) || keep_images !== undefined) {
         let finalImages = [];
@@ -245,27 +253,35 @@ const PostController = {
           finalImages = post.images;
         }
 
-        const deletedImages = post.images.filter((img) => !finalImages.includes(img));
-
-        deletedImages.forEach((img) => {
-          deletePhysicalFile(img);
-        });
-        // -----------------------------------------------------
-
+        deletedImages = post.images.filter((img) => !finalImages.includes(img));
         post.images = [...finalImages, ...newImages];
       }
 
       await post.save();
 
-      const { author_avatar } = await getAuthorInfo(accountId);
-      post.author_avatar = author_avatar ?? post.author_avatar;
+      deletedImages.forEach((img) => {
+        deletePhysicalFile(img);
+      });
 
-      const signedPost = serializePost(post);
+      let signedPost;
+      try {
+        const { author_avatar } = await getAuthorInfo(accountId);
+        post.author_avatar = author_avatar ?? post.author_avatar;
 
-      const io = req.app.get("io");
-      if (io) {
-        io.to("feed").emit("post_updated", { post: signedPost });
-        io.to(`post:${id}`).emit("post_updated", { post: signedPost });
+        signedPost = serializePost(post);
+
+        const io = req.app.get("io");
+        if (io) {
+          io.to("feed").emit("post_updated", { post: signedPost });
+          io.to(`post:${id}`).emit("post_updated", { post: signedPost });
+        }
+      } catch (postProcessError) {
+        console.error("Lỗi xử lý phụ sau khi lưu bài viết:", postProcessError);
+        return res.status(200).json({
+          message: "Cập nhật bài viết thành công (lỗi xử lý phụ)",
+          data: serializePost(post),
+          error: postProcessError.message
+        });
       }
 
       return res.status(200).json({

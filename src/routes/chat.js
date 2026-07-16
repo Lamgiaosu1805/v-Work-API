@@ -2,6 +2,7 @@ const express = require("express");
 const { authenticate } = require("../middlewares/authMiddleware");
 const ChatController = require("../controllers/ChatController");
 const { upload, processChatImage, uploadGroupAvatar } = require("../middlewares/uploadChatImage");
+const { uploadChatFile, wrapUpload } = require("../middlewares/uploadChatFile");
 
 const router = express.Router();
 
@@ -45,6 +46,19 @@ router.get(
   "/conversations/:conversationId/images",
   authenticate,
   ChatController.getConversationImages
+);
+
+router.post(
+  "/conversations/:conversationId/files",
+  authenticate,
+  wrapUpload(uploadChatFile.single("file")),
+  ChatController.sendFile
+);
+
+router.get(
+  "/conversations/:conversationId/messages/:messageId/file",
+  authenticate,
+  ChatController.getMessageFile
 );
 
 router.patch(

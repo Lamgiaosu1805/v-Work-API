@@ -23,6 +23,14 @@ const PERMISSIONS = [
   { code: PERMISSION.HRM_ATTENDANCE_IMPORT, description: "Nhập dữ liệu chấm công" },
   { code: PERMISSION.HRM_ATTENDANCE_EDIT, description: "Sửa dữ liệu chấm công" },
   {
+    code: PERMISSION.HRM_EMPLOYEE_VIEW,
+    description: "Xem danh sách nhân viên"
+  },
+  {
+    code: PERMISSION.HRM_EMPLOYEE_EDIT,
+    description: "Thêm/sửa thông tin nhân viên"
+  },
+  {
     code: PERMISSION.HRM_MENU_ATTENDANCE_SETTINGS,
     description: "Xem menu Quản lý chấm công (ca làm, WiFi)"
   },

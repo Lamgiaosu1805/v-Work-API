@@ -17,7 +17,8 @@ const { PERMISSION } = require("../constants");
 const {
   buildLatePenaltyResolver,
   buildEarlyPenaltyResolver,
-  buildForgotPenaltyResolver
+  buildForgotPenaltyResolver,
+  buildUnifiedForgotOccurrenceMap
 } = require("../helpers/attendancePenalty");
 const {
   parseExcelToBlocks,
@@ -1142,7 +1143,7 @@ const AttendanceController = {
 
         let worksheetMap;
         let forgotMap;
-        let forgotCountMap;
+        let forgotOccurrenceMap;
         let lateForgivenSet;
         let earlyForgivenSet;
         let leavePeriodsMap;
@@ -1159,12 +1160,25 @@ const AttendanceController = {
           const monthStart = moment.tz(rangeStart, TZ).startOf("month").toDate();
           const monthEnd = moment.tz(rangeEnd, TZ).endOf("month").toDate();
 
-          const [worksheets, forgotReqs, lateReqs, earlyReqs, leaveStatuses] = await Promise.all([
+          const [
+            worksheets,
+            monthWorksheets,
+            forgotReqs,
+            lateReqs,
+            earlyReqs,
+            leaveStatuses,
+            monthLeaveStatuses
+          ] = await Promise.all([
             WorkSheetModel.find({
               user_id: userId,
               date: { $gte: rangeStart, $lte: rangeEnd },
               isDeleted: false
             }).populate("shifts"),
+            WorkSheetModel.find({
+              user_id: userId,
+              date: { $gte: monthStart, $lte: monthEnd },
+              isDeleted: false
+            }),
             RequestModel.find({
               user_id: userId,
               request_type: "forgot_checkin",
@@ -1193,6 +1207,12 @@ const AttendanceController = {
               date: { $gte: rangeStart, $lte: rangeEnd },
               status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
               isDeleted: false
+            }),
+            WorkDayStatusModel.find({
+              user_id: userId,
+              date: { $gte: monthStart, $lte: monthEnd },
+              status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
+              isDeleted: false
             })
           ]);
 
@@ -1203,15 +1223,61 @@ const AttendanceController = {
             forgotReqs.map((r) => [moment.tz(r.date, TZ).format("YYYY-MM-DD"), r])
           );
 
-          forgotCountMap = new Map();
-          const monthlyCounter = new Map();
-          for (const r of forgotReqs) {
-            const m = moment.tz(r.date, TZ);
-            const monthKey = m.format("YYYY-MM");
-            const n = (monthlyCounter.get(monthKey) || 0) + 1;
-            monthlyCounter.set(monthKey, n);
-            forgotCountMap.set(m.format("YYYY-MM-DD"), n);
+          const monthLeavePeriodsMap = new Map();
+          for (const ds of monthLeaveStatuses) {
+            const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
+            if (!monthLeavePeriodsMap.has(key)) monthLeavePeriodsMap.set(key, new Set());
+            monthLeavePeriodsMap.get(key).add(ds.period);
           }
+
+          const monthWorksheetMap = new Map(
+            monthWorksheets.map((ws) => [moment.tz(ws.date, TZ).format("YYYY-MM-DD"), ws])
+          );
+          const excelRawMap = new Map(
+            dayRows.map(({ dateStr, rawIn, rawOut }) => [
+              moment.tz(dateStr, "DD/MM/YYYY", TZ).format("YYYY-MM-DD"),
+              { rawIn, rawOut }
+            ])
+          );
+          const daySnapshots = [];
+          const allDateKeys = new Set([...monthWorksheetMap.keys(), ...excelRawMap.keys()]);
+          for (const dateKey of allDateKeys) {
+            const ws = monthWorksheetMap.get(dateKey);
+            const excelRow = excelRawMap.get(dateKey);
+            const forgotReq = forgotMap.get(dateKey);
+
+            const machineIn = excelRow?.rawIn
+              ? moment.tz(`${dateKey} ${excelRow.rawIn}`, "YYYY-MM-DD HH:mm", TZ).toDate()
+              : null;
+            const machineOut = excelRow?.rawOut
+              ? moment.tz(`${dateKey} ${excelRow.rawOut}`, "YYYY-MM-DD HH:mm", TZ).toDate()
+              : null;
+            const appIn = ws?.check_in ? new Date(ws.check_in) : null;
+            const appOut = ws?.check_out ? new Date(ws.check_out) : null;
+
+            let hasIn = !!(machineIn || appIn);
+            let hasOut = !!(machineOut || appOut);
+            if (forgotReq) {
+              if (forgotReq.type === "check_in" || forgotReq.type === "both") hasIn = true;
+              if (forgotReq.type === "check_out" || forgotReq.type === "both") hasOut = true;
+            }
+            if (!hasIn && !hasOut) continue;
+
+            const periods = monthLeavePeriodsMap.get(dateKey);
+            daySnapshots.push({
+              dateKey,
+              hasIn,
+              hasOut,
+              leaveMorning: !!periods && (periods.has("morning") || periods.has("full")),
+              leaveAfternoon: !!periods && (periods.has("afternoon") || periods.has("full"))
+            });
+          }
+
+          forgotOccurrenceMap = buildUnifiedForgotOccurrenceMap({
+            approvedForgotRequests: forgotReqs,
+            daySnapshots
+          });
+
           lateForgivenSet = new Set(
             lateReqs.map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD"))
           );
@@ -1252,7 +1318,7 @@ const AttendanceController = {
             rawOut,
             worksheet,
             forgotMap,
-            forgotCountMap,
+            forgotOccurrenceMap,
             lateForgivenSet,
             earlyForgivenSet,
             leavePeriodsMap,
@@ -1296,7 +1362,7 @@ const AttendanceController = {
             rawOut,
             worksheet,
             forgotMap,
-            forgotCountMap,
+            forgotOccurrenceMap,
             lateForgivenSet,
             earlyForgivenSet,
             leavePeriodsMap,

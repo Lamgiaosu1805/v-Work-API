@@ -12,6 +12,8 @@ const PERMISSION = Object.freeze({
   HRM_REQUEST_REVIEW: "hrm.request.review",
   HRM_ATTENDANCE_IMPORT: "hrm.attendance.import",
   HRM_ATTENDANCE_EDIT: "hrm.attendance.edit",
+  HRM_EMPLOYEE_VIEW: "hrm.employee.view",
+  HRM_EMPLOYEE_EDIT: "hrm.employee.edit",
   HRM_MENU_ATTENDANCE_SETTINGS: "hrm.menu.attendance_settings",
   HRM_MENU_ATTENDANCE_OVERVIEW: "hrm.menu.attendance_overview",
   HRM_MENU_DEPARTMENT: "hrm.menu.department",

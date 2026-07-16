@@ -12,7 +12,7 @@ const {
   getLeaveBalance,
   LeaveBalanceError
 } = require("../helpers/leaveBalance");
-const { LEAVE_BALANCE_REASON } = require("../constants");
+const { LEAVE_BALANCE_REASON, PERMISSION } = require("../constants");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
@@ -22,7 +22,7 @@ const DepartmentModel = require("../models/DepartmentModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
 const { sign, serializeUser } = require("../helpers/staticUrl");
-const { getEffectivePermissions } = require("../helpers/rbac");
+const { getEffectivePermissions, can } = require("../helpers/rbac");
 const AppModel = require("../models/AppModel");
 
 const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
@@ -443,7 +443,9 @@ const UserController = {
       const filter = { isDeleted: false };
 
       const isFullAccess =
-        req.account.role === "admin" || req.account.module_access?.includes("hrm");
+        req.account.role === "admin" ||
+        req.account.module_access?.includes("hrm") ||
+        (await can(req.account, PERMISSION.HRM_EMPLOYEE_VIEW));
 
       if (!isFullAccess) {
         const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });

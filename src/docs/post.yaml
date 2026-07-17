@@ -61,6 +61,38 @@ paths:
         "400": { $ref: "#/components/responses/InvalidId" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /posts/{id}/edit:
+    patch:
+      tags: [Post]
+      summary: Sửa bài đăng (chỉ tác giả)
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                content: { type: string, description: "Nội dung mới, bỏ qua field này nếu không đổi" }
+                visibility: { type: string, enum: [all, department] }
+                dept_id: { type: string }
+                keep_images:
+                  type: string
+                  description: >-
+                    JSON array các đường dẫn ảnh cũ muốn giữ lại, ví dụ ["feed/abc.webp"].
+                    Ảnh cũ không có trong danh sách này sẽ bị xóa khỏi bài viết và khỏi disk.
+                    Nếu có upload ảnh mới mà không gửi field này, toàn bộ ảnh cũ sẽ bị xóa.
+                images:
+                  type: array
+                  items: { type: string, format: binary }
+                  description: "Ảnh mới muốn thêm vào bài viết (tối đa 20 ảnh)"
+      responses:
+        "200": { description: Cập nhật bài viết thành công }
+        "400": { description: "Nội dung trống hoặc dữ liệu không hợp lệ" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Không phải tác giả bài viết" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /posts/{id}/pin:
     patch:
       tags: [Post]

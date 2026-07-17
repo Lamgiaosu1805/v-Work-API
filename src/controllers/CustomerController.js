@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const dayjs = require("dayjs");
+const XLSX = require("xlsx");
 const CustomerModel = require("../models/CustomerModel");
 const CustomerInteractionModel = require("../models/CustomerInteractionModel");
 const UserInfoModel = require("../models/UserInfoModel");
@@ -16,8 +17,13 @@ const {
 const { computeClaimWindow } = require("../helpers/claimWindowHelper");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const { tikluyClient } = require("../utils/tikluyClient");
-const { decrypt } = require("../helpers/customerHelper");
+const { decrypt, buildCustomerPipeline } = require("../helpers/customerHelper");
 const { canAccessCustomer, canManageSale } = require("../helpers/crmScope");
+
+const GENDER_LABELS = {
+  male: "Nam",
+  female: "Nữ"
+};
 
 const ensureCustomerAccessByExternalId = async (req, res, externalId) => {
   const customer = await CustomerModel.findOne({ external_id: externalId, isDeleted: false });
@@ -1062,232 +1068,16 @@ const CustomerController = {
   // GET /customer/all — Admin/Manager xem danh sách khách hàng theo phạm vi được cấp
   getAll: async (req, res) => {
     try {
-      const {
-        page = 1,
-        limit = 20,
-        status,
-        search,
-        app_code,
-        source_type,
-        from_date,
-        to_date,
-        branch_id,
-        funnel_status,
-        behavior,
-        role_type,
-        sale_ids
-      } = req.query;
+      const { page = 1, limit = 20 } = req.query;
       const currentPage = Math.max(Number(page) || 1, 1);
       const currentLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
       const skip = (currentPage - 1) * currentLimit;
-      const parseMulti = (value) =>
-        String(value || "")
-          .split(",")
-          .map((item) => item.trim())
-          .filter((item) => item && item !== "all");
-      const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const initialMatch = { isDeleted: false };
 
-      if (status && status !== "all") initialMatch.status = status;
-      if (source_type && source_type !== "all") initialMatch.source_type = source_type;
-      if (app_code) {
-        const app = await AppModel.findOne({ code: app_code, is_active: true });
-        if (!app)
-          return res.status(404).json({ message: "Ứng dụng không tồn tại hoặc đã bị khóa" });
-        initialMatch.app_id = app._id;
-      }
-      if (search) {
-        const safeSearch = escapeRegex(String(search).trim().slice(0, 100));
-        initialMatch.$or = [
-          { phone_number: { $regex: safeSearch, $options: "i" } },
-          { "identity.full_name": { $regex: safeSearch, $options: "i" } },
-          { external_id: { $regex: safeSearch, $options: "i" } }
-        ];
-      }
-
-      let scopedSaleIds = null;
-      if (req.account.role !== "admin" && req.account.dept_scope !== "all") {
-        const manager = await UserInfoModel.findOne({
-          id_account: req.account._id,
-          isDeleted: false
-        })
-          .select("_id")
-          .lean();
-        if (!manager)
-          return res.status(404).json({ message: "Không tìm thấy thông tin người quản lý" });
-        const departmentIds = await UserDepartmentPositionModel.distinct("department", {
-          user: manager._id,
-          isDeleted: false
-        });
-        scopedSaleIds = await UserDepartmentPositionModel.distinct("user", {
-          department: { $in: departmentIds },
-          isDeleted: false
-        });
-      }
-
-      const pipeline = [
-        { $match: initialMatch },
-        {
-          $lookup: {
-            from: InvestmentModel.collection.name,
-            let: { customerId: "$_id" },
-            pipeline: [
-              {
-                $match: {
-                  $expr: {
-                    $and: [
-                      { $eq: ["$customer_id", "$$customerId"] },
-                      { $eq: ["$isDeleted", false] }
-                    ]
-                  }
-                }
-              },
-              { $project: { product_name: 1, status: 1, invested_at: 1 } }
-            ],
-            as: "investments"
-          }
-        },
-        {
-          $lookup: {
-            from: UserInfoModel.collection.name,
-            localField: "referred_by",
-            foreignField: "_id",
-            as: "referredSale"
-          }
-        },
-        {
-          $lookup: {
-            from: AgentModel.collection.name,
-            localField: "agent_id",
-            foreignField: "_id",
-            as: "agentInfo"
-          }
-        },
-        {
-          $lookup: {
-            from: AppModel.collection.name,
-            localField: "app_id",
-            foreignField: "_id",
-            as: "appInfo"
-          }
-        },
-        {
-          $addFields: {
-            referred_by: { $arrayElemAt: ["$referredSale", 0] },
-            agent_id: { $arrayElemAt: ["$agentInfo", 0] },
-            app_id: { $arrayElemAt: ["$appInfo", 0] },
-            investment_count: { $size: "$investments" },
-            products: { $setUnion: ["$investments.product_name", []] },
-            active_investments: {
-              $filter: {
-                input: "$investments",
-                as: "investment",
-                cond: { $eq: ["$$investment.status", "active"] }
-              }
-            },
-            settled_investments: {
-              $filter: {
-                input: "$investments",
-                as: "investment",
-                cond: { $in: ["$$investment.status", ["matured", "early_terminated"]] }
-              }
-            }
-          }
-        },
-        {
-          $addFields: {
-            latest_active_at: { $max: "$active_investments.invested_at" },
-            latest_settled_at: { $max: "$settled_investments.invested_at" },
-            status_tags: {
-              $concatArrays: [
-                {
-                  $cond: [
-                    { $eq: [{ $ifNull: ["$identity.verified_at", null] }, null] },
-                    ["not_kyc"],
-                    []
-                  ]
-                },
-                {
-                  $cond: [
-                    {
-                      $and: [
-                        { $ne: [{ $ifNull: ["$identity.verified_at", null] }, null] },
-                        { $eq: ["$investment_count", 0] }
-                      ]
-                    },
-                    ["kyc_verified_no_investment"],
-                    []
-                  ]
-                },
-                {
-                  $cond: [{ $gt: [{ $size: "$active_investments" }, 0] }, ["active_investor"], []]
-                },
-                { $cond: [{ $gt: [{ $size: "$settled_investments" }, 0] }, ["settled"], []] }
-              ]
-            },
-            behavior_tags: {
-              $concatArrays: [
-                { $cond: [{ $gt: ["$investment_count", { $size: "$products" }] }, ["upsale"], []] },
-                { $cond: [{ $gte: [{ $size: "$products" }, 2] }, ["cross_sale"], []] }
-              ]
-            },
-            role_tags: {
-              $cond: [
-                { $ne: [{ $ifNull: ["$agent_id", null] }, null] },
-                [
-                  {
-                    $cond: [
-                      { $eq: ["$agent_id.agent_type", "ENTERPRISE"] },
-                      "agent",
-                      "collaborator"
-                    ]
-                  }
-                ],
-                []
-              ]
-            }
-          }
-        }
-      ];
-
-      const advancedMatch = {};
-      const funnelStatuses = parseMulti(funnel_status);
-      const behaviors = parseMulti(behavior);
-      const roleTypes = parseMulti(role_type);
-      const selectedSaleIds = parseMulti(sale_ids)
-        .filter((id) => mongoose.Types.ObjectId.isValid(id))
-        .map((id) => new mongoose.Types.ObjectId(id));
-      if (funnelStatuses.length) advancedMatch.status_tags = { $in: funnelStatuses };
-      if (behaviors.length) advancedMatch.behavior_tags = { $in: behaviors };
-      if (roleTypes.length) advancedMatch.role_tags = { $in: roleTypes };
-      if (branch_id && mongoose.Types.ObjectId.isValid(branch_id))
-        advancedMatch["referred_by.branch_id"] = new mongoose.Types.ObjectId(branch_id);
-      if (selectedSaleIds.length) advancedMatch["referred_by._id"] = { $in: selectedSaleIds };
-      if (scopedSaleIds) {
-        advancedMatch.$or = [{ "referred_by._id": { $in: scopedSaleIds } }, { referred_by: null }];
-      }
-      if (Object.keys(advancedMatch).length) pipeline.push({ $match: advancedMatch });
-
-      if (from_date || to_date) {
-        const dateCondition = {
-          ...(from_date ? { $gte: new Date(from_date) } : {}),
-          ...(to_date ? { $lte: new Date(to_date) } : {})
-        };
-        if (Object.values(dateCondition).some((date) => Number.isNaN(date.getTime()))) {
-          return res.status(400).json({ message: "Khoảng thời gian không hợp lệ" });
-        }
-        const eventMatches = [];
-        if (!funnelStatuses.length || funnelStatuses.includes("not_kyc"))
-          eventMatches.push({ createdAt: dateCondition });
-        if (funnelStatuses.includes("kyc_verified_no_investment"))
-          eventMatches.push({ "identity.verified_at": dateCondition });
-        if (funnelStatuses.includes("active_investor"))
-          eventMatches.push({ latest_active_at: dateCondition });
-        if (funnelStatuses.includes("settled"))
-          eventMatches.push({ latest_settled_at: dateCondition });
-        pipeline.push({
-          $match: eventMatches.length === 1 ? eventMatches[0] : { $or: eventMatches }
-        });
+      let pipeline;
+      try {
+        pipeline = await buildCustomerPipeline(req, req.query);
+      } catch (err) {
+        return res.status(err.statusCode ?? 500).json({ message: err.message });
       }
 
       pipeline.push(
@@ -1697,12 +1487,10 @@ const CustomerController = {
       if (pendingClaim) {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(409)
-          .json({
-            message:
-              "Khách hàng đang có yêu cầu nhận từ sale, vui lòng xử lý yêu cầu đó trước khi phân khách"
-          });
+        return res.status(409).json({
+          message:
+            "Khách hàng đang có yêu cầu nhận từ sale, vui lòng xử lý yêu cầu đó trước khi phân khách"
+        });
       }
 
       const sale = await UserInfoModel.findById(sale_user_info_id).session(session);
@@ -1813,6 +1601,96 @@ const CustomerController = {
       session.endSession();
       console.error("Error in assignCustomer:", error);
       return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
+  exportExcel: async (req, res) => {
+    try {
+      let pipeline;
+      try {
+        pipeline = await buildCustomerPipeline(req, req.query);
+      } catch (err) {
+        return res.status(err.statusCode ?? 500).json({ message: err.message });
+      }
+
+      const countResult = await CustomerModel.aggregate([...pipeline, { $count: "value" }]);
+      const total = countResult[0]?.value ?? 0;
+
+      if (total === 0) {
+        return res.status(400).json({ message: "Không có dữ liệu khớp bộ lọc để xuất" });
+      }
+
+      const customers = await CustomerModel.aggregate([
+        ...pipeline,
+        { $sort: { createdAt: -1 } },
+        {
+          $project: {
+            phone_number: 1,
+            external_id: 1,
+            source_type: 1,
+            status: 1,
+            createdAt: 1,
+            "identity.full_name": 1,
+            "identity.id_number": 1,
+            "identity.gender": 1,
+            referred_by: 1,
+            agent_id: 1,
+            app_id: 1,
+            status_tags: 1,
+            behavior_tags: 1,
+            role_tags: 1
+          }
+        }
+      ]);
+
+      const rows = customers.map((c, index) => ({
+        STT: index + 1,
+        App: c.app_id ? `${c.app_id.name} (${c.app_id.code})` : "",
+        "Họ tên": c.identity?.full_name ?? "",
+        "Số điện thoại": c.phone_number ?? "",
+        CCCD: c.identity?.id_number ?? "",
+        "Giới tính": GENDER_LABELS[c.identity?.gender] ?? "",
+        "Trạng thái": c.status ?? "",
+        "Nguồn (source_type)": c.source_type ?? "",
+        "Sale phụ trách": c.referred_by?.full_name ?? "",
+        "Mã NV": c.referred_by?.ma_nv ?? "",
+        "Ngày tạo": c.createdAt ? new Date(c.createdAt).toLocaleString("vi-VN") : ""
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet["!cols"] = [
+        { wch: 6 },
+        { wch: 16 },
+        { wch: 24 },
+        { wch: 16 },
+        { wch: 16 },
+        { wch: 10 },
+        { wch: 16 },
+        { wch: 18 },
+        { wch: 22 },
+        { wch: 12 },
+        { wch: 18 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Khách hàng");
+
+      const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+      const filename = `khach_hang_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+      return res.status(200).send(buffer);
+    } catch (error) {
+      console.error("Error in exportExcel:", error);
+      return res.status(500).json({
+        message: "Internal server error",
+        error: error.message
+      });
     }
   }
 };

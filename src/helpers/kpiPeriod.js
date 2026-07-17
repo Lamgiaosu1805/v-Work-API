@@ -22,6 +22,17 @@ function monthRange(year, month) {
   };
 }
 
+function quarterMonths(quarterKeyStr) {
+  const [year, q] = quarterKeyStr.split("-Q");
+  const startMonth = (Number(q) - 1) * 3 + 1;
+  return [0, 1, 2].map((i) => monthKey(Number(year), startMonth + i));
+}
+
+function yearMonths(yearKeyStr) {
+  const year = Number(yearKeyStr);
+  return Array.from({ length: 12 }, (_, i) => monthKey(year, i + 1));
+}
+
 function weekKey(date) {
   const m = moment.tz(date, TZ);
   return `${m.isoWeekYear()}-W${pad2(m.isoWeek())}`;
@@ -33,4 +44,4 @@ function weekRange(weekKeyStr) {
   return { start: start.toDate(), end: start.clone().add(7, "days").toDate() };
 }
 
-module.exports = { pad2, monthKey, dayKey, monthRange, weekKey, weekRange };
+module.exports = { pad2, monthKey, dayKey, monthRange, weekKey, weekRange, quarterMonths, yearMonths };

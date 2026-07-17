@@ -35,6 +35,7 @@ const omicallRouter = require("./omicall");
 const kpiPeriodTargetRouter = require("./kpiPeriodTarget");
 const kpiAdjustmentRouter = require("./kpiAdjustment");
 const kpiDailyReportRouter = require("./kpiDailyReport");
+const kpiDashboardRouter = require("./kpiDashboard");
 
 const route = (app) => {
   app.use(`/posts`, postRouter);
@@ -74,6 +75,7 @@ const route = (app) => {
   app.use(`/kpi/period-targets`, kpiPeriodTargetRouter);
   app.use(`/kpi/adjustments`, kpiAdjustmentRouter);
   app.use(`/kpi/daily-reports`, kpiDailyReportRouter);
+  app.use(`/kpi/dashboard`, kpiDashboardRouter);
 };
 
 module.exports = route;

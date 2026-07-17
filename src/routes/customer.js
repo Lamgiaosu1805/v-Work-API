@@ -20,6 +20,7 @@ router.get(
 router.get("/agent-customers", verifyInternalRequest, CustomerController.getMyCustomersAsAgent);
 router.get("/my-info", authenticate, CustomerController.getMyInfo);
 router.get("/all", authenticate, canManage("crm"), CustomerController.getAll);
+router.get("/export-excel", authenticate, canManage("crm"), CustomerController.exportExcel);
 router.get(
   "/detail-info-customer",
   authenticate,

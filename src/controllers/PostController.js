@@ -7,6 +7,12 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const DepartmentModel = require("../models/DepartmentModel");
 const pushNotification = require("../helpers/pushNotification");
 const { serializePost, serializeComment, signReactions } = require("../helpers/staticUrl");
+const {
+  getCommentDepth,
+  resolveReplyPlacement,
+  normalizeCommentMentions,
+  nestComments
+} = require("../helpers/commentUtils");
 const cleanupUploadedFiles = require("../utils/cleanupUploadedFiles");
 const deletePhysicalFile = require("../utils/deletePhysicalFile");
 
@@ -30,7 +36,6 @@ async function getAuthorInfo(accountId) {
   };
 }
 
-// Nhận mảng docs có author_id, trả về map { accountId → avatar }
 async function buildAvatarMap(docs) {
   const ids = [...new Set(docs.map((d) => String(d.author_id)).filter(Boolean))];
   if (!ids.length) return {};
@@ -39,6 +44,69 @@ async function buildAvatarMap(docs) {
     { id_account: 1, avatar: 1 }
   ).lean();
   return Object.fromEntries(infos.map((u) => [String(u.id_account), u.avatar ?? null]));
+}
+
+function applyAvatarMap(comments, avatarMap) {
+  comments.forEach((c) => {
+    c.author_avatar = avatarMap[String(c.author_id)] ?? c.author_avatar;
+    if (Array.isArray(c.replies)) applyAvatarMap(c.replies, avatarMap);
+  });
+}
+
+function collectAuthorIds(comments, ids = new Set()) {
+  comments.forEach((c) => {
+    if (c.author_id) ids.add(String(c.author_id));
+    if (Array.isArray(c.replies)) collectAuthorIds(c.replies, ids);
+  });
+  return ids;
+}
+
+async function sendCommentNotifications({
+  post,
+  postId,
+  commenterId,
+  commenterName,
+  signedComment,
+  isRootComment,
+  replyToAuthorId,
+  mentions
+}) {
+  const notified = new Set([commenterId.toString()]);
+
+  const notify = (accountId, title, body, data) => {
+    const id = accountId?.toString();
+    if (!id || notified.has(id)) return;
+    notified.add(id);
+    pushNotification.sendToAccount({ account_id: accountId, title, body, data }).catch((err) => {
+      console.error("[Notification] Gửi thất bại:", err);
+    });
+  };
+
+  if (isRootComment && post.author_id.toString() !== commenterId.toString()) {
+    notify(post.author_id, "Bình luận mới", `${commenterName} đã bình luận bài viết của bạn`, {
+      type: "new_comment",
+      post_id: postId
+    });
+  }
+
+  if (replyToAuthorId && replyToAuthorId.toString() !== commenterId.toString()) {
+    notify(replyToAuthorId, "Trả lời bình luận", `${commenterName} đã trả lời bình luận của bạn`, {
+      type: "comment_reply",
+      post_id: postId,
+      comment_id: String(signedComment._id)
+    });
+  }
+
+  (mentions || []).forEach((m) => {
+    if (m.user_id?.toString() !== commenterId.toString()) {
+      notify(
+        m.user_id,
+        "Bạn được nhắc đến",
+        `${commenterName} đã nhắc đến bạn trong một bình luận`,
+        { type: "comment_mention", post_id: postId, comment_id: String(signedComment._id) }
+      );
+    }
+  });
 }
 
 const PostController = {
@@ -351,24 +419,51 @@ const PostController = {
       const { id } = req.params;
       const page = Math.max(1, parseInt(req.query.page, 10) || 1);
       const limit = Math.min(100, parseInt(req.query.limit, 10) || 20);
-
       const sortDir = req.query.sort === "desc" ? -1 : 1;
-      const filter = { post_id: id, isDeleted: false };
-      const total = await CommentModel.countDocuments(filter);
-      const comments = await CommentModel.find(filter)
+
+      const rootFilter = { post_id: id, parent_id: null, isDeleted: false };
+      const total = await CommentModel.countDocuments(rootFilter);
+      const roots = await CommentModel.find(rootFilter)
         .sort({ createdAt: sortDir })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean();
 
-      const avatarMap = await buildAvatarMap(comments);
-      comments.forEach((c) => {
-        c.author_avatar = avatarMap[String(c.author_id)] ?? c.author_avatar;
-      });
+      const rootIds = roots.map((r) => r._id);
+      let depth2List = [];
+      let depth3List = [];
+
+      if (rootIds.length) {
+        depth2List = await CommentModel.find({
+          post_id: id,
+          parent_id: { $in: rootIds },
+          depth: 2,
+          isDeleted: false
+        })
+          .sort({ createdAt: 1 })
+          .lean();
+
+        const depth2Ids = depth2List.map((c) => c._id);
+        if (depth2Ids.length) {
+          depth3List = await CommentModel.find({
+            post_id: id,
+            parent_id: { $in: depth2Ids },
+            depth: 3,
+            isDeleted: false
+          })
+            .sort({ createdAt: 1 })
+            .lean();
+        }
+      }
+
+      const nested = nestComments(roots, depth2List, depth3List);
+      const allFlat = [...roots, ...depth2List, ...depth3List];
+      const avatarMap = await buildAvatarMap(allFlat);
+      applyAvatarMap(nested, avatarMap);
 
       return res.status(200).json({
         message: "Thành công",
-        data: comments.map(serializeComment),
+        data: nested.map(serializeComment),
         pagination: {
           total,
           page,
@@ -385,7 +480,7 @@ const PostController = {
   createCommentWithImages: async (req, res) => {
     const uploadedFile = req.file || null;
     const { id: postId } = req.params;
-    const { content } = req.body;
+    const { content, parent_id: parentId, mentions: mentionsInput } = req.body;
 
     const hasContent = content && content.trim();
     const hasImage = !!uploadedFile;
@@ -402,12 +497,20 @@ const PostController = {
       return res.status(400).json({ message: "ID bài viết không hợp lệ" });
     }
 
+    if (parentId && !mongoose.Types.ObjectId.isValid(parentId)) {
+      cleanupUploadedFiles(uploadedFile, "invalid-parent-id");
+      return res.status(400).json({ message: "ID bình luận cha không hợp lệ" });
+    }
+
     let session;
     let isCommitted = false;
     let signedComment;
     let updatedPost;
     let post;
     let commenter_name;
+    let mentions = [];
+    let replyToAuthorId = null;
+    const isRootComment = !parentId;
 
     try {
       const authorInfo = await getAuthorInfo(req.account._id);
@@ -425,6 +528,35 @@ const PostController = {
         return res.status(404).json({ message: "Không tìm thấy bài viết" });
       }
 
+      // 1. Khởi chạy resolveReplyPlacement với giá trị mặc định là null (cho comment gốc)
+      // Nếu có parentId, biến này sẽ được ghi đè sau khi tìm thấy parentComment hợp lệ.
+      let placement = resolveReplyPlacement(null);
+      let parentComment = null;
+
+      if (parentId) {
+        parentComment = await CommentModel.findOne({
+          _id: parentId,
+          post_id: postId,
+          isDeleted: false
+        })
+          .session(session)
+          .lean();
+
+        if (!parentComment) {
+          await session.abortTransaction();
+          await session.endSession();
+          cleanupUploadedFiles(uploadedFile, "parent-not-found");
+          return res.status(404).json({ message: "Không tìm thấy bình luận được trả lời" });
+        }
+
+        // Tận dụng hàm resolveReplyPlacement có sẵn để tự động tính toán depth, parent_id, root_id, reply_to
+        placement = resolveReplyPlacement(parentComment);
+        replyToAuthorId = parentComment.author_id;
+      }
+
+      // Tận dụng hàm normalizeCommentMentions có sẵn để chuẩn hóa tag tên
+      mentions = await normalizeCommentMentions(mentionsInput, replyToAuthorId);
+
       const image = uploadedFile ? `feed/${uploadedFile.filename}` : null;
 
       const [comment] = await CommentModel.create(
@@ -435,7 +567,13 @@ const PostController = {
             author_name: commenter_name,
             author_avatar,
             content: content ? content.trim() : "",
-            image
+            image,
+            depth: placement.depth,
+            parent_id: placement.parent_id,
+            root_id: placement.root_id,
+            reply_to_id: placement.reply_to_id,
+            reply_to_name: placement.reply_to_name,
+            mentions
           }
         ],
         { session }
@@ -454,11 +592,32 @@ const PostController = {
         return res.status(404).json({ message: "Không tìm thấy bài viết" });
       }
 
+      // 2. Tăng replies_count chuẩn xác theo cấp hiển thị[cite: 2]
+      if (placement.parent_id) {
+        let targetIncrementId = null;
+
+        if (placement.depth === 2) {
+          // Reply cho root (depth 1) -> Tăng replies_count trên chính root gốc (A)[cite: 2]
+          targetIncrementId = placement.root_id;
+        } else if (placement.depth === 3) {
+          // Reply cho comment phụ (depth 2 hoặc depth 3 flatten) -> Tăng replies_count trên comment cha cấp 2 (B)[cite: 2]
+          targetIncrementId = placement.parent_id;
+        }
+
+        if (targetIncrementId) {
+          await CommentModel.updateOne(
+            { _id: targetIncrementId, isDeleted: false },
+            { $inc: { replies_count: 1 } },
+            { session }
+          );
+        }
+      }
+
       await session.commitTransaction();
       await session.endSession();
       isCommitted = true;
 
-      signedComment = serializeComment(comment);
+      signedComment = serializeComment(comment.toObject ? comment.toObject() : comment);
     } catch (error) {
       console.error("Đã xảy ra lỗi khi tạo bình luận:", error);
 
@@ -485,19 +644,16 @@ const PostController = {
         });
       }
 
-      const isNotSameUser = post.author_id.toString() !== req.account._id.toString();
-      if (isNotSameUser) {
-        pushNotification
-          .sendToAccount({
-            account_id: post.author_id,
-            title: "Bình luận mới",
-            body: `${commenter_name} đã bình luận bài viết của bạn`,
-            data: { type: "new_comment", post_id: postId }
-          })
-          .catch((err) => {
-            console.error("[Notification] Gửi thất bại:", err);
-          });
-      }
+      await sendCommentNotifications({
+        post,
+        postId,
+        commenterId: req.account._id,
+        commenterName: commenter_name,
+        signedComment,
+        isRootComment,
+        replyToAuthorId: parentId ? replyToAuthorId : null,
+        mentions
+      });
     } catch (realtimeError) {
       console.error("Lỗi đồng bộ realtime:", realtimeError);
       return res.status(200).json({
@@ -523,18 +679,56 @@ const PostController = {
       });
       if (!comment) return res.status(404).json({ message: "Không tìm thấy bình luận" });
 
-      const isAuthor = comment.author_id.toString() === accountId;
+      const isAuthor = comment.author_id.toString() === accountId.toString();
       if (!isAuthor && role !== "admin") {
         return res.status(403).json({ message: "Bạn không có quyền xóa bình luận này" });
       }
 
-      comment.isDeleted = true;
-      await comment.save();
+      const depth = getCommentDepth(comment);
+      let idsToDelete = [comment._id];
 
-      await PostModel.findByIdAndUpdate(postId, { $inc: { comments_count: -1 } });
+      if (depth === 1) {
+        const descendants = await CommentModel.find({
+          post_id: postId,
+          root_id: commentId,
+          isDeleted: false
+        })
+          .select("_id")
+          .lean();
+        idsToDelete = [comment._id, ...descendants.map((d) => d._id)];
+      } else if (depth === 2) {
+        const depth3 = await CommentModel.find({
+          post_id: postId,
+          parent_id: commentId,
+          depth: 3,
+          isDeleted: false
+        })
+          .select("_id")
+          .lean();
+        idsToDelete = [comment._id, ...depth3.map((d) => d._id)];
+      }
+
+      await CommentModel.updateMany({ _id: { $in: idsToDelete } }, { $set: { isDeleted: true } });
+
+      const deleteCount = idsToDelete.length;
+      await PostModel.findByIdAndUpdate(postId, { $inc: { comments_count: -deleteCount } });
+
+      if (depth === 2 && comment.parent_id) {
+        await CommentModel.updateOne({ _id: comment.parent_id }, { $inc: { replies_count: -1 } });
+      } else if (depth === 3 && comment.parent_id) {
+        await CommentModel.updateOne({ _id: comment.parent_id }, { $inc: { replies_count: -1 } });
+      }
 
       const io = req.app.get("io");
-      if (io) io.to(`post:${postId}`).emit("comment_deleted", { comment_id: commentId });
+      if (io) {
+        idsToDelete.forEach((id) => {
+          io.to(`post:${postId}`).emit("comment_deleted", {
+            comment_id: String(id),
+            parent_id: comment.parent_id ? String(comment.parent_id) : null,
+            depth
+          });
+        });
+      }
 
       return res.status(200).json({ message: "Đã xóa bình luận" });
     } catch (error) {

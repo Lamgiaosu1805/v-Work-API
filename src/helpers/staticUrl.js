@@ -20,6 +20,15 @@ function signReactions(reactions) {
   });
 }
 
+function signMentions(mentions) {
+  if (!Array.isArray(mentions)) return mentions;
+  return mentions.map((m) => {
+    const obj = toPlain(m);
+    obj.avatar = sign(obj.avatar);
+    return obj;
+  });
+}
+
 function serializePost(post) {
   if (!post) return post;
   const p = toPlain(post);
@@ -34,6 +43,10 @@ function serializeComment(comment) {
   const c = toPlain(comment);
   c.image = sign(c.image);
   c.author_avatar = sign(c.author_avatar);
+  if (Array.isArray(c.mentions)) c.mentions = signMentions(c.mentions);
+  if (Array.isArray(c.replies)) {
+    c.replies = c.replies.map(serializeComment);
+  }
   return c;
 }
 
@@ -65,6 +78,7 @@ function signAvatarsDeep(value) {
 module.exports = {
   sign,
   signReactions,
+  signMentions,
   serializePost,
   serializeComment,
   serializeUser,

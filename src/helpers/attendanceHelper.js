@@ -234,47 +234,20 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
 
     const OVERRIDABLE = ["pending", "missed_clock", "absent"];
 
-    if (computed.morning_absent || computed.afternoon_absent) {
-      await WorkDayStatusModel.deleteMany(
-        {
-          user_id: userId,
-          date: { $gte: dayStart, $lt: dayEnd },
-          status: { $in: OVERRIDABLE }
-        },
-        { session }
-      );
-      const periodStatuses =
-        computed.morning_absent && computed.afternoon_absent
-          ? [
-              ["morning", "absent"],
-              ["afternoon", "absent"]
-            ]
-          : computed.morning_absent
-            ? [
-                ["morning", "absent"],
-                ["afternoon", "present"]
-              ]
-            : [
-                ["morning", "present"],
-                ["afternoon", "absent"]
-              ];
-      for (const [period, st] of periodStatuses) {
-        await WorkDayStatusModel.updateOne(
-          { user_id: userId, date: dayStart, period },
-          {
-            $setOnInsert: {
-              worksheet_id: worksheet._id,
-              status: st,
-              sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
-              isDeleted: false
-            }
-          },
-          { upsert: true, session }
-        );
-      }
-    } else {
-      const complete = !computed.missedIn && !computed.missedOut;
-      const newStatus = complete ? "present" : "missed_clock";
+    // Trạng thái từng buổi: nếu bị phạt (absent do đi muộn/về sớm quá mức) thì "absent",
+    // nếu chỉ đơn thuần thiếu chấm công (không phạt) thì "missed_clock" (Quên chấm),
+    // ngược lại buổi đó có chấm công thật -> "present" (Đi làm).
+    const resolvePeriodStatus = (isAbsent, isMissed) => {
+      if (isAbsent) return "absent";
+      if (isMissed) return "missed_clock";
+      return "present";
+    };
+    const morningStatus = resolvePeriodStatus(computed.morning_absent, computed.missedIn);
+    const afternoonStatus = resolvePeriodStatus(computed.afternoon_absent, computed.missedOut);
+
+    if (morningStatus === afternoonStatus) {
+      // Cả ngày cùng 1 trạng thái -> giữ 1 doc period "full"
+      const newStatus = morningStatus;
       const result = await WorkDayStatusModel.updateMany(
         {
           user_id: userId,
@@ -299,6 +272,34 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
           { upsert: true, session }
         );
       }
+    } else {
+      // Khác trạng thái theo buổi -> tách 2 doc "morning"/"afternoon"
+      await WorkDayStatusModel.deleteMany(
+        {
+          user_id: userId,
+          date: { $gte: dayStart, $lt: dayEnd },
+          status: { $in: OVERRIDABLE }
+        },
+        { session }
+      );
+      const periodStatuses = [
+        ["morning", morningStatus],
+        ["afternoon", afternoonStatus]
+      ];
+      for (const [period, st] of periodStatuses) {
+        await WorkDayStatusModel.updateOne(
+          { user_id: userId, date: dayStart, period },
+          {
+            $setOnInsert: {
+              worksheet_id: worksheet._id,
+              status: st,
+              sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
+              isDeleted: false
+            }
+          },
+          { upsert: true, session }
+        );
+      }
     }
 
     await session.commitTransaction();
@@ -310,9 +311,41 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
   }
 }
 
+const NON_DERIVABLE_STATUSES = new Set([
+  "leave_paid",
+  "leave_unpaid",
+  "remote",
+  "business_trip",
+  "client_visit"
+]);
+
+// Đối chiếu day_statuses với check_in/check_out thật của worksheet trước khi trả về client,
+// đề phòng status lưu cũ/lệch (vd: checkout đã bị sửa/xoá sau khi status được tính lần trước).
+// Đối chiếu theo TỪNG buổi: "morning" ứng với check_in, "afternoon" ứng với check_out,
+// "full" ứng với cả 2 (đủ cả 2 mới coi là có dữ liệu).
+function correctDayStatuses(statuses, ws) {
+  const hasCheckIn = !!ws?.check_in;
+  const hasCheckOut = !!ws?.check_out;
+  if (!hasCheckIn && !hasCheckOut) return statuses;
+
+  return statuses.map((s) => {
+    if (NON_DERIVABLE_STATUSES.has(s.status)) return s;
+
+    let periodHasData;
+    if (s.period === "morning") periodHasData = hasCheckIn;
+    else if (s.period === "afternoon") periodHasData = hasCheckOut;
+    else periodHasData = hasCheckIn && hasCheckOut;
+
+    if (!periodHasData && s.status !== "missed_clock") return { ...s, status: "missed_clock" };
+    if (periodHasData && s.status === "absent") return { ...s, status: "present" };
+    return s;
+  });
+}
+
 module.exports = {
   parseExcelToBlocks,
   parseDayRows,
   resolveAttendanceDay,
-  saveAttendanceDay
+  saveAttendanceDay,
+  correctDayStatuses
 };

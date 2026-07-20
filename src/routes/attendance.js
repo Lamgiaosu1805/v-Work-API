@@ -38,6 +38,7 @@ router.get(
   hasModuleAccess("hrm"),
   AttendanceController.getPayrollStats
 );
+router.get("/my-payroll-stats", authenticate, AttendanceController.getMyPayrollStats);
 
 router.post(
   "/createAllowedWifiLocation",

@@ -110,7 +110,8 @@ const ForgotCheckinRequest = RequestModel.discriminator(
       required: true
     },
     expected_check_in: { type: Date, default: null },
-    expected_check_out: { type: Date, default: null }
+    expected_check_out: { type: Date, default: null },
+    occurrence: { type: Number, default: null }
   })
 );
 

@@ -27,6 +27,7 @@ const {
   saveAttendanceDay,
   correctDayStatuses
 } = require("../helpers/attendanceHelper");
+const { getPayrollPeriodRange } = require("../helpers/payrollPeriod");
 
 const AttendanceController = {
   getAllowedWifiLocations: async (req, res) => {
@@ -1198,8 +1199,8 @@ const AttendanceController = {
             .endOf("day")
             .toDate();
 
-          const monthStart = moment.tz(rangeStart, TZ).startOf("month").toDate();
-          const monthEnd = moment.tz(rangeEnd, TZ).endOf("month").toDate();
+          const periodStart = getPayrollPeriodRange(rangeStart).start;
+          const periodEnd = getPayrollPeriodRange(rangeEnd).end;
 
           const [
             worksheets,
@@ -1217,7 +1218,7 @@ const AttendanceController = {
             }).populate("shifts"),
             WorkSheetModel.find({
               user_id: userId,
-              date: { $gte: monthStart, $lte: monthEnd },
+              date: { $gte: periodStart, $lte: periodEnd },
               isDeleted: false
             }),
             RequestModel.find({
@@ -1225,7 +1226,7 @@ const AttendanceController = {
               request_type: "forgot_checkin",
               status: "approved",
               isDeleted: false,
-              date: { $gte: monthStart, $lte: monthEnd }
+              date: { $gte: periodStart, $lte: periodEnd }
             }).sort({ date: 1 }),
             RequestModel.find({
               user_id: userId,
@@ -1251,7 +1252,7 @@ const AttendanceController = {
             }),
             WorkDayStatusModel.find({
               user_id: userId,
-              date: { $gte: monthStart, $lte: monthEnd },
+              date: { $gte: periodStart, $lte: periodEnd },
               status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
               isDeleted: false
             })

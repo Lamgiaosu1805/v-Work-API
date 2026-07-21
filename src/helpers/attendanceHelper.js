@@ -158,6 +158,8 @@ function resolveAttendanceDay({
     if (occInfo && !occInfo.hasRequest) {
       const base = isSaturday ? 0.5 : 1;
       work_unit = Math.max(0, base / 2 - leaveDeduction);
+      const r = resolveForgotPenalty(dayStart, occInfo.occurrence || 0, isSaturday);
+      penalty_amount = r.penalty_amount;
     } else {
       work_unit = 0;
     }

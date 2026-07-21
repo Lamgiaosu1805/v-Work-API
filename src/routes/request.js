@@ -7,6 +7,7 @@ router.get("/eligible-reviewers", authenticate, RequestController.getEligibleRev
 router.post("/", authenticate, RequestController.create);
 router.get("/my", authenticate, RequestController.getMyRequests);
 router.get("/", authenticate, RequestController.getAll);
+router.get("/:id", authenticate, RequestController.getById);
 router.patch("/review/:id", authenticate, RequestController.review);
 router.patch("/cancel/:id", authenticate, RequestController.cancel);
 

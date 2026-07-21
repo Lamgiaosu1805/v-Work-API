@@ -4,7 +4,11 @@ const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const ShiftModel = require("../models/ShiftModel");
 const { resolveLeaveConflictOnAttendance } = require("./leaveHandler");
-const { buildForgotPenaltyResolver, buildUnifiedForgotOccurrenceMap } = require("./attendancePenalty");
+const {
+  buildForgotPenaltyResolver,
+  buildUnifiedForgotOccurrenceMap
+} = require("./attendancePenalty");
+const { getPayrollPeriodRange } = require("./payrollPeriod");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -66,6 +70,60 @@ async function validateAsync(payload, userInfo, session) {
   return null;
 }
 
+async function computeForgotOccurrence(userId, date, session) {
+  const { start: periodStart, end: periodEnd } = getPayrollPeriodRange(date);
+
+  const [monthRequests, monthWorksheets, monthLeaveStatuses] = await Promise.all([
+    RequestModel.find({
+      user_id: userId,
+      request_type: "forgot_checkin",
+      status: "approved",
+      isDeleted: false,
+      date: { $gte: periodStart, $lte: periodEnd }
+    })
+      .sort({ date: 1 })
+      .session(session),
+    WorkSheetModel.find({
+      user_id: userId,
+      date: { $gte: periodStart, $lte: periodEnd },
+      isDeleted: false
+    }).session(session),
+    WorkDayStatusModel.find({
+      user_id: userId,
+      date: { $gte: periodStart, $lte: periodEnd },
+      status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
+      isDeleted: false
+    }).session(session)
+  ]);
+
+  const leavePeriodsMap = new Map();
+  for (const ds of monthLeaveStatuses) {
+    const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
+    if (!leavePeriodsMap.has(key)) leavePeriodsMap.set(key, new Set());
+    leavePeriodsMap.get(key).add(ds.period);
+  }
+
+  const daySnapshots = monthWorksheets.map((ws) => {
+    const dateKey = moment.tz(ws.date, TZ).format("YYYY-MM-DD");
+    const periods = leavePeriodsMap.get(dateKey);
+    return {
+      dateKey,
+      hasIn: !!ws.check_in,
+      hasOut: !!ws.check_out,
+      leaveMorning: !!periods && (periods.has("morning") || periods.has("full")),
+      leaveAfternoon: !!periods && (periods.has("afternoon") || periods.has("full"))
+    };
+  });
+
+  const occMap = buildUnifiedForgotOccurrenceMap({
+    approvedForgotRequests: monthRequests,
+    daySnapshots
+  });
+
+  const dateKey = moment.tz(date, TZ).format("YYYY-MM-DD");
+  return occMap.get(dateKey)?.occurrence || monthRequests.length + 1;
+}
+
 async function onCreate(request, _userInfo, session) {
   const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
   const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
@@ -78,6 +136,9 @@ async function onCreate(request, _userInfo, session) {
     { $addToSet: { sources: { ref_id: request._id, ref_type: "request" } } },
     { session }
   );
+
+  request.occurrence = await computeForgotOccurrence(request.user_id, request.date, session);
+  await request.save({ session });
 }
 
 async function onReject(request, session) {
@@ -146,64 +207,9 @@ async function onApprove(request, session) {
     worksheet = created;
   }
 
-  // Excel import mới tính lại work_unit cho ngày quên chấm công; nếu chưa import lại
-  // sau khi duyệt, công sẽ treo ở giá trị cũ (thường là 0). Tính luôn work_unit ở đây
-  // để công đúng ngay khi duyệt, không phải chờ import Excel. Import Excel sau này vẫn
-  // là nguồn tính chính thức (có gộp thêm dữ liệu máy chấm công/nghỉ phép), giá trị ở
-  // đây chỉ là kết quả tạm thời hợp lý ngay sau khi duyệt.
   if (worksheet.check_in && worksheet.check_out) {
-    const monthStart = moment.tz(request.date, TZ).startOf("month").toDate();
-    const monthEnd = moment.tz(request.date, TZ).endOf("month").toDate();
-
-    const [monthRequests, monthWorksheets, monthLeaveStatuses] = await Promise.all([
-      RequestModel.find({
-        user_id: request.user_id,
-        request_type: "forgot_checkin",
-        status: "approved",
-        isDeleted: false,
-        date: { $gte: monthStart, $lte: monthEnd }
-      })
-        .sort({ date: 1 })
-        .session(session),
-      WorkSheetModel.find({
-        user_id: request.user_id,
-        date: { $gte: monthStart, $lte: monthEnd },
-        isDeleted: false
-      }).session(session),
-      WorkDayStatusModel.find({
-        user_id: request.user_id,
-        date: { $gte: monthStart, $lte: monthEnd },
-        status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
-        isDeleted: false
-      }).session(session)
-    ]);
-
-    const leavePeriodsMap = new Map();
-    for (const ds of monthLeaveStatuses) {
-      const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
-      if (!leavePeriodsMap.has(key)) leavePeriodsMap.set(key, new Set());
-      leavePeriodsMap.get(key).add(ds.period);
-    }
-
-    const daySnapshots = monthWorksheets.map((ws) => {
-      const dateKey = moment.tz(ws.date, TZ).format("YYYY-MM-DD");
-      const periods = leavePeriodsMap.get(dateKey);
-      return {
-        dateKey,
-        hasIn: !!ws.check_in,
-        hasOut: !!ws.check_out,
-        leaveMorning: !!periods && (periods.has("morning") || periods.has("full")),
-        leaveAfternoon: !!periods && (periods.has("afternoon") || periods.has("full"))
-      };
-    });
-
-    const occMap = buildUnifiedForgotOccurrenceMap({
-      approvedForgotRequests: monthRequests,
-      daySnapshots
-    });
-
-    const dateKey = moment.tz(request.date, TZ).format("YYYY-MM-DD");
-    const occurrence = occMap.get(dateKey)?.occurrence || monthRequests.length;
+    const occurrence =
+      request.occurrence ?? (await computeForgotOccurrence(request.user_id, request.date, session));
     const isSaturday = moment.tz(request.date, TZ).day() === 6;
     const dayStart = moment.tz(request.date, TZ).startOf("day").toDate();
 

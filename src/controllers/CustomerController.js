@@ -1179,10 +1179,12 @@ const CustomerController = {
           if (existing) {
             const customRegisteredAt = item.created_at ? new Date(item.created_at) : null;
             const isValidDate = customRegisteredAt && !Number.isNaN(customRegisteredAt.getTime());
-            const isDifferent =
-              isValidDate && existing.registeredAt?.getTime() !== customRegisteredAt.getTime();
+            const shouldUpdate =
+              isValidDate &&
+              (!existing.registeredAt ||
+                existing.registeredAt.getTime() !== customRegisteredAt.getTime());
 
-            if (isDifferent) {
+            if (shouldUpdate) {
               await CustomerModel.updateOne(
                 { _id: existing._id },
                 { $set: { registeredAt: customRegisteredAt } }
@@ -1191,6 +1193,7 @@ const CustomerController = {
             } else {
               results.skipped++;
             }
+
             continue;
           }
 

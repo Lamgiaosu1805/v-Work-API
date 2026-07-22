@@ -52,6 +52,7 @@ const CustomerController = {
         external_id,
         ref_code,
         type, // "sale" | "agent" | undefined
+        created_at,
 
         // Thông tin ekyc
         full_name,
@@ -178,6 +179,7 @@ const CustomerController = {
           referred_by,
           agent_id,
           source_type,
+          registeredAt: created_at ? new Date(created_at) : now,
           status: hasKycInfo ? "kyc_verified" : "registered",
           identity: hasKycInfo
             ? {
@@ -414,9 +416,10 @@ const CustomerController = {
       }
 
       if (from_date || to_date) {
-        filter.createdAt = {};
-        if (from_date) filter.createdAt.$gte = new Date(from_date);
-        if (to_date) filter.createdAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
+        filter.registeredAt = {};
+        if (from_date) filter.registeredAt.$gte = new Date(from_date);
+        if (to_date)
+          filter.registeredAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
       }
 
       if (search) {
@@ -430,7 +433,7 @@ const CustomerController = {
         CustomerModel.find(filter)
           .populate("app_id", "name code")
           .select("-identity.id_front_url -identity.id_back_url -identity.selfie_url") // ẩn ảnh CCCD
-          .sort({ createdAt: -1 })
+          .sort({ registeredAt: -1 })
           .skip(skip)
           .limit(Number(limit)),
         CustomerModel.countDocuments(filter)
@@ -500,9 +503,10 @@ const CustomerController = {
       }
 
       if (from_date || to_date) {
-        filter.createdAt = {};
-        if (from_date) filter.createdAt.$gte = new Date(from_date);
-        if (to_date) filter.createdAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
+        filter.registeredAt = {};
+        if (from_date) filter.registeredAt.$gte = new Date(from_date);
+        if (to_date)
+          filter.registeredAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
       }
 
       if (search) {
@@ -516,7 +520,7 @@ const CustomerController = {
         CustomerModel.find(filter)
           .populate("app_id", "name code")
           .select("-identity.id_front_url -identity.id_back_url -identity.selfie_url")
-          .sort({ createdAt: -1 })
+          .sort({ registeredAt: -1 })
           .skip(skip)
           .limit(Number(limit)),
         CustomerModel.countDocuments(filter)
@@ -623,6 +627,7 @@ const CustomerController = {
             sale: sale_info, // null nếu không có sale
             agent: agent_info // null nếu không có agent
           },
+          registeredAt: customer.registeredAt,
           createdAt: customer.createdAt,
           updatedAt: customer.updatedAt
         }
@@ -1081,7 +1086,7 @@ const CustomerController = {
       }
 
       pipeline.push(
-        { $sort: { createdAt: -1 } },
+        { $sort: { registeredAt: -1 } },
         {
           $facet: {
             data: [
@@ -1149,8 +1154,8 @@ const CustomerController = {
       const results = {
         total: customers.length,
         created: 0,
-        updated: 0, // đã tồn tại, cập nhật lại createdAt theo dữ liệu gốc
-        skipped: 0, // đã tồn tại, createdAt đã đúng hoặc không có create_at để đối chiếu
+        updated: 0, // đã tồn tại, cập nhật lại registeredAt theo dữ liệu gốc
+        skipped: 0, // đã tồn tại, registeredAt đã đúng hoặc không có createdAt để đối chiếu
         failed: []
       };
 
@@ -1172,18 +1177,15 @@ const CustomerController = {
           });
 
           if (existing) {
-            // Không tạo mới, không đổi bất kỳ field nào khác ngoài createdAt.
-            // Chỉ cập nhật createdAt nếu payload có ngày gốc hợp lệ và khác giá trị hiện tại.
-            const customCreatedAt = item.create_at ? new Date(item.create_at) : null;
-            const isValidDate = customCreatedAt && !Number.isNaN(customCreatedAt.getTime());
+            const customRegisteredAt = item.created_at ? new Date(item.created_at) : null;
+            const isValidDate = customRegisteredAt && !Number.isNaN(customRegisteredAt.getTime());
             const isDifferent =
-              isValidDate && existing.createdAt?.getTime() !== customCreatedAt.getTime();
+              isValidDate && existing.registeredAt?.getTime() !== customRegisteredAt.getTime();
 
             if (isDifferent) {
               await CustomerModel.updateOne(
                 { _id: existing._id },
-                { $set: { createdAt: customCreatedAt } },
-                { timestamps: false }
+                { $set: { registeredAt: customRegisteredAt } }
               );
               results.updated++;
             } else {
@@ -1199,8 +1201,14 @@ const CustomerController = {
               ? (genderMap[Number(item.gender)] ?? null)
               : null;
 
-          // Khởi tạo document trong bộ nhớ, chưa lưu xuống DB
-          const customerDoc = new CustomerModel({
+          const customRegisteredAt = item.created_at ? new Date(item.created_at) : null;
+          const isValidRegisteredAt =
+            customRegisteredAt && !Number.isNaN(customRegisteredAt.getTime());
+
+          // Tạo mới — source_type = "marketing" vì KH cũ chưa biết thuộc ai.
+          // createdAt để Mongoose tự gán bình thường (đúng nghĩa: thời điểm sync vào hệ thống này).
+          // registeredAt lưu riêng ngày đăng ký gốc từ hệ thống cũ, dùng cho lọc/sort theo nghiệp vụ.
+          await CustomerModel.create({
             app_id: app._id,
             phone_number: item.phone_number,
             external_id: item.external_id,
@@ -1209,6 +1217,7 @@ const CustomerController = {
             agent_id: null,
             source_type: "marketing",
             status: item.is_kyc ? "kyc_verified" : "registered",
+            registeredAt: isValidRegisteredAt ? customRegisteredAt : null,
             identity: item.is_kyc
               ? {
                   full_name: item.full_name ?? null,
@@ -1227,19 +1236,6 @@ const CustomerController = {
                 }
               : {}
           });
-
-          // Ngày đăng ký gốc từ hệ thống cũ — ưu tiên dùng thay vì để
-          // Mongoose tự gán thời điểm chạy import làm createdAt
-          if (item.create_at) {
-            const customCreatedAt = new Date(item.create_at);
-            if (!Number.isNaN(customCreatedAt.getTime())) {
-              customerDoc.createdAt = customCreatedAt;
-              customerDoc.updatedAt = customCreatedAt;
-            }
-          }
-
-          // Lưu đúng 1 lần; timestamps: false để không bị ghi đè lại createdAt vừa gán
-          await customerDoc.save({ timestamps: false });
 
           results.created++;
         } catch (err) {
@@ -1651,14 +1647,14 @@ const CustomerController = {
 
       const customers = await CustomerModel.aggregate([
         ...pipeline,
-        { $sort: { createdAt: -1 } },
+        { $sort: { registeredAt: -1 } },
         {
           $project: {
             phone_number: 1,
             external_id: 1,
             source_type: 1,
             status: 1,
-            createdAt: 1,
+            registeredAt: 1,
             "identity.full_name": 1,
             "identity.id_number": 1,
             "identity.gender": 1,
@@ -1683,7 +1679,7 @@ const CustomerController = {
         "Nguồn (source_type)": c.source_type ?? "",
         "Sale phụ trách": c.referred_by?.full_name ?? "",
         "Mã NV": c.referred_by?.ma_nv ?? "",
-        "Ngày tạo": c.createdAt ? new Date(c.createdAt).toLocaleString("vi-VN") : ""
+        "Ngày tạo": c.registeredAt ? new Date(c.registeredAt).toLocaleString("vi-VN") : ""
       }));
 
       const worksheet = XLSX.utils.json_to_sheet(rows);

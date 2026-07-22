@@ -252,7 +252,7 @@ async function buildCustomerPipeline(req, query) {
     }
     const eventMatches = [];
     if (!funnelStatuses.length || funnelStatuses.includes("not_kyc"))
-      eventMatches.push({ createdAt: dateCondition });
+      eventMatches.push({ registeredAt: dateCondition });
     if (funnelStatuses.includes("kyc_verified"))
       eventMatches.push({ "identity.verified_at": dateCondition });
     if (funnelStatuses.includes("kyc_verified_no_investment"))

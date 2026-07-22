@@ -1149,7 +1149,8 @@ const CustomerController = {
       const results = {
         total: customers.length,
         created: 0,
-        skipped: 0, // đã tồn tại → bỏ qua
+        updated: 0, // đã tồn tại, cập nhật lại createdAt theo dữ liệu gốc
+        skipped: 0, // đã tồn tại, createdAt đã đúng hoặc không có create_at để đối chiếu
         failed: []
       };
 
@@ -1171,8 +1172,23 @@ const CustomerController = {
           });
 
           if (existing) {
-            // Đã tồn tại → bỏ qua hoàn toàn, không ghi đè bất cứ thứ gì
-            results.skipped++;
+            // Không tạo mới, không đổi bất kỳ field nào khác ngoài createdAt.
+            // Chỉ cập nhật createdAt nếu payload có ngày gốc hợp lệ và khác giá trị hiện tại.
+            const customCreatedAt = item.create_at ? new Date(item.create_at) : null;
+            const isValidDate = customCreatedAt && !Number.isNaN(customCreatedAt.getTime());
+            const isDifferent =
+              isValidDate && existing.createdAt?.getTime() !== customCreatedAt.getTime();
+
+            if (isDifferent) {
+              await CustomerModel.updateOne(
+                { _id: existing._id },
+                { $set: { createdAt: customCreatedAt } },
+                { timestamps: false }
+              );
+              results.updated++;
+            } else {
+              results.skipped++;
+            }
             continue;
           }
 
@@ -1183,8 +1199,8 @@ const CustomerController = {
               ? (genderMap[Number(item.gender)] ?? null)
               : null;
 
-          // Tạo mới — source_type = "marketing" vì KH cũ chưa biết thuộc ai
-          await CustomerModel.create({
+          // Khởi tạo document trong bộ nhớ, chưa lưu xuống DB
+          const customerDoc = new CustomerModel({
             app_id: app._id,
             phone_number: item.phone_number,
             external_id: item.external_id,
@@ -1211,6 +1227,19 @@ const CustomerController = {
                 }
               : {}
           });
+
+          // Ngày đăng ký gốc từ hệ thống cũ — ưu tiên dùng thay vì để
+          // Mongoose tự gán thời điểm chạy import làm createdAt
+          if (item.create_at) {
+            const customCreatedAt = new Date(item.create_at);
+            if (!Number.isNaN(customCreatedAt.getTime())) {
+              customerDoc.createdAt = customCreatedAt;
+              customerDoc.updatedAt = customCreatedAt;
+            }
+          }
+
+          // Lưu đúng 1 lần; timestamps: false để không bị ghi đè lại createdAt vừa gán
+          await customerDoc.save({ timestamps: false });
 
           results.created++;
         } catch (err) {

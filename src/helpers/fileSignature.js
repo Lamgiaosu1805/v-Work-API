@@ -33,6 +33,7 @@ function encryptFilePath(relativePath, ttlSeconds = DEFAULT_TTL_SECONDS) {
 }
 
 function decryptFileToken(token) {
+  console.log("Decrypting token:", token);
   if (!token || typeof token !== "string") return null;
   try {
     const raw = Buffer.from(token, "base64url");
@@ -40,12 +41,21 @@ function decryptFileToken(token) {
     const iv = raw.subarray(0, 12);
     const tag = raw.subarray(12, 28);
     const ct = raw.subarray(28);
-
+    console.log(
+      "IV:",
+      iv.toString("hex"),
+      "Tag:",
+      tag.toString("hex"),
+      "Ciphertext length:",
+      ct.length,
+      getKey().toString("hex")
+    );
     const decipher = crypto.createDecipheriv("aes-256-gcm", getKey(), iv);
     decipher.setAuthTag(tag);
     const plain = Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
 
     const { p, e } = JSON.parse(plain);
+    console.log("Decrypted payload:", { p, e });
     if (!p || !e) return null;
     if (Math.floor(Date.now() / 1000) > Number(e)) return null;
 

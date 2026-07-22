@@ -154,7 +154,15 @@ function resolveAttendanceDay({
   let morning_absent = false;
   let afternoon_absent = false;
   if (missedIn || missedOut) {
-    work_unit = 0;
+    const occInfo = forgotOccurrenceMap?.get(dateKey);
+    if (occInfo && !occInfo.hasRequest) {
+      const base = isSaturday ? 0.5 : 1;
+      work_unit = Math.max(0, base / 2 - leaveDeduction);
+      const r = resolveForgotPenalty(dayStart, occInfo.occurrence || 0, isSaturday);
+      penalty_amount = r.penalty_amount;
+    } else {
+      work_unit = 0;
+    }
   } else if (forgot) {
     const occurrence = forgotCountMap?.get(dateKey) || 0;
     const r = resolveForgotPenalty(dayStart, occurrence, isSaturday);

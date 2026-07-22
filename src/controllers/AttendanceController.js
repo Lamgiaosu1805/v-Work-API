@@ -23,8 +23,10 @@ const {
   parseExcelToBlocks,
   parseDayRows,
   resolveAttendanceDay,
-  saveAttendanceDay
+  saveAttendanceDay,
+  correctDayStatuses
 } = require("../helpers/attendanceHelper");
+const { getPayrollPeriodRange } = require("../helpers/payrollPeriod");
 
 const AttendanceController = {
   getAllowedWifiLocations: async (req, res) => {
@@ -427,6 +429,14 @@ const AttendanceController = {
         });
       }
 
+      if (req.query.department && mongoose.Types.ObjectId.isValid(req.query.department)) {
+        const deptUserIds = await UserDepartmentPositionModel.distinct("user", {
+          department: req.query.department
+        });
+        const allowed = new Set(deptUserIds.map(String));
+        userIds = userIds.filter((id) => allowed.has(String(id)));
+      }
+
       const [worksheets, statuses] = await Promise.all([
         WorkSheetModel.find({
           user_id: { $in: userIds },
@@ -559,7 +569,9 @@ const AttendanceController = {
       });
       if (!userInfo) return res.status(404).json({ message: "Không tìm thấy nhân viên" });
 
+      const isSelf = userInfo.id_account?.toString() === req.account._id.toString();
       const hasViewAll =
+        isSelf ||
         req.account.role === "admin" ||
         req.account.dept_scope === "all" ||
         (await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL));
@@ -685,7 +697,7 @@ const AttendanceController = {
 
       const daily = [...allDates].sort().map((dateStr) => {
         const ws = wsMap.get(dateStr);
-        const statuses = dsMap.get(dateStr) || [];
+        const statuses = correctDayStatuses(dsMap.get(dateStr) || [], ws);
         const reqs = reqMap.get(dateStr) || [];
 
         if (ws) {
@@ -837,6 +849,22 @@ const AttendanceController = {
     }
   },
 
+  getMyPayrollStats: async (req, res) => {
+    try {
+      const myInfo = await UserInfoModel.findOne({
+        id_account: req.account._id,
+        isDeleted: false
+      });
+      if (!myInfo) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+
+      req.params.userId = myInfo._id.toString();
+      return AttendanceController.getPayrollStats(req, res);
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Lỗi server", error: err.message });
+    }
+  },
+
   getPayrollStatsAll: async (req, res) => {
     const TZ = "Asia/Ho_Chi_Minh";
     try {
@@ -938,6 +966,17 @@ const AttendanceController = {
         const wss = wsByUser.get(uid) || [];
         const dss = dsByUser.get(uid) || [];
 
+        const wsByDate = new Map();
+        for (const ws of wss) {
+          wsByDate.set(moment.tz(ws.date, TZ).format("YYYY-MM-DD"), ws);
+        }
+        const dsByDate = new Map();
+        for (const ds of dss) {
+          const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
+          if (!dsByDate.has(key)) dsByDate.set(key, []);
+          dsByDate.get(key).push(ds);
+        }
+
         const probationEnd = u.probation_end_date
           ? moment.tz(u.probation_end_date, TZ).startOf("day")
           : null;
@@ -976,16 +1015,19 @@ const AttendanceController = {
         let remote_days = 0;
         let business_trip_days = 0;
         let client_visit_days = 0;
-        for (const s of dss) {
-          const w = s.period === "full" ? 1 : 0.5;
-          if (s.status === "present") present_days += w;
-          else if (s.status === "missed_clock") missed_clock_days += w;
-          else if (s.status === "absent") absent_days += w;
-          else if (s.status === "leave_paid") leave_paid_days += w;
-          else if (s.status === "leave_unpaid") leave_unpaid_days += w;
-          else if (s.status === "remote") remote_days += w;
-          else if (s.status === "business_trip") business_trip_days += w;
-          else if (s.status === "client_visit") client_visit_days += w;
+        for (const [dateKey, statusesOfDate] of dsByDate) {
+          const corrected = correctDayStatuses(statusesOfDate, wsByDate.get(dateKey));
+          for (const s of corrected) {
+            const w = s.period === "full" ? 1 : 0.5;
+            if (s.status === "present") present_days += w;
+            else if (s.status === "missed_clock") missed_clock_days += w;
+            else if (s.status === "absent") absent_days += w;
+            else if (s.status === "leave_paid") leave_paid_days += w;
+            else if (s.status === "leave_unpaid") leave_unpaid_days += w;
+            else if (s.status === "remote") remote_days += w;
+            else if (s.status === "business_trip") business_trip_days += w;
+            else if (s.status === "client_visit") client_visit_days += w;
+          }
         }
 
         return {
@@ -1156,8 +1198,8 @@ const AttendanceController = {
             .endOf("day")
             .toDate();
 
-          const monthStart = moment.tz(rangeStart, TZ).startOf("month").toDate();
-          const monthEnd = moment.tz(rangeEnd, TZ).endOf("month").toDate();
+          const periodStart = getPayrollPeriodRange(rangeStart).start;
+          const periodEnd = getPayrollPeriodRange(rangeEnd).end;
 
           const [worksheets, forgotReqs, lateReqs, earlyReqs, leaveStatuses] = await Promise.all([
             WorkSheetModel.find({
@@ -1165,12 +1207,17 @@ const AttendanceController = {
               date: { $gte: rangeStart, $lte: rangeEnd },
               isDeleted: false
             }).populate("shifts"),
+            WorkSheetModel.find({
+              user_id: userId,
+              date: { $gte: periodStart, $lte: periodEnd },
+              isDeleted: false
+            }),
             RequestModel.find({
               user_id: userId,
               request_type: "forgot_checkin",
               status: "approved",
               isDeleted: false,
-              date: { $gte: monthStart, $lte: monthEnd }
+              date: { $gte: periodStart, $lte: periodEnd }
             }).sort({ date: 1 }),
             RequestModel.find({
               user_id: userId,
@@ -1191,6 +1238,12 @@ const AttendanceController = {
             WorkDayStatusModel.find({
               user_id: userId,
               date: { $gte: rangeStart, $lte: rangeEnd },
+              status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
+              isDeleted: false
+            }),
+            WorkDayStatusModel.find({
+              user_id: userId,
+              date: { $gte: periodStart, $lte: periodEnd },
               status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
               isDeleted: false
             })

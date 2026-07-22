@@ -4,7 +4,11 @@ const { RequestModel } = require("../models/RequestModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const { can, getAccountsWithPermission } = require("../helpers/rbac");
 const { PERMISSION } = require("../constants");
-const { notify, acquireRequestReviewLock } = require("../helpers/requestUtils");
+const {
+  notify,
+  acquireRequestReviewLock,
+  resolveReviewerProfileByAccountId
+} = require("../helpers/requestUtils");
 const { getApprovalChain, getManagedUserIds } = require("../helpers/approvalChain");
 const leaveHandler = require("../helpers/leaveHandler");
 const lateEarlyHandler = require("../helpers/lateEarlyHandler");
@@ -55,7 +59,7 @@ const RequestController = {
       });
       if (!userInfo) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
 
-      const chain = await getApprovalChain(userInfo._id, { stopAtFirstMatch: true });
+      const chain = await getApprovalChain(userInfo._id);
       return res.status(200).json({ message: "OK", data: chain[0] ?? null });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -114,7 +118,7 @@ const RequestController = {
         await session.commitTransaction();
         session.endSession();
 
-        getApprovalChain(userInfo._id, { stopAtFirstMatch: true })
+        getApprovalChain(userInfo._id)
           .then((chain) => {
             const nearest = chain[0];
             if (!nearest) return null;
@@ -190,6 +194,11 @@ const RequestController = {
       const skip = (Number(page) - 1) * Number(limit);
       const filter = { isDeleted: false };
 
+      const myUserInfo = await UserInfoModel.findOne({
+        id_account: req.account._id,
+        isDeleted: false
+      });
+
       const hasViewAll = await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL);
       let scopedUserIds = null;
       if (!hasViewAll) {
@@ -200,13 +209,9 @@ const RequestController = {
             message: "Bạn không có quyền quản lý tính năng này"
           });
 
-        const managerInfo = await UserInfoModel.findOne({
-          id_account: req.account._id,
-          isDeleted: false
-        });
-        if (!managerInfo)
+        if (!myUserInfo)
           return res.status(404).json({ message: "Không tìm thấy thông tin quản lý" });
-        scopedUserIds = await getManagedUserIds(managerInfo._id);
+        scopedUserIds = await getManagedUserIds(myUserInfo._id);
       }
 
       if (request_type && VALID_TYPES.includes(request_type)) filter.request_type = request_type;
@@ -236,6 +241,11 @@ const RequestController = {
       }
 
       if (scopedUserIds) filter.user_id = { $in: scopedUserIds };
+      // Loại đơn của chính người gọi API khỏi danh sách - tránh vừa thấy vừa được gợi ý
+      // duyệt đơn của chính mình (review action đã chặn tự duyệt, đây là fix ở tầng hiển thị).
+      if (myUserInfo) {
+        filter.user_id = { ...(filter.user_id ?? {}), $ne: myUserInfo._id };
+      }
 
       const [requests, total] = await Promise.all([
         RequestModel.find(filter)
@@ -262,6 +272,68 @@ const RequestController = {
     }
   },
 
+  getById: async (req, res) => {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      return res.status(400).json({ message: "ID không hợp lệ" });
+
+    try {
+      const request = await RequestModel.findOne({ _id: id, isDeleted: false })
+        .populate("user_id", "full_name ma_nv phone_number")
+        .populate("reviewed_by", "full_name id_account");
+      if (!request) return res.status(404).json({ message: "Đơn không tồn tại" });
+
+      const myUserInfo = await UserInfoModel.findOne({
+        id_account: req.account._id,
+        isDeleted: false
+      });
+      const isOwner = myUserInfo && request.user_id._id.equals(myUserInfo._id);
+      const canViewAll = await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL);
+      let canSee = isOwner || canViewAll;
+      if (!canSee) {
+        const canReview = await can(req.account, PERMISSION.HRM_REQUEST_REVIEW);
+        if (canReview) {
+          const chain = await getApprovalChain(request.user_id._id);
+          canSee = chain.some((c) => c.accountId.toString() === req.account._id.toString());
+        }
+      }
+      if (!canSee) return res.status(403).json({ message: "Bạn không có quyền xem đơn này" });
+
+      const approvals = await Promise.all(
+        request.approvals.map(async (a) => ({
+          account: a.account,
+          reviewed_at: a.reviewed_at,
+          reviewer: await resolveReviewerProfileByAccountId(a.account)
+        }))
+      );
+
+      let reviewed_by_profile = null;
+      if (request.reviewed_by) {
+        reviewed_by_profile = await resolveReviewerProfileByAccountId(
+          request.reviewed_by.id_account
+        );
+      }
+
+      let pending_reviewer = null;
+      if (request.status === "pending") {
+        const chain = await getApprovalChain(request.user_id._id);
+        const approvedAccountIds = new Set(request.approvals.map((a) => String(a.account)));
+        pending_reviewer = chain.find((c) => !approvedAccountIds.has(String(c.accountId))) ?? null;
+      }
+
+      const data = {
+        ...request.toObject(),
+        approvals,
+        reviewed_by_profile,
+        pending_reviewer
+      };
+
+      return res.status(200).json({ message: "OK", data });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
+
   review: async (req, res) => {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id))
@@ -276,13 +348,15 @@ const RequestController = {
     try {
       const preCheck = await RequestModel.findOne(
         { _id: id, isDeleted: false },
-        { request_type: 1, total_days: 1 }
+        { request_type: 1, total_days: 1, occurrence: 1 }
       );
       if (!preCheck) return res.status(404).json({ message: "Đơn không tồn tại" });
 
       const canReviewAll = await can(req.account, PERMISSION.HRM_REQUEST_REVIEW_ALL);
       const needsMultiApproval =
-        action === "approve" && preCheck.request_type === "leave" && preCheck.total_days > 3;
+        action === "approve" &&
+        ((preCheck.request_type === "leave" && preCheck.total_days > 3) ||
+          (preCheck.request_type === "forgot_checkin" && (preCheck.occurrence ?? 0) >= 6));
 
       if (needsMultiApproval) release = await acquireRequestReviewLock(id);
 
@@ -358,6 +432,22 @@ const RequestController = {
           if (release) await release();
           return res.status(409).json({ message: "Bạn đã duyệt đơn này rồi" });
         }
+
+        if (
+          request.request_type === "forgot_checkin" &&
+          request.approvals.length === 0 &&
+          !canReviewAll
+        ) {
+          const chain = await getApprovalChain(request.user_id);
+          const isLevel1 = chain[0]?.accountId?.toString() === req.account._id.toString();
+          if (!isLevel1) {
+            await session.abortTransaction();
+            session.endSession();
+            if (release) await release();
+            return res.status(403).json({ message: "Cần trưởng bộ phận duyệt trước" });
+          }
+        }
+
         request.approvals.push({ account: req.account._id, reviewed_at: new Date() });
 
         if (request.approvals.length >= 2) {
@@ -406,7 +496,7 @@ const RequestController = {
 
       Promise.all([
         UserInfoModel.findById(request.user_id).select("id_account full_name"),
-        getApprovalChain(request.user_id, { stopAtFirstMatch: true }),
+        getApprovalChain(request.user_id),
         getAccountsWithPermission(PERMISSION.HRM_REQUEST_VIEW_ALL)
       ])
         .then(([employeeInfo, nearestChain, hrAccountIds]) => {

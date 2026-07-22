@@ -5,97 +5,113 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const { can } = require("./rbac");
 const { PERMISSION } = require("../constants");
 
-async function getApprovalChain(userInfoId, { stopAtFirstMatch = false } = {}) {
-  const employee = await UserInfoModel.findById(userInfoId, { branch_id: 1, isDeleted: 1 });
-  if (!employee || employee.isDeleted) return [];
+async function buildCandidate(userInfo, account) {
+  if (!userInfo || !account) return null;
 
-  const memberships = await UserDepartmentPositionModel.find({
-    user: userInfoId,
+  const membership = await UserDepartmentPositionModel.findOne({
+    user: userInfo._id,
     isDeleted: false
-  }).distinct("department");
-  if (!memberships.length) return [];
+  })
+    .populate("position", "position_name")
+    .populate("department", "department_name");
 
-  const seenDeptIds = new Set();
-  const chain = [];
-  const seenUsers = new Set();
-  let frontier = memberships.map(String);
+  return {
+    userInfoId: userInfo._id,
+    accountId: account._id,
+    full_name: userInfo.full_name,
+    position_name: membership?.position?.position_name ?? null,
+    department_name: membership?.department?.department_name ?? null
+  };
+}
 
-  while (frontier.length && seenDeptIds.size < 50) {
-    const newFrontier = frontier.filter((id) => !seenDeptIds.has(id));
-    if (!newFrontier.length) break;
-    newFrontier.forEach((id) => seenDeptIds.add(id));
+async function resolveDepartmentHead(employeeUserInfoId) {
+  const membership = await UserDepartmentPositionModel.findOne({
+    user: employeeUserInfoId,
+    isDeleted: false
+  });
+  if (!membership) return null;
 
-    const candidateUserIds = await UserDepartmentPositionModel.find({
-      department: { $in: newFrontier },
-      isDeleted: false,
-      user: { $ne: userInfoId }
-    }).distinct("user");
+  const deptMemberIds = await UserDepartmentPositionModel.find({
+    department: membership.department,
+    isDeleted: false,
+    user: { $ne: employeeUserInfoId }
+  }).distinct("user");
+  if (!deptMemberIds.length) return null;
 
-    if (candidateUserIds.length) {
-      const candidates = await UserInfoModel.find(
-        { _id: { $in: candidateUserIds }, isDeleted: false },
-        { branch_id: 1, full_name: 1, id_account: 1 }
-      );
+  const userInfos = await UserInfoModel.find(
+    { _id: { $in: deptMemberIds }, isDeleted: false },
+    { full_name: 1, id_account: 1 }
+  );
+  if (!userInfos.length) return null;
 
-      const branchMatched = candidates.filter(
-        (c) => employee.branch_id && c.branch_id && employee.branch_id.equals(c.branch_id)
-      );
+  const accounts = await AccountModel.find({
+    _id: { $in: userInfos.map((u) => u.id_account) },
+    isDeleted: false
+  }).sort({ createdAt: 1 });
 
-      const accounts = await AccountModel.find(
-        { _id: { $in: branchMatched.map((c) => c.id_account) }, isDeleted: false },
-        { role: 1 }
-      );
-      const accountMap = new Map(accounts.map((a) => [String(a._id), a]));
-
-      const permissionChecks = await Promise.all(
-        branchMatched.map((c) => {
-          const account = accountMap.get(String(c.id_account));
-          return account ? can(account, PERMISSION.HRM_REQUEST_REVIEW) : Promise.resolve(false);
-        })
-      );
-
-      branchMatched.forEach((c, i) => {
-        if (!permissionChecks[i] || seenUsers.has(String(c._id))) return;
-        seenUsers.add(String(c._id));
-        chain.push({ userInfoId: c._id, accountId: c.id_account, full_name: c.full_name });
-      });
+  for (const account of accounts) {
+    if (await can(account, PERMISSION.HRM_REQUEST_REVIEW)) {
+      const userInfo = userInfos.find((u) => String(u.id_account) === String(account._id));
+      return buildCandidate(userInfo, account);
     }
-
-    const depts = await DepartmentModel.find(
-      { _id: { $in: newFrontier }, isDeleted: false },
-      { parent: 1, manager: 1 }
-    );
-    const managerIds = [
-      ...new Set(
-        depts
-          .map((d) => d.manager)
-          .filter(Boolean)
-          .map(String)
-      )
-    ].filter((id) => !seenUsers.has(id));
-    if (managerIds.length) {
-      const managerInfos = await UserInfoModel.find(
-        { _id: { $in: managerIds }, isDeleted: false },
-        { full_name: 1, id_account: 1 }
-      );
-      managerInfos.forEach((c) => {
-        if (seenUsers.has(String(c._id))) return;
-        seenUsers.add(String(c._id));
-        chain.push({ userInfoId: c._id, accountId: c.id_account, full_name: c.full_name });
-      });
-    }
-
-    if (stopAtFirstMatch && chain.length) break;
-
-    // Lên 1 cấp
-    frontier = depts
-      .map((d) => d.parent)
-      .filter(Boolean)
-      .map(String);
   }
 
-  return chain;
+  return null;
 }
+
+async function resolveIndirectManagerOrAdmin(employeeUserInfoId) {
+  const membership = await UserDepartmentPositionModel.findOne({
+    user: employeeUserInfoId,
+    isDeleted: false
+  });
+
+  if (membership) {
+    const department = await DepartmentModel.findById(membership.department, { manager: 1 });
+    if (department?.manager) {
+      const managerInfo = await UserInfoModel.findOne({
+        _id: department.manager,
+        isDeleted: false
+      });
+      if (managerInfo) {
+        const account = await AccountModel.findOne({
+          _id: managerInfo.id_account,
+          isDeleted: false
+        });
+        if (account) return buildCandidate(managerInfo, account);
+      }
+    }
+  }
+
+  const adminAccount = await AccountModel.findOne({ role: "admin", isDeleted: false }).sort({
+    createdAt: 1
+  });
+  if (!adminAccount) return null;
+  const adminUserInfo = await UserInfoModel.findOne({
+    id_account: adminAccount._id,
+    isDeleted: false
+  });
+  if (!adminUserInfo) return null;
+
+  return buildCandidate(adminUserInfo, adminAccount);
+}
+
+async function getApprovalChain(employeeUserInfoId) {
+  const [level1, level2] = await Promise.all([
+    resolveDepartmentHead(employeeUserInfoId),
+    resolveIndirectManagerOrAdmin(employeeUserInfoId)
+  ]);
+
+  const seenAccounts = new Set();
+  return [level1, level2].filter((c) => {
+    if (!c) return false;
+    if (String(c.userInfoId) === String(employeeUserInfoId)) return false;
+    const key = String(c.accountId);
+    if (seenAccounts.has(key)) return false;
+    seenAccounts.add(key);
+    return true;
+  });
+}
+
 async function getManagedUserIds(managerUserInfoId) {
   const manager = await UserInfoModel.findById(managerUserInfoId, { branch_id: 1, isDeleted: 1 });
   if (!manager || manager.isDeleted) return [];

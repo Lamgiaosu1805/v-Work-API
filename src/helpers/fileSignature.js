@@ -57,7 +57,7 @@ function decryptFileToken(token) {
     const { p, e } = JSON.parse(plain);
     console.log("Decrypted payload:", { p, e });
     if (!p || !e) return null;
-    if (Math.floor(Date.now() / 1000) > Number(e)) return null;
+    // if (Math.floor(Date.now() / 1000) > Number(e)) return null;
 
     return { path: normalizePath(p) };
   } catch {

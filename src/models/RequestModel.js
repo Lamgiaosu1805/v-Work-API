@@ -60,7 +60,8 @@ const LateEarlyRequest = RequestModel.discriminator(
     date: { type: Date, required: true },
     shift_id: { type: ObjId, ref: "shift", required: true },
     type: { type: String, enum: ["late", "early_out"], required: true },
-    minutes: { type: Number, required: true }
+    minutes: { type: Number, required: true },
+    occurrence: { type: Number, default: null }
   })
 );
 

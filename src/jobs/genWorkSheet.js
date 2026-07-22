@@ -74,34 +74,51 @@ async function createDailyWorkSheets(targetDate) {
     if (!adminShift) console.warn("[Cron] Không tìm thấy ca hành chính!");
     if (!morningShift) console.warn("[Cron] Không tìm thấy ca sáng!");
 
+    let created = 0;
+    let failed = 0;
+
     for (const user of fulltimeUsers) {
       const shift = dayOfWeek === 6 ? morningShift : adminShift;
       if (!shift) continue;
 
-      const worksheet = await WorkSheet.findOneAndUpdate(
-        { user_id: user._id, date: today },
-        { $setOnInsert: { shifts: [shift._id] } },
-        { upsert: true, new: true }
-      );
-      await ensurePendingStatus(user._id, worksheet._id, today);
+      try {
+        const worksheet = await WorkSheet.findOneAndUpdate(
+          { user_id: user._id, date: today, isDeleted: false },
+          { $setOnInsert: { shifts: [shift._id] } },
+          { upsert: true, new: true }
+        );
+        await ensurePendingStatus(user._id, worksheet._id, today);
+        created++;
+      } catch (err) {
+        console.error(`[Cron] Lỗi tạo worksheet cho user ${user._id}:`, err.message);
+        failed++;
+      }
     }
 
     for (const user of parttimeUsers) {
-      const workSchedule = await WorkSchedule.find({ userId: user._id, dayOfWeek }).populate(
-        "shifts"
-      );
-      if (!workSchedule || workSchedule.length === 0) continue;
+      try {
+        const workSchedule = await WorkSchedule.find({
+          userId: user._id,
+          dayOfWeek,
+          isDeleted: false
+        }).populate("shifts");
+        if (!workSchedule || workSchedule.length === 0) continue;
 
-      const shiftsToday = workSchedule.flatMap((ws) => ws.shifts);
-      const worksheet = await WorkSheet.findOneAndUpdate(
-        { user_id: user._id, date: today },
-        { $setOnInsert: { shifts: shiftsToday.map((s) => s._id) } },
-        { upsert: true, new: true }
-      );
-      await ensurePendingStatus(user._id, worksheet._id, today);
+        const shiftsToday = workSchedule.flatMap((ws) => ws.shifts);
+        const worksheet = await WorkSheet.findOneAndUpdate(
+          { user_id: user._id, date: today, isDeleted: false },
+          { $setOnInsert: { shifts: shiftsToday.map((s) => s._id) } },
+          { upsert: true, new: true }
+        );
+        await ensurePendingStatus(user._id, worksheet._id, today);
+        created++;
+      } catch (err) {
+        console.error(`[Cron] Lỗi tạo worksheet cho user ${user._id}:`, err.message);
+        failed++;
+      }
     }
 
-    console.log("[Cron] Tạo WorkSheet hằng ngày hoàn tất!");
+    console.log(`[Cron] Tạo WorkSheet hằng ngày hoàn tất: ${created} thành công, ${failed} lỗi.`);
   } catch (error) {
     console.error("[Cron] Lỗi createDailyWorkSheets:", error);
   }

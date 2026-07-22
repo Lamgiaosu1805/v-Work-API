@@ -82,6 +82,8 @@ const CustomerModel = new mongoose.Schema(
       granted_at: { type: Date, default: null }
     },
 
+    registeredAt: { type: Date, default: null },
+
     ...BaseSchema.obj
   },
   {
@@ -92,5 +94,8 @@ const CustomerModel = new mongoose.Schema(
 );
 
 CustomerModel.index({ app_id: 1, phone_number: 1 }, { unique: true });
+CustomerModel.index({ "identity.verified_at": 1, createdAt: 1 });
+CustomerModel.index({ referred_by: 1, createdAt: -1 });
+CustomerModel.index({ registeredAt: -1 });
 
 module.exports = mongoose.model("customer", CustomerModel);

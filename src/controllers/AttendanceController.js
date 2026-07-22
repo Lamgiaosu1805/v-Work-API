@@ -720,7 +720,7 @@ const AttendanceController = {
         for (const s of statuses) {
           const w = s.period === "full" ? 1 : 0.5;
           if (s.status === "present") present_days += w;
-          else if (s.status === "missed_clock") missed_clock_days += w;
+          else if (s.status === "missed_clock") missed_clock_days += 1;
           else if (s.status === "absent") absent_days += w;
           else if (s.status === "leave_paid") leave_paid_days += w;
           else if (s.status === "leave_unpaid") leave_unpaid_days += w;
@@ -1021,7 +1021,8 @@ const AttendanceController = {
           for (const s of corrected) {
             const w = s.period === "full" ? 1 : 0.5;
             if (s.status === "present") present_days += w;
-            else if (s.status === "missed_clock") missed_clock_days += w;
+            // "Quên chấm" đếm theo SỐ LẦN (nguyên), không theo trọng số buổi — mỗi buổi/ngày quên = 1.
+            else if (s.status === "missed_clock") missed_clock_days += 1;
             else if (s.status === "absent") absent_days += w;
             else if (s.status === "leave_paid") leave_paid_days += w;
             else if (s.status === "leave_unpaid") leave_unpaid_days += w;

@@ -236,6 +236,9 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
 
     const OVERRIDABLE = ["pending", "missed_clock", "absent"];
 
+    // Trạng thái từng buổi: nếu bị phạt (absent do đi muộn/về sớm quá mức) thì "absent",
+    // nếu chỉ đơn thuần thiếu chấm công (không phạt) thì "missed_clock" (Quên chấm),
+    // ngược lại buổi đó có chấm công thật -> "present" (Đi làm).
     const resolvePeriodStatus = (isAbsent, isMissed) => {
       if (isAbsent) return "absent";
       if (isMissed) return "missed_clock";

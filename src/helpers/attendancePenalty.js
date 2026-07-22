@@ -1,4 +1,7 @@
+const moment = require("moment-timezone");
 const AttendancePenaltyModel = require("../models/AttendancePenaltyModel");
+
+const TZ = "Asia/Ho_Chi_Minh";
 
 async function buildLatePenaltyResolver() {
   const all = await AttendancePenaltyModel.find({
@@ -112,12 +115,40 @@ async function buildForgotPenaltyResolver() {
     if (tier.penalty_kind === "money")
       return { work_unit: base, penalty_amount: tier.penalty_value };
 
-    // Quá số lần quên chấm công cho phép: Thứ 7 chỉ mất nửa công (0.25 = 1/2 của 0.5),
-    // không mất hết như ngày thường (mất hết = 0).
-    const work_unit = isSaturday ? base / 2 : Math.max(0, base - tier.penalty_value);
-
-    return { work_unit, penalty_amount: 0 };
+    return { work_unit: base / 2, penalty_amount: 0 };
   };
 }
 
-module.exports = { buildLatePenaltyResolver, buildEarlyPenaltyResolver, buildForgotPenaltyResolver };
+function buildUnifiedForgotOccurrenceMap({ approvedForgotRequests, daySnapshots }) {
+  const requestDateKeys = new Set(
+    (approvedForgotRequests || []).map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD"))
+  );
+
+  const autoDateKeys = (daySnapshots || [])
+    .filter((d) => {
+      if (requestDateKeys.has(d.dateKey)) return false;
+      const missedIn = !d.hasIn && !d.leaveMorning;
+      const missedOut = !d.hasOut && !d.leaveAfternoon;
+      const isPartial = (d.hasIn && !d.hasOut) || (!d.hasIn && d.hasOut);
+      return isPartial && (missedIn || missedOut);
+    })
+    .map((d) => d.dateKey);
+
+  const merged = [
+    ...[...requestDateKeys].map((dateKey) => ({ dateKey, hasRequest: true })),
+    ...autoDateKeys.map((dateKey) => ({ dateKey, hasRequest: false }))
+  ].sort((a, b) => (a.dateKey < b.dateKey ? -1 : a.dateKey > b.dateKey ? 1 : 0));
+
+  const map = new Map();
+  merged.forEach((item, idx) => {
+    map.set(item.dateKey, { occurrence: idx + 1, hasRequest: item.hasRequest });
+  });
+  return map;
+}
+
+module.exports = {
+  buildLatePenaltyResolver,
+  buildEarlyPenaltyResolver,
+  buildForgotPenaltyResolver,
+  buildUnifiedForgotOccurrenceMap
+};

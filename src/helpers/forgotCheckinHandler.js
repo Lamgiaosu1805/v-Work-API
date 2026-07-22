@@ -214,11 +214,7 @@ async function onApprove(request, session) {
     const dayStart = moment.tz(request.date, TZ).startOf("day").toDate();
 
     const resolveForgotPenalty = await buildForgotPenaltyResolver();
-    const { work_unit, penalty_amount } = resolveForgotPenalty(
-      dayStart,
-      occurrence || monthRequests.length,
-      isSaturday
-    );
+    const { work_unit, penalty_amount } = resolveForgotPenalty(dayStart, occurrence, isSaturday);
     worksheet.work_unit = work_unit;
     worksheet.penalty_amount = penalty_amount;
     await worksheet.save({ session });

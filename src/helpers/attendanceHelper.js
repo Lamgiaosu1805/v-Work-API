@@ -51,7 +51,7 @@ function resolveAttendanceDay({
   rawOut,
   worksheet,
   forgotMap,
-  forgotCountMap,
+  forgotOccurrenceMap,
   lateForgivenSet,
   earlyForgivenSet,
   leavePeriodsMap,
@@ -164,7 +164,8 @@ function resolveAttendanceDay({
       work_unit = 0;
     }
   } else if (forgot) {
-    const occurrence = forgotCountMap?.get(dateKey) || 0;
+    const occInfo = forgotOccurrenceMap?.get(dateKey);
+    const occurrence = occInfo?.occurrence || 0;
     const r = resolveForgotPenalty(dayStart, occurrence, isSaturday);
     work_unit = Math.max(0, r.work_unit - leaveDeduction);
     penalty_amount = r.penalty_amount;
@@ -235,9 +236,6 @@ async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
 
     const OVERRIDABLE = ["pending", "missed_clock", "absent"];
 
-    // Trạng thái từng buổi: nếu bị phạt (absent do đi muộn/về sớm quá mức) thì "absent",
-    // nếu chỉ đơn thuần thiếu chấm công (không phạt) thì "missed_clock" (Quên chấm),
-    // ngược lại buổi đó có chấm công thật -> "present" (Đi làm).
     const resolvePeriodStatus = (isAbsent, isMissed) => {
       if (isAbsent) return "absent";
       if (isMissed) return "missed_clock";

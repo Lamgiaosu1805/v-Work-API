@@ -19,6 +19,7 @@ function resolveWithinBase(baseDir, relativePath) {
 
 function serveEncryptedFile(req, res) {
   const decoded = decryptFileToken(req.params.token);
+  console.log("Decoded token:", decoded);
   if (!decoded) {
     return res.status(403).json({ message: "Link không hợp lệ hoặc đã hết hạn" });
   }

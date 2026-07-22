@@ -9,6 +9,7 @@ const pushNotification = require("../helpers/pushNotification");
 const { serializePost, serializeComment, signReactions } = require("../helpers/staticUrl");
 const cleanupUploadedFiles = require("../utils/cleanupUploadedFiles");
 const deletePhysicalFile = require("../utils/deletePhysicalFile");
+const { decryptFileToken } = require("../helpers/fileSignature");
 
 async function getAuthorInfo(accountId) {
   const userInfo = await UserInfoModel.findOne({ id_account: accountId });
@@ -241,8 +242,13 @@ const PostController = {
             const parsedKeepImages =
               typeof keep_images === "string" ? JSON.parse(keep_images) : keep_images;
 
-            if (Array.isArray(parsedKeepImages)) {
-              finalImages = post.images.filter((img) => parsedKeepImages.includes(img));
+            const keptPaths = parsedKeepImages
+              .map((img) => decryptFileToken(img.split("/f/").pop()))
+              .filter(Boolean)
+              .map((decoded) => decoded.path);
+
+            if (Array.isArray(keptPaths)) {
+              finalImages = post.images.filter((img) => keptPaths.includes(img));
             }
           } catch (e) {
             finalImages = post.images;

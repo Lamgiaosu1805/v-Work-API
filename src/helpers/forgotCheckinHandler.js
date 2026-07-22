@@ -2,13 +2,19 @@ const moment = require("moment-timezone");
 const { RequestModel } = require("../models/RequestModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
-const ShiftModel = require("../models/ShiftModel");
-const { resolveLeaveConflictOnAttendance } = require("./leaveHandler");
 const {
+  normalizeDayPunches,
+  resolveAttendanceDay,
+  saveAttendanceDay
+} = require("./attendanceHelper");
+const {
+  buildLatePenaltyResolver,
+  buildEarlyPenaltyResolver,
   buildForgotPenaltyResolver,
   buildUnifiedForgotOccurrenceMap
 } = require("./attendancePenalty");
 const { getPayrollPeriodRange } = require("./payrollPeriod");
+const { buildUserDayContext } = require("../jobs/finalizeWorkDay");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -103,15 +109,31 @@ async function computeForgotOccurrence(userId, date, session) {
     leavePeriodsMap.get(key).add(ds.period);
   }
 
+  const requestByDate = new Map(
+    monthRequests.map((r) => [moment.tz(r.date, TZ).format("YYYY-MM-DD"), r])
+  );
+
   const daySnapshots = monthWorksheets.map((ws) => {
     const dateKey = moment.tz(ws.date, TZ).format("YYYY-MM-DD");
     const periods = leavePeriodsMap.get(dateKey);
+    const leaveMorning = !!periods && (periods.has("morning") || periods.has("full"));
+    const leaveAfternoon = !!periods && (periods.has("afternoon") || periods.has("full"));
+    const { checkIn, checkOut } = normalizeDayPunches({
+      machineIn: null,
+      machineOut: null,
+      appIn: ws.check_in ? new Date(ws.check_in) : null,
+      appOut: ws.check_out ? new Date(ws.check_out) : null,
+      forgot: requestByDate.get(dateKey),
+      worksheet: ws,
+      leaveMorning,
+      leaveAfternoon
+    });
     return {
       dateKey,
-      hasIn: !!ws.check_in,
-      hasOut: !!ws.check_out,
-      leaveMorning: !!periods && (periods.has("morning") || periods.has("full")),
-      leaveAfternoon: !!periods && (periods.has("afternoon") || periods.has("full"))
+      hasIn: !!checkIn,
+      hasOut: !!checkOut,
+      leaveMorning,
+      leaveAfternoon
     };
   });
 
@@ -189,7 +211,7 @@ async function onApprove(request, session) {
     clockUpdate.check_out = new Date(request.expected_check_out);
   }
 
-  let worksheet = await WorkSheetModel.findOneAndUpdate(
+  const updated = await WorkSheetModel.findOneAndUpdate(
     {
       user_id: request.user_id,
       date: { $gte: dateStart, $lte: dateEnd },
@@ -199,43 +221,52 @@ async function onApprove(request, session) {
     { session, new: true }
   );
 
-  if (!worksheet) {
-    const [created] = await WorkSheetModel.create(
+  if (!updated) {
+    await WorkSheetModel.create(
       [{ user_id: request.user_id, date: dateStart, shifts: [], ...clockUpdate }],
       { session }
     );
-    worksheet = created;
   }
 
-  if (worksheet.check_in && worksheet.check_out) {
-    const occurrence =
-      request.occurrence ?? (await computeForgotOccurrence(request.user_id, request.date, session));
-    const isSaturday = moment.tz(request.date, TZ).day() === 6;
-    const dayStart = moment.tz(request.date, TZ).startOf("day").toDate();
+  const worksheet = await WorkSheetModel.findOne({
+    user_id: request.user_id,
+    date: { $gte: dateStart, $lte: dateEnd },
+    isDeleted: false
+  })
+    .populate("shifts")
+    .session(session);
 
-    const resolveForgotPenalty = await buildForgotPenaltyResolver();
-    const { work_unit, penalty_amount } = resolveForgotPenalty(dayStart, occurrence, isSaturday);
-    worksheet.work_unit = work_unit;
-    worksheet.penalty_amount = penalty_amount;
-    await worksheet.save({ session });
-  }
+  const dateKey = moment.tz(request.date, TZ).format("YYYY-MM-DD");
+  const { start: periodStart, end: periodEnd } = getPayrollPeriodRange(request.date);
+  const [context, resolveLatePenalty, resolveEarlyPenalty, resolveForgotPenalty] =
+    await Promise.all([
+      buildUserDayContext(
+        request.user_id,
+        dateKey,
+        dateStart,
+        dateEnd,
+        periodStart,
+        periodEnd,
+        session
+      ),
+      buildLatePenaltyResolver(),
+      buildEarlyPenaltyResolver(),
+      buildForgotPenaltyResolver()
+    ]);
 
-  let lastShiftEnd = null;
-  if (worksheet.shifts?.length > 0) {
-    const lastShiftId = worksheet.shifts[worksheet.shifts.length - 1];
-    const lastShift = await ShiftModel.findById(lastShiftId).session(session);
-    lastShiftEnd = lastShift?.end_time ?? null;
-  }
-
-  await resolveLeaveConflictOnAttendance({
-    userId: request.user_id,
-    worksheetId: worksheet._id,
-    date: request.date,
-    checkInTime: worksheet.check_in,
-    checkOutTime: worksheet.check_out,
-    lastShiftEnd,
-    session
+  const computed = resolveAttendanceDay({
+    dateKey,
+    rawIn: worksheet.check_in ? moment.tz(worksheet.check_in, TZ).format("HH:mm") : null,
+    rawOut: worksheet.check_out ? moment.tz(worksheet.check_out, TZ).format("HH:mm") : null,
+    worksheet,
+    ...context,
+    resolveLatePenalty,
+    resolveEarlyPenalty,
+    resolveForgotPenalty
   });
+  if (computed.skip) return;
+
+  await saveAttendanceDay({ userId: request.user_id, dateKey, worksheet, computed, session });
 }
 
 module.exports = { validate, validateAsync, onCreate, onReject, onApprove };

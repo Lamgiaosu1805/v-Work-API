@@ -45,6 +45,72 @@ function parseDayRows(block) {
   return dayRows;
 }
 
+const DEFAULT_SHIFT_START_MINUTES = 480;
+const DEFAULT_SHIFT_END_MINUTES = 1020;
+const NOON_MINUTES = 720;
+const AFTERNOON_START_MINUTES = 780;
+
+function toMinutesOfDay(time) {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function punchClassifyMidpoint(worksheet, leaveMorning, leaveAfternoon) {
+  const shifts = worksheet?.shifts;
+  const firstStart = shifts?.[0]?.start_time;
+  const lastEnd = shifts?.[shifts.length - 1]?.end_time;
+  let start = firstStart ? toMinutesOfDay(firstStart) : DEFAULT_SHIFT_START_MINUTES;
+  let end = lastEnd ? toMinutesOfDay(lastEnd) : DEFAULT_SHIFT_END_MINUTES;
+
+  if (leaveMorning) start = Math.max(start, AFTERNOON_START_MINUTES);
+  if (leaveAfternoon) end = Math.min(end, NOON_MINUTES);
+
+  return (start + end) / 2;
+}
+
+function punchMinutesOfDay(punch) {
+  const m = moment.tz(punch, TZ);
+  return m.hours() * 60 + m.minutes();
+}
+
+function normalizeDayPunches({
+  machineIn,
+  machineOut,
+  appIn,
+  appOut,
+  forgot,
+  worksheet,
+  leaveMorning = false,
+  leaveAfternoon = false
+}) {
+  let checkIn = machineIn && appIn ? new Date(Math.min(machineIn, appIn)) : machineIn || appIn;
+  let checkOut =
+    machineOut && appOut ? new Date(Math.max(machineOut, appOut)) : machineOut || appOut;
+
+  if (forgot) {
+    if (forgot.type === "check_in" || forgot.type === "both") checkIn = worksheet?.check_in;
+    if (forgot.type === "check_out" || forgot.type === "both") checkOut = worksheet?.check_out;
+  }
+
+  if (checkIn && checkOut && new Date(checkOut) <= new Date(checkIn)) {
+    checkIn = new Date(Math.min(new Date(checkIn), new Date(checkOut)));
+    checkOut = null;
+  }
+
+  if (!forgot && !!checkIn !== !!checkOut) {
+    const midpoint = punchClassifyMidpoint(worksheet, leaveMorning, leaveAfternoon);
+    const single = checkIn || checkOut;
+    const isAfterMidpoint = punchMinutesOfDay(single) > midpoint;
+    checkIn = isAfterMidpoint ? null : single;
+    checkOut = isAfterMidpoint ? single : null;
+  }
+
+  return {
+    checkIn: checkIn ? new Date(checkIn) : null,
+    checkOut: checkOut ? new Date(checkOut) : null
+  };
+}
+
 function resolveAttendanceDay({
   dateKey,
   rawIn,
@@ -77,19 +143,21 @@ function resolveAttendanceDay({
   const appIn = worksheet.check_in ? new Date(worksheet.check_in) : null;
   const appOut = worksheet.check_out ? new Date(worksheet.check_out) : null;
 
-  let newCheckIn = machineIn && appIn ? new Date(Math.min(machineIn, appIn)) : machineIn || appIn;
-  let newCheckOut =
-    machineOut && appOut ? new Date(Math.max(machineOut, appOut)) : machineOut || appOut;
-  if (forgot) {
-    if (forgot.type === "check_in" || forgot.type === "both") newCheckIn = worksheet.check_in;
-    if (forgot.type === "check_out" || forgot.type === "both") newCheckOut = worksheet.check_out;
-  }
+  const leavePeriods = leavePeriodsMap?.get(dateKey);
+  let leaveMorning = !!leavePeriods && (leavePeriods.has("morning") || leavePeriods.has("full"));
+  let leaveAfternoon =
+    !!leavePeriods && (leavePeriods.has("afternoon") || leavePeriods.has("full"));
 
-  const MIN_GAP_MINUTES = 120;
-  if (newCheckIn && newCheckOut) {
-    const gapMinutes = (new Date(newCheckOut) - new Date(newCheckIn)) / 60000;
-    if (gapMinutes < MIN_GAP_MINUTES) newCheckOut = null;
-  }
+  const { checkIn: newCheckIn, checkOut: newCheckOut } = normalizeDayPunches({
+    machineIn,
+    machineOut,
+    appIn,
+    appOut,
+    forgot,
+    worksheet,
+    leaveMorning,
+    leaveAfternoon
+  });
 
   const hasIn = !!newCheckIn;
   const hasOut = !!newCheckOut;
@@ -103,11 +171,6 @@ function resolveAttendanceDay({
     const lastShift = worksheet.shifts[worksheet.shifts.length - 1];
     lastShiftEnd = lastShift?.end_time ?? null;
   }
-
-  const leavePeriods = leavePeriodsMap?.get(dateKey);
-  let leaveMorning = !!leavePeriods && (leavePeriods.has("morning") || leavePeriods.has("full"));
-  let leaveAfternoon =
-    !!leavePeriods && (leavePeriods.has("afternoon") || leavePeriods.has("full"));
   if (hasIn && hasOut) {
     if (leaveMorning) {
       const noon = moment.tz(dateKey, TZ).hour(12).minute(0).second(0);
@@ -130,6 +193,10 @@ function resolveAttendanceDay({
   );
   const missedIn = !hasIn && !leaveMorning;
   const missedOut = !hasOut && !leaveAfternoon;
+  const forgotCoversIn = !!forgot && (forgot.type === "check_in" || forgot.type === "both");
+  const forgotCoversOut = !!forgot && (forgot.type === "check_out" || forgot.type === "both");
+  const statusMissedIn = missedIn || forgotCoversIn;
+  const statusMissedOut = missedOut || forgotCoversOut;
 
   let minutesLate = 0;
   const firstShift = worksheet.shifts && worksheet.shifts[0];
@@ -138,7 +205,6 @@ function resolveAttendanceDay({
     const shiftStart = moment.tz(dateKey, TZ).hour(sh).minute(sm).second(0);
     minutesLate = Math.max(0, Math.floor((moment.tz(newCheckIn, TZ) - shiftStart) / 60000));
   }
-  if (forgiven) minutesLate = 0;
 
   let minutesEarly = 0;
   if (hasOut && !leaveAfternoon && lastShiftEnd) {
@@ -147,31 +213,24 @@ function resolveAttendanceDay({
     minutesEarly = Math.max(0, Math.floor((shiftEnd - moment.tz(newCheckOut, TZ)) / 60000));
   }
   const earlyForgiven = earlyForgivenSet.has(dateKey);
-  if (earlyForgiven) minutesEarly = 0;
+
+  const penaltyLateMinutes = forgiven ? 0 : minutesLate;
+  const penaltyEarlyMinutes = earlyForgiven ? 0 : minutesEarly;
 
   let work_unit;
   let penalty_amount = 0;
   let morning_absent = false;
   let afternoon_absent = false;
-  if (missedIn || missedOut) {
+  if (missedIn || missedOut || forgot) {
     const occInfo = forgotOccurrenceMap?.get(dateKey);
-    if (occInfo && !occInfo.hasRequest) {
-      const base = isSaturday ? 0.5 : 1;
-      work_unit = Math.max(0, base / 2 - leaveDeduction);
-      const r = resolveForgotPenalty(dayStart, occInfo.occurrence || 0, isSaturday);
-      penalty_amount = r.penalty_amount;
-    } else {
-      work_unit = 0;
-    }
-  } else if (forgot) {
-    const occInfo = forgotOccurrenceMap?.get(dateKey);
-    const occurrence = occInfo?.occurrence || 0;
-    const r = resolveForgotPenalty(dayStart, occurrence, isSaturday);
-    work_unit = Math.max(0, r.work_unit - leaveDeduction);
+    const hasRequest = occInfo ? occInfo.hasRequest : !!forgot;
+    const base = isSaturday ? 0.5 : 1;
+    const r = resolveForgotPenalty(dayStart, occInfo?.occurrence || 0, isSaturday);
+    work_unit = Math.max(0, (hasRequest ? r.work_unit : base / 2) - leaveDeduction);
     penalty_amount = r.penalty_amount;
   } else {
-    const lateResult = resolveLatePenalty(dayStart, minutesLate, isSaturday);
-    const earlyResult = resolveEarlyPenalty(dayStart, minutesEarly, isSaturday);
+    const lateResult = resolveLatePenalty(dayStart, penaltyLateMinutes, isSaturday);
+    const earlyResult = resolveEarlyPenalty(dayStart, penaltyEarlyMinutes, isSaturday);
     work_unit = Math.max(0, Math.min(lateResult.work_unit, earlyResult.work_unit) - leaveDeduction);
     penalty_amount = lateResult.penalty_amount + earlyResult.penalty_amount;
     morning_absent = lateResult.morning_absent;
@@ -187,7 +246,6 @@ function resolveAttendanceDay({
     (worksheet.minute_early ?? 0) === minutesEarly &&
     (worksheet.work_unit ?? null) === work_unit &&
     (worksheet.penalty_amount ?? 0) === penalty_amount;
-  if (unchanged) return { skip: true, unchanged: true };
 
   worksheet.check_in = newCheckIn;
   worksheet.check_out = newCheckOut;
@@ -198,6 +256,7 @@ function resolveAttendanceDay({
 
   return {
     skip: false,
+    unchanged,
     newCheckIn,
     newCheckOut,
     minutesLate,
@@ -210,106 +269,117 @@ function resolveAttendanceDay({
     hasOut,
     missedIn,
     missedOut,
+    statusMissedIn,
+    statusMissedOut,
     lastShiftEnd
   };
 }
 
-async function saveAttendanceDay({ userId, dateKey, worksheet, computed }) {
+async function persistAttendanceDay({ userId, dateKey, worksheet, computed, session }) {
   const dateMoment = moment.tz(dateKey, TZ).startOf("day");
   const dayStart = dateMoment.toDate();
   const dayEnd = moment(dateMoment).add(1, "day").toDate();
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    await worksheet.save({ session });
+  await worksheet.save({ session });
 
-    await resolveLeaveConflictOnAttendance({
-      userId,
-      worksheetId: worksheet._id,
-      date: dateKey,
-      checkInTime: computed.newCheckIn,
-      checkOutTime: computed.newCheckOut,
-      lastShiftEnd: computed.lastShiftEnd,
-      session
-    });
+  await resolveLeaveConflictOnAttendance({
+    userId,
+    worksheetId: worksheet._id,
+    date: dateKey,
+    checkInTime: computed.newCheckIn,
+    checkOutTime: computed.newCheckOut,
+    lastShiftEnd: computed.lastShiftEnd,
+    session
+  });
 
-    const OVERRIDABLE = ["pending", "missed_clock", "absent"];
+  const OVERRIDABLE = ["pending", "missed_clock", "absent", "present"];
 
-    // Trạng thái từng buổi: nếu bị phạt (absent do đi muộn/về sớm quá mức) thì "absent",
-    // nếu chỉ đơn thuần thiếu chấm công (không phạt) thì "missed_clock" (Quên chấm),
-    // ngược lại buổi đó có chấm công thật -> "present" (Đi làm).
-    const resolvePeriodStatus = (isAbsent, isMissed) => {
-      if (isAbsent) return "absent";
-      if (isMissed) return "missed_clock";
-      return "present";
-    };
-    const morningStatus = resolvePeriodStatus(computed.morning_absent, computed.missedIn);
-    const afternoonStatus = resolvePeriodStatus(computed.afternoon_absent, computed.missedOut);
+  const resolvePeriodStatus = (isAbsent, isMissed) => {
+    if (isAbsent) return "absent";
+    if (isMissed) return "missed_clock";
+    return "present";
+  };
+  const morningStatus = resolvePeriodStatus(
+    computed.morning_absent,
+    computed.statusMissedIn ?? computed.missedIn
+  );
+  const afternoonStatus = resolvePeriodStatus(
+    computed.afternoon_absent,
+    computed.statusMissedOut ?? computed.missedOut
+  );
 
-    if (morningStatus === afternoonStatus) {
-      // Cả ngày cùng 1 trạng thái -> giữ 1 doc period "full"
-      const newStatus = morningStatus;
-      const result = await WorkDayStatusModel.updateMany(
+  if (morningStatus === afternoonStatus) {
+    const newStatus = morningStatus;
+    const result = await WorkDayStatusModel.updateMany(
+      {
+        user_id: userId,
+        date: { $gte: dayStart, $lt: dayEnd },
+        status: { $in: OVERRIDABLE },
+        isDeleted: false
+      },
+      { status: newStatus },
+      { session }
+    );
+    if (result.matchedCount === 0) {
+      await WorkDayStatusModel.updateOne(
+        { user_id: userId, date: dayStart, period: "full" },
         {
-          user_id: userId,
-          date: { $gte: dayStart, $lt: dayEnd },
-          status: { $in: OVERRIDABLE },
-          isDeleted: false
+          $set: { status: newStatus },
+          $setOnInsert: {
+            worksheet_id: worksheet._id,
+            sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
+            isDeleted: false
+          }
         },
-        { status: newStatus },
-        { session }
+        { upsert: true, session }
       );
-      if (result.matchedCount === 0) {
-        await WorkDayStatusModel.updateOne(
-          { user_id: userId, date: dayStart, period: "full" },
-          {
-            $set: { status: newStatus },
-            $setOnInsert: {
-              worksheet_id: worksheet._id,
-              sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
-              isDeleted: false
-            }
-          },
-          { upsert: true, session }
-        );
-      }
-    } else {
-      // Khác trạng thái theo buổi -> tách 2 doc "morning"/"afternoon"
-      await WorkDayStatusModel.deleteMany(
-        {
-          user_id: userId,
-          date: { $gte: dayStart, $lt: dayEnd },
-          status: { $in: OVERRIDABLE }
-        },
-        { session }
-      );
-      const periodStatuses = [
-        ["morning", morningStatus],
-        ["afternoon", afternoonStatus]
-      ];
-      for (const [period, st] of periodStatuses) {
-        await WorkDayStatusModel.updateOne(
-          { user_id: userId, date: dayStart, period },
-          {
-            $setOnInsert: {
-              worksheet_id: worksheet._id,
-              status: st,
-              sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
-              isDeleted: false
-            }
-          },
-          { upsert: true, session }
-        );
-      }
     }
+  } else {
+    await WorkDayStatusModel.deleteMany(
+      {
+        user_id: userId,
+        date: { $gte: dayStart, $lt: dayEnd },
+        status: { $in: OVERRIDABLE }
+      },
+      { session }
+    );
+    const periodStatuses = [
+      ["morning", morningStatus],
+      ["afternoon", afternoonStatus]
+    ];
+    for (const [period, st] of periodStatuses) {
+      await WorkDayStatusModel.updateOne(
+        { user_id: userId, date: dayStart, period },
+        {
+          $setOnInsert: {
+            worksheet_id: worksheet._id,
+            status: st,
+            sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
+            isDeleted: false
+          }
+        },
+        { upsert: true, session }
+      );
+    }
+  }
+}
 
-    await session.commitTransaction();
+async function saveAttendanceDay({ userId, dateKey, worksheet, computed, session = null }) {
+  if (session) {
+    await persistAttendanceDay({ userId, dateKey, worksheet, computed, session });
+    return;
+  }
+
+  const ownSession = await mongoose.startSession();
+  ownSession.startTransaction();
+  try {
+    await persistAttendanceDay({ userId, dateKey, worksheet, computed, session: ownSession });
+    await ownSession.commitTransaction();
   } catch (e) {
-    await session.abortTransaction();
+    await ownSession.abortTransaction();
     throw e;
   } finally {
-    session.endSession();
+    ownSession.endSession();
   }
 }
 
@@ -347,6 +417,7 @@ function correctDayStatuses(statuses, ws) {
 module.exports = {
   parseExcelToBlocks,
   parseDayRows,
+  normalizeDayPunches,
   resolveAttendanceDay,
   saveAttendanceDay,
   correctDayStatuses

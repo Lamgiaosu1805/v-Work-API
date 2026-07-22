@@ -356,7 +356,8 @@ const RequestController = {
       const needsMultiApproval =
         action === "approve" &&
         ((preCheck.request_type === "leave" && preCheck.total_days > 3) ||
-          (preCheck.request_type === "forgot_checkin" && (preCheck.occurrence ?? 0) >= 6));
+          (preCheck.request_type === "forgot_checkin" && (preCheck.occurrence ?? 0) >= 6) ||
+          (preCheck.request_type === "late_early" && (preCheck.occurrence ?? 0) >= 4));
 
       if (needsMultiApproval) release = await acquireRequestReviewLock(id);
 
@@ -434,7 +435,7 @@ const RequestController = {
         }
 
         if (
-          request.request_type === "forgot_checkin" &&
+          ["forgot_checkin", "late_early"].includes(request.request_type) &&
           request.approvals.length === 0 &&
           !canReviewAll
         ) {

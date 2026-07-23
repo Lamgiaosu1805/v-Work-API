@@ -1146,6 +1146,39 @@ const CustomerController = {
         return res.status(400).json({ message: "Tối đa 500 khách hàng mỗi lần" });
       }
 
+      const invalidItems = [];
+      customers.forEach((item, index) => {
+        if (!item.phone_number || !item.external_id) {
+          invalidItems.push({
+            index,
+            phone_number: item.phone_number ?? null,
+            reason: "Thiếu phone_number hoặc external_id"
+          });
+          return;
+        }
+        if (!item.created_at) {
+          invalidItems.push({ index, phone_number: item.phone_number, reason: "Thiếu created_at" });
+          return;
+        }
+        if (Number.isNaN(new Date(item.created_at).getTime())) {
+          invalidItems.push({
+            index,
+            phone_number: item.phone_number,
+            reason: `created_at không hợp lệ: ${item.created_at}`
+          });
+        }
+      });
+
+      if (invalidItems.length > 0) {
+        console.error("[BULK_UPSERT_VALIDATION_FAILED]", JSON.stringify(invalidItems));
+        // 422: request đúng format JSON nhưng dữ liệu nghiệp vụ không hợp lệ
+        return res.status(422).json({
+          message: `Batch bị từ chối: ${invalidItems.length}/${customers.length} item thiếu hoặc sai created_at`,
+          invalid_count: invalidItems.length,
+          invalid_items: invalidItems
+        });
+      }
+
       const app = await AppModel.findOne({ code: app_code, is_active: true });
       if (!app) {
         return res.status(404).json({ message: "App không tồn tại" });
@@ -1177,7 +1210,7 @@ const CustomerController = {
           });
 
           if (existing) {
-            const customRegisteredAt = item.created_at ? new Date(item.created_at) : null;
+            const customRegisteredAt = item.created_at ? new Date(item.created_at) : new Date();
             const isValidDate = customRegisteredAt && !Number.isNaN(customRegisteredAt.getTime());
             const isDifferent =
               isValidDate && existing.registeredAt?.getTime() !== customRegisteredAt.getTime();
@@ -1217,7 +1250,7 @@ const CustomerController = {
             agent_id: null,
             source_type: "marketing",
             status: item.is_kyc ? "kyc_verified" : "registered",
-            registeredAt: isValidRegisteredAt ? customRegisteredAt : null,
+            registeredAt: isValidRegisteredAt ? customRegisteredAt : new Date(),
             identity: item.is_kyc
               ? {
                   full_name: item.full_name ?? null,

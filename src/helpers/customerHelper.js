@@ -99,6 +99,11 @@ async function buildCustomerPipeline(req, query) {
   const pipeline = [
     { $match: initialMatch },
     {
+      $addFields: {
+        effective_registered_at: { $ifNull: ["$registeredAt", "$createdAt"] }
+      }
+    },
+    {
       $lookup: {
         from: InvestmentModel.collection.name,
         let: { customerId: "$_id" },
@@ -252,7 +257,7 @@ async function buildCustomerPipeline(req, query) {
     }
     const eventMatches = [];
     if (!funnelStatuses.length || funnelStatuses.includes("not_kyc"))
-      eventMatches.push({ registeredAt: dateCondition });
+      eventMatches.push({ effective_registered_at: dateCondition });
     if (funnelStatuses.includes("kyc_verified"))
       eventMatches.push({ "identity.verified_at": dateCondition });
     if (funnelStatuses.includes("kyc_verified_no_investment"))

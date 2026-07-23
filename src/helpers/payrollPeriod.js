@@ -16,4 +16,45 @@ function getPayrollPeriodRange(refDate) {
   };
 }
 
-module.exports = { getPayrollPeriodRange };
+function calcStandardWorkUnits({ periodStart, periodEnd, holidays = [], branchId = null }) {
+  const applicableHolidays = holidays.filter((h) => {
+    if (h.scope_type === "all") return true;
+    return branchId && h.branches.some((b) => b.toString() === branchId.toString());
+  });
+
+  const holidayMap = new Map();
+  for (const h of applicableHolidays) {
+    holidayMap.set(moment.tz(h.date, TZ).format("YYYY-MM-DD"), h.duration_days ?? 1);
+  }
+
+  let weekdays = 0;
+  let saturdays = 0;
+  let holidayDeduction = 0;
+
+  const cursor = moment.tz(periodStart, TZ).clone().startOf("day");
+  const end = moment.tz(periodEnd, TZ);
+  while (cursor.isSameOrBefore(end, "day")) {
+    const day = cursor.day();
+    if (day !== 0) {
+      const key = cursor.format("YYYY-MM-DD");
+      if (holidayMap.has(key)) {
+        holidayDeduction += day === 6 ? 0.5 : holidayMap.get(key);
+      } else if (day === 6) {
+        saturdays++;
+      } else {
+        weekdays++;
+      }
+    }
+    cursor.add(1, "day");
+  }
+
+  return {
+    standard_work_units: weekdays * 1 + saturdays * 0.5,
+    weekdays,
+    saturdays,
+    holiday_count: applicableHolidays.length,
+    holiday_deduction: holidayDeduction
+  };
+}
+
+module.exports = { getPayrollPeriodRange, calcStandardWorkUnits };

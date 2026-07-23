@@ -59,7 +59,11 @@ function registerWeeklyReportJobs() {
         const pendingDeptIds = [];
 
         for (const dept of departments) {
-          let report = await WeeklyReportModel.findOne({ department: dept._id, weekStart });
+          let report = await WeeklyReportModel.findOne({
+            department: dept._id,
+            weekStart,
+            isDeleted: false
+          });
 
           if (!report) {
             report = await WeeklyReportModel.create({
@@ -106,7 +110,8 @@ function registerWeeklyReportJobs() {
         const weekStart = getWeekStart();
         const pendingReports = await WeeklyReportModel.find({
           weekStart,
-          status: "pending"
+          status: "pending",
+          isDeleted: false
         }).select("department");
 
         if (pendingReports.length === 0) {
@@ -114,7 +119,10 @@ function registerWeeklyReportJobs() {
           return;
         }
 
-        await WeeklyReportModel.updateMany({ weekStart, status: "pending" }, { status: "missing" });
+        await WeeklyReportModel.updateMany(
+          { weekStart, status: "pending", isDeleted: false },
+          { status: "missing" }
+        );
 
         // Thông báo các phòng ban bị đánh missing
         await Promise.allSettled(

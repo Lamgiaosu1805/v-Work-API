@@ -9,55 +9,77 @@ const {
   buildForgotPenaltyResolver,
   buildUnifiedForgotOccurrenceMap
 } = require("../helpers/attendancePenalty");
-const { resolveAttendanceDay, saveAttendanceDay } = require("../helpers/attendanceHelper");
+const {
+  normalizeDayPunches,
+  resolveAttendanceDay,
+  saveAttendanceDay
+} = require("../helpers/attendanceHelper");
+const { getPayrollPeriodRange } = require("../helpers/payrollPeriod");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
 // Build context (forgotMap, forgotOccurrenceMap, lateForgivenSet, earlyForgivenSet, leavePeriodsMap)
 // cho 1 nhân viên trong ngày hôm nay, cùng cách importExcel đang load, để resolveAttendanceDay/
 // saveAttendanceDay tính đúng status/work_unit y hệt luồng import.
-async function buildUserDayContext(userId, dateKey, todayStart, todayEnd, monthStart, monthEnd) {
-  const [monthWorksheets, forgotReqs, lateReqs, earlyReqs, leaveStatuses] = await Promise.all([
-    WorkSheetModel.find({
-      user_id: userId,
-      date: { $gte: monthStart, $lte: monthEnd },
-      isDeleted: false
-    }),
-    RequestModel.find({
-      user_id: userId,
-      request_type: "forgot_checkin",
-      status: "approved",
-      isDeleted: false,
-      date: { $gte: monthStart, $lte: monthEnd }
-    }).sort({ date: 1 }),
-    RequestModel.find({
-      user_id: userId,
-      request_type: "late_early",
-      type: "late",
-      status: "approved",
-      isDeleted: false,
-      date: { $gte: todayStart, $lte: todayEnd }
-    }),
-    RequestModel.find({
-      user_id: userId,
-      request_type: "late_early",
-      type: "early_out",
-      status: "approved",
-      isDeleted: false,
-      date: { $gte: todayStart, $lte: todayEnd }
-    }),
-    WorkDayStatusModel.find({
-      user_id: userId,
-      date: { $gte: todayStart, $lte: todayEnd },
-      status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
-      isDeleted: false
-    })
-  ]);
+async function buildUserDayContext(
+  userId,
+  dateKey,
+  todayStart,
+  todayEnd,
+  periodStart,
+  periodEnd,
+  session = null
+) {
+  const [monthWorksheets, forgotReqs, lateReqs, earlyReqs, leaveStatuses, monthLeaveStatuses] =
+    await Promise.all([
+      WorkSheetModel.find({
+        user_id: userId,
+        date: { $gte: periodStart, $lte: periodEnd },
+        isDeleted: false
+      }).session(session),
+      RequestModel.find({
+        user_id: userId,
+        request_type: "forgot_checkin",
+        status: "approved",
+        isDeleted: false,
+        date: { $gte: periodStart, $lte: periodEnd }
+      })
+        .sort({ date: 1 })
+        .session(session),
+      RequestModel.find({
+        user_id: userId,
+        request_type: "late_early",
+        type: "late",
+        status: "approved",
+        isDeleted: false,
+        date: { $gte: todayStart, $lte: todayEnd }
+      }).session(session),
+      RequestModel.find({
+        user_id: userId,
+        request_type: "late_early",
+        type: "early_out",
+        status: "approved",
+        isDeleted: false,
+        date: { $gte: todayStart, $lte: todayEnd }
+      }).session(session),
+      WorkDayStatusModel.find({
+        user_id: userId,
+        date: { $gte: todayStart, $lte: todayEnd },
+        status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
+        isDeleted: false
+      }).session(session),
+      WorkDayStatusModel.find({
+        user_id: userId,
+        date: { $gte: periodStart, $lte: periodEnd },
+        status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
+        isDeleted: false
+      }).session(session)
+    ]);
 
   const forgotMap = new Map(forgotReqs.map((r) => [moment.tz(r.date, TZ).format("YYYY-MM-DD"), r]));
 
   const monthLeavePeriodsMap = new Map();
-  for (const ds of leaveStatuses) {
+  for (const ds of monthLeaveStatuses) {
     const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
     if (!monthLeavePeriodsMap.has(key)) monthLeavePeriodsMap.set(key, new Set());
     monthLeavePeriodsMap.get(key).add(ds.period);
@@ -66,16 +88,26 @@ async function buildUserDayContext(userId, dateKey, todayStart, todayEnd, monthS
   const daySnapshots = [];
   for (const ws of monthWorksheets) {
     const wsDateKey = moment.tz(ws.date, TZ).format("YYYY-MM-DD");
-    const hasIn = !!ws.check_in;
-    const hasOut = !!ws.check_out;
-    if (!hasIn && !hasOut) continue;
     const periods = monthLeavePeriodsMap.get(wsDateKey);
+    const leaveMorning = !!periods && (periods.has("morning") || periods.has("full"));
+    const leaveAfternoon = !!periods && (periods.has("afternoon") || periods.has("full"));
+    const { checkIn, checkOut } = normalizeDayPunches({
+      machineIn: null,
+      machineOut: null,
+      appIn: ws.check_in ? new Date(ws.check_in) : null,
+      appOut: ws.check_out ? new Date(ws.check_out) : null,
+      forgot: forgotMap.get(wsDateKey),
+      worksheet: ws,
+      leaveMorning,
+      leaveAfternoon
+    });
+    if (!checkIn && !checkOut) continue;
     daySnapshots.push({
       dateKey: wsDateKey,
-      hasIn,
-      hasOut,
-      leaveMorning: !!periods && (periods.has("morning") || periods.has("full")),
-      leaveAfternoon: !!periods && (periods.has("afternoon") || periods.has("full"))
+      hasIn: !!checkIn,
+      hasOut: !!checkOut,
+      leaveMorning,
+      leaveAfternoon
     });
   }
 
@@ -99,16 +131,15 @@ async function buildUserDayContext(userId, dateKey, todayStart, todayEnd, monthS
   return { forgotMap, forgotOccurrenceMap, lateForgivenSet, earlyForgivenSet, leavePeriodsMap };
 }
 
-async function finalizeWorkDay() {
+async function finalizeWorkDay(targetDate = null) {
   try {
-    const now = moment.tz(TZ);
+    const now = targetDate ? moment.tz(targetDate, TZ) : moment.tz(TZ);
     const todayStart = now.clone().startOf("day");
     const todayEnd = now.clone().endOf("day");
     const dateKey = todayStart.format("YYYY-MM-DD");
     const today = todayStart.toDate();
     const tomorrow = todayStart.clone().add(1, "day").toDate();
-    const monthStart = todayStart.clone().startOf("month");
-    const monthEnd = todayStart.clone().endOf("month");
+    const { start: periodStart, end: periodEnd } = getPayrollPeriodRange(today);
 
     console.log(`[Cron] finalizeWorkDay: ${todayStart.format("DD/MM/YYYY")}`);
 
@@ -138,8 +169,8 @@ async function finalizeWorkDay() {
           dateKey,
           todayStart.toDate(),
           todayEnd.toDate(),
-          monthStart.toDate(),
-          monthEnd.toDate()
+          periodStart,
+          periodEnd
         );
 
         const rawIn = worksheet.check_in ? moment.tz(worksheet.check_in, TZ).format("HH:mm") : null;
@@ -164,7 +195,7 @@ async function finalizeWorkDay() {
         if (computed.skip) continue;
 
         await saveAttendanceDay({ userId: worksheet.user_id, dateKey, worksheet, computed });
-        finalized++;
+        if (!computed.unchanged) finalized++;
       } catch (e) {
         console.error(`[Cron] finalizeWorkDay lỗi user ${worksheet.user_id}:`, e);
         failed++;
@@ -194,4 +225,4 @@ function registerFinalizeWorkDayJob() {
   );
 }
 
-module.exports = { finalizeWorkDay, registerFinalizeWorkDayJob };
+module.exports = { finalizeWorkDay, buildUserDayContext, registerFinalizeWorkDayJob };

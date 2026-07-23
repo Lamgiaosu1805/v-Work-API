@@ -23,11 +23,12 @@ const {
 const {
   parseExcelToBlocks,
   parseDayRows,
+  normalizeDayPunches,
   resolveAttendanceDay,
   saveAttendanceDay,
   correctDayStatuses
 } = require("../helpers/attendanceHelper");
-const { getPayrollPeriodRange } = require("../helpers/payrollPeriod");
+const { getPayrollPeriodRange, calcStandardWorkUnits } = require("../helpers/payrollPeriod");
 
 const AttendanceController = {
   getAllowedWifiLocations: async (req, res) => {
@@ -175,10 +176,7 @@ const AttendanceController = {
         .tz(today, "Asia/Ho_Chi_Minh")
         .hour(firstStartH)
         .minute(firstStartM);
-      const lateMinutes = Math.max(
-        0,
-        Math.floor((now - firstShiftStart) / 60000) - firstShift.late_allowance_minutes
-      );
+      const lateMinutes = Math.max(0, Math.floor((now - firstShiftStart) / 60000));
 
       worksheet.check_in = now.toDate();
       worksheet.minutes_late = lateMinutes;
@@ -598,7 +596,7 @@ const AttendanceController = {
           return res.status(403).json({ message: "Bạn không có quyền xem nhân viên này" });
       }
 
-      const [worksheets, dayStatuses, requests, forgotRequests] = await Promise.all([
+      const [worksheets, dayStatuses, holidays, requests, forgotRequests] = await Promise.all([
         WorkSheetModel.find({
           user_id: userInfo._id,
           date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
@@ -606,6 +604,10 @@ const AttendanceController = {
         }),
         WorkDayStatusModel.find({
           user_id: userInfo._id,
+          date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+          isDeleted: false
+        }),
+        HolidayModel.find({
           date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
           isDeleted: false
         }),
@@ -720,7 +722,7 @@ const AttendanceController = {
         for (const s of statuses) {
           const w = s.period === "full" ? 1 : 0.5;
           if (s.status === "present") present_days += w;
-          else if (s.status === "missed_clock") missed_clock_days += w;
+          else if (s.status === "missed_clock") missed_clock_days += 1;
           else if (s.status === "absent") absent_days += w;
           else if (s.status === "leave_paid") leave_paid_days += w;
           else if (s.status === "leave_unpaid") leave_unpaid_days += w;
@@ -825,6 +827,12 @@ const AttendanceController = {
           leave_balance: Math.max(0, await getLeaveBalance(userInfo._id))
         },
         summary: {
+          standard_work_units: calcStandardWorkUnits({
+            periodStart,
+            periodEnd,
+            holidays,
+            branchId: userInfo.branch_id
+          }).standard_work_units,
           work_unit_total,
           work_unit_official,
           work_unit_probation,
@@ -928,7 +936,7 @@ const AttendanceController = {
       const totalUsers = await UserInfoModel.countDocuments(userFilter);
       const users = await UserInfoModel.find(
         userFilter,
-        "ma_nv full_name probation_end_date employment_type"
+        "ma_nv full_name probation_end_date employment_type branch_id"
       )
         .sort({ ma_nv: 1 })
         .skip((page - 1) * limit)
@@ -936,7 +944,7 @@ const AttendanceController = {
 
       const userIds = users.map((u) => u._id);
 
-      const [worksheets, dayStatuses] = await Promise.all([
+      const [worksheets, dayStatuses, holidays] = await Promise.all([
         WorkSheetModel.find({
           user_id: { $in: userIds },
           date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
@@ -946,8 +954,25 @@ const AttendanceController = {
           user_id: { $in: userIds },
           date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
           isDeleted: false
+        }),
+        HolidayModel.find({
+          date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
+          isDeleted: false
         })
       ]);
+
+      const standardUnitsByBranch = new Map();
+      const standardUnitsForBranch = (branchId) => {
+        const key = branchId ? branchId.toString() : "";
+        if (!standardUnitsByBranch.has(key)) {
+          standardUnitsByBranch.set(
+            key,
+            calcStandardWorkUnits({ periodStart, periodEnd, holidays, branchId })
+              .standard_work_units
+          );
+        }
+        return standardUnitsByBranch.get(key);
+      };
 
       const wsByUser = new Map();
       for (const ws of worksheets) {
@@ -1021,7 +1046,8 @@ const AttendanceController = {
           for (const s of corrected) {
             const w = s.period === "full" ? 1 : 0.5;
             if (s.status === "present") present_days += w;
-            else if (s.status === "missed_clock") missed_clock_days += w;
+            // "Quên chấm" đếm theo SỐ LẦN (nguyên), không theo trọng số buổi — mỗi buổi/ngày quên = 1.
+            else if (s.status === "missed_clock") missed_clock_days += 1;
             else if (s.status === "absent") absent_days += w;
             else if (s.status === "leave_paid") leave_paid_days += w;
             else if (s.status === "leave_unpaid") leave_unpaid_days += w;
@@ -1039,6 +1065,7 @@ const AttendanceController = {
           probation_end_date: u.probation_end_date
             ? moment.tz(u.probation_end_date, TZ).format("DD/MM/YYYY")
             : null,
+          standard_work_units: standardUnitsForBranch(u.branch_id),
           work_unit_total,
           work_unit_official,
           work_unit_probation,
@@ -1286,32 +1313,32 @@ const AttendanceController = {
           for (const dateKey of allDateKeys) {
             const ws = monthWorksheetMap.get(dateKey);
             const excelRow = excelRawMap.get(dateKey);
-            const forgotReq = forgotMap.get(dateKey);
-
-            const machineIn = excelRow?.rawIn
-              ? moment.tz(`${dateKey} ${excelRow.rawIn}`, "YYYY-MM-DD HH:mm", TZ).toDate()
-              : null;
-            const machineOut = excelRow?.rawOut
-              ? moment.tz(`${dateKey} ${excelRow.rawOut}`, "YYYY-MM-DD HH:mm", TZ).toDate()
-              : null;
-            const appIn = ws?.check_in ? new Date(ws.check_in) : null;
-            const appOut = ws?.check_out ? new Date(ws.check_out) : null;
-
-            let hasIn = !!(machineIn || appIn);
-            let hasOut = !!(machineOut || appOut);
-            if (forgotReq) {
-              if (forgotReq.type === "check_in" || forgotReq.type === "both") hasIn = true;
-              if (forgotReq.type === "check_out" || forgotReq.type === "both") hasOut = true;
-            }
-            if (!hasIn && !hasOut) continue;
-
             const periods = monthLeavePeriodsMap.get(dateKey);
+            const leaveMorning = !!periods && (periods.has("morning") || periods.has("full"));
+            const leaveAfternoon = !!periods && (periods.has("afternoon") || periods.has("full"));
+
+            const { checkIn, checkOut } = normalizeDayPunches({
+              machineIn: excelRow?.rawIn
+                ? moment.tz(`${dateKey} ${excelRow.rawIn}`, "YYYY-MM-DD HH:mm", TZ).toDate()
+                : null,
+              machineOut: excelRow?.rawOut
+                ? moment.tz(`${dateKey} ${excelRow.rawOut}`, "YYYY-MM-DD HH:mm", TZ).toDate()
+                : null,
+              appIn: ws?.check_in ? new Date(ws.check_in) : null,
+              appOut: ws?.check_out ? new Date(ws.check_out) : null,
+              forgot: forgotMap.get(dateKey),
+              worksheet: ws,
+              leaveMorning,
+              leaveAfternoon
+            });
+            if (!checkIn && !checkOut) continue;
+
             daySnapshots.push({
               dateKey,
-              hasIn,
-              hasOut,
-              leaveMorning: !!periods && (periods.has("morning") || periods.has("full")),
-              leaveAfternoon: !!periods && (periods.has("afternoon") || periods.has("full"))
+              hasIn: !!checkIn,
+              hasOut: !!checkOut,
+              leaveMorning,
+              leaveAfternoon
             });
           }
 
@@ -1369,14 +1396,14 @@ const AttendanceController = {
             resolveForgotPenalty
           });
           if (computed.skip) {
-            if (computed.unchanged) unchanged++;
-            else skipped++;
+            skipped++;
             continue;
           }
 
           try {
             await saveAttendanceDay({ userId, dateKey, worksheet, computed });
-            imported++;
+            if (computed.unchanged) unchanged++;
+            else imported++;
           } catch (e) {
             console.error(`[importExcel] Lỗi ngày ${dateStr} (mã ${block.machine_code}):`, e);
             failures.push({
@@ -1413,14 +1440,14 @@ const AttendanceController = {
             resolveForgotPenalty
           });
           if (computed.skip) {
-            if (computed.unchanged) unchanged++;
-            else skipped++;
+            skipped++;
             continue;
           }
 
           try {
             await saveAttendanceDay({ userId, dateKey, worksheet, computed });
-            imported++;
+            if (computed.unchanged) unchanged++;
+            else imported++;
           } catch (e) {
             console.error(
               `[importExcel] Lỗi ngày ${dateKey} (mã ${block.machine_code}, dữ liệu app):`,
@@ -1472,43 +1499,13 @@ const AttendanceController = {
         isDeleted: false
       });
 
-      const applicableHolidays = holidays.filter((h) => {
-        if (h.scope_type === "all") return true;
-        return branch_id && h.branches.some((b) => b.toString() === branch_id);
-      });
-
-      const holidayMap = new Map();
-      for (const h of applicableHolidays) {
-        const key = moment.tz(h.date, TZ).format("YYYY-MM-DD");
-        holidayMap.set(key, h.duration_days ?? 1);
-      }
-
-      let weekdays = 0;
-      let saturdays = 0;
-      let holidayDeduction = 0;
-
-      const cursor = periodStart.clone();
-      while (cursor.isSameOrBefore(periodEnd, "day")) {
-        const day = cursor.day();
-        const key = cursor.format("YYYY-MM-DD");
-
-        if (day === 0) {
-          cursor.add(1, "day");
-          continue;
-        }
-
-        if (holidayMap.has(key)) {
-          holidayDeduction += day === 6 ? 0.5 : holidayMap.get(key);
-        } else if (day === 6) {
-          saturdays++;
-        } else {
-          weekdays++;
-        }
-
-        cursor.add(1, "day");
-      }
-
-      const standard_work_units = weekdays * 1 + saturdays * 0.5;
+      const { standard_work_units, weekdays, saturdays, holiday_count, holiday_deduction } =
+        calcStandardWorkUnits({
+          periodStart,
+          periodEnd,
+          holidays,
+          branchId: branch_id
+        });
 
       return res.json({
         message: "OK",
@@ -1521,8 +1518,8 @@ const AttendanceController = {
           breakdown: {
             weekdays,
             saturdays,
-            holiday_days: applicableHolidays.length,
-            holiday_deduction: holidayDeduction
+            holiday_days: holiday_count,
+            holiday_deduction
           }
         }
       });

@@ -384,60 +384,75 @@ const CustomerController = {
     try {
       const accountId = req.account._id;
 
-      // Lấy thông tin sale từ account
       const sale = await UserInfoModel.findOne({ id_account: accountId });
       if (!sale) {
         return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
       }
 
-      // Query params
-      const {
-        page = 1,
-        limit = 20,
-        status, // lọc theo trạng thái
-        search, // tìm theo tên hoặc sđt
-        app_code, // lọc theo app
-        from_date, // lọc theo ngày đăng ký
-        to_date
-      } = req.query;
+      const { page = 1, limit = 20, status, search, app_code, from_date, to_date } = req.query;
 
       const skip = (Number(page) - 1) * Number(limit);
 
-      // Build filter
-      const filter = { referred_by: sale._id };
+      const matchStage = { referred_by: sale._id };
 
       if (status) {
-        filter.status = status;
+        matchStage.status = status;
       }
 
       if (app_code) {
         const app = await AppModel.findOne({ code: app_code, is_active: true });
-        if (app) filter.app_id = app._id;
+        if (app) matchStage.app_id = app._id;
       }
 
       if (from_date || to_date) {
-        filter.registeredAt = {};
-        if (from_date) filter.registeredAt.$gte = new Date(from_date);
+        matchStage.registeredAt = {};
+        if (from_date) matchStage.registeredAt.$gte = new Date(from_date);
         if (to_date)
-          filter.registeredAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
+          matchStage.registeredAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
       }
 
       if (search) {
-        filter.$or = [
+        matchStage.$or = [
           { phone_number: { $regex: search, $options: "i" } },
           { "identity.full_name": { $regex: search, $options: "i" } }
         ];
       }
 
-      const [customers, total] = await Promise.all([
-        CustomerModel.find(filter)
-          .populate("app_id", "name code")
-          .select("-identity.id_front_url -identity.id_back_url -identity.selfie_url") // ẩn ảnh CCCD
-          .sort({ registeredAt: -1 })
-          .skip(skip)
-          .limit(Number(limit)),
-        CustomerModel.countDocuments(filter)
-      ]);
+      const pipeline = [
+        { $match: matchStage },
+        { $addFields: { _sortRegisteredAt: { $ifNull: ["$registeredAt", "$createdAt"] } } },
+        { $sort: { _sortRegisteredAt: -1 } },
+        {
+          $lookup: {
+            from: "apps",
+            localField: "app_id",
+            foreignField: "_id",
+            as: "app_id"
+          }
+        },
+        { $unwind: { path: "$app_id", preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            _sortRegisteredAt: 0,
+            "identity.id_front_url": 0,
+            "identity.id_back_url": 0,
+            "identity.selfie_url": 0,
+            "app_id.createdAt": 0,
+            "app_id.updatedAt": 0,
+            "app_id.__v": 0
+          }
+        },
+        {
+          $facet: {
+            data: [{ $skip: skip }, { $limit: Number(limit) }],
+            total: [{ $count: "value" }]
+          }
+        }
+      ];
+
+      const [result] = await CustomerModel.aggregate(pipeline);
+      const customers = result?.data || [];
+      const total = result?.total?.[0]?.value || 0;
 
       return res.status(200).json({
         message: "Lấy danh sách khách hàng thành công",
@@ -457,6 +472,7 @@ const CustomerController = {
       });
     }
   },
+
   getMyCustomersAsAgent: async (req, res) => {
     try {
       const {
@@ -467,20 +483,18 @@ const CustomerController = {
         app_code,
         from_date,
         to_date,
-        agent_code // mã đại lý — bên hệ thống đầu tư truyền lên
+        agent_code
       } = req.query;
 
       if (!agent_code || !app_code) {
         return res.status(400).json({ message: "Thiếu agent_code hoặc app_code" });
       }
 
-      // Tìm app
       const app = await AppModel.findOne({ code: app_code, is_active: true });
       if (!app) {
         return res.status(404).json({ message: "App không tồn tại hoặc đã bị khóa" });
       }
 
-      // Tìm agent theo agent_code + app_id
       const agent = await AgentModel.findOne({
         app_id: app._id,
         agent_code,
@@ -492,39 +506,64 @@ const CustomerController = {
 
       const skip = (Number(page) - 1) * Number(limit);
 
-      // Build filter theo agent_id
-      const filter = {
+      const matchStage = {
         app_id: app._id,
         agent_id: agent._id
       };
 
       if (status) {
-        filter.status = status;
+        matchStage.status = status;
       }
 
       if (from_date || to_date) {
-        filter.registeredAt = {};
-        if (from_date) filter.registeredAt.$gte = new Date(from_date);
+        matchStage.registeredAt = {};
+        if (from_date) matchStage.registeredAt.$gte = new Date(from_date);
         if (to_date)
-          filter.registeredAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
+          matchStage.registeredAt.$lte = new Date(new Date(to_date).setHours(23, 59, 59, 999));
       }
 
       if (search) {
-        filter.$or = [
+        matchStage.$or = [
           { phone_number: { $regex: search, $options: "i" } },
           { "identity.full_name": { $regex: search, $options: "i" } }
         ];
       }
 
-      const [customers, total] = await Promise.all([
-        CustomerModel.find(filter)
-          .populate("app_id", "name code")
-          .select("-identity.id_front_url -identity.id_back_url -identity.selfie_url")
-          .sort({ registeredAt: -1 })
-          .skip(skip)
-          .limit(Number(limit)),
-        CustomerModel.countDocuments(filter)
-      ]);
+      const pipeline = [
+        { $match: matchStage },
+        { $addFields: { _sortRegisteredAt: { $ifNull: ["$registeredAt", "$createdAt"] } } },
+        { $sort: { _sortRegisteredAt: -1 } },
+        {
+          $lookup: {
+            from: "apps",
+            localField: "app_id",
+            foreignField: "_id",
+            as: "app_id"
+          }
+        },
+        { $unwind: { path: "$app_id", preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            _sortRegisteredAt: 0,
+            "identity.id_front_url": 0,
+            "identity.id_back_url": 0,
+            "identity.selfie_url": 0,
+            "app_id.createdAt": 0,
+            "app_id.updatedAt": 0,
+            "app_id.__v": 0
+          }
+        },
+        {
+          $facet: {
+            data: [{ $skip: skip }, { $limit: Number(limit) }],
+            total: [{ $count: "value" }]
+          }
+        }
+      ];
+
+      const [result] = await CustomerModel.aggregate(pipeline);
+      const customers = result?.data || [];
+      const total = result?.total?.[0]?.value || 0;
 
       return res.status(200).json({
         message: "Lấy danh sách khách hàng của đại lý thành công",
@@ -1086,7 +1125,8 @@ const CustomerController = {
       }
 
       pipeline.push(
-        { $sort: { registeredAt: -1 } },
+        { $addFields: { _sortRegisteredAt: { $ifNull: ["$registeredAt", "$createdAt"] } } },
+        { $sort: { _sortRegisteredAt: -1 } },
         {
           $facet: {
             data: [
@@ -1094,6 +1134,7 @@ const CustomerController = {
               { $limit: currentLimit },
               {
                 $project: {
+                  _sortRegisteredAt: 0,
                   referredSale: 0,
                   agentInfo: 0,
                   appInfo: 0,
@@ -1146,38 +1187,6 @@ const CustomerController = {
         return res.status(400).json({ message: "Tối đa 500 khách hàng mỗi lần" });
       }
 
-      const invalidItems = [];
-      customers.forEach((item, index) => {
-        if (!item.phone_number || !item.external_id) {
-          invalidItems.push({
-            index,
-            phone_number: item.phone_number ?? null,
-            reason: "Thiếu phone_number hoặc external_id"
-          });
-          return;
-        }
-        if (!item.created_at) {
-          invalidItems.push({ index, phone_number: item.phone_number, reason: "Thiếu created_at" });
-          return;
-        }
-        if (Number.isNaN(new Date(item.created_at).getTime())) {
-          invalidItems.push({
-            index,
-            phone_number: item.phone_number,
-            reason: `created_at không hợp lệ: ${item.created_at}`
-          });
-        }
-      });
-
-      if (invalidItems.length > 0) {
-        console.error("[BULK_UPSERT_VALIDATION_FAILED]", JSON.stringify(invalidItems));
-        return res.status(422).json({
-          message: `Batch bị từ chối: ${invalidItems.length}/${customers.length} item thiếu hoặc sai created_at`,
-          invalid_count: invalidItems.length,
-          invalid_items: invalidItems
-        });
-      }
-
       const app = await AppModel.findOne({ code: app_code, is_active: true });
       if (!app) {
         return res.status(404).json({ message: "App không tồn tại" });
@@ -1186,8 +1195,8 @@ const CustomerController = {
       const results = {
         total: customers.length,
         created: 0,
-        updated: 0, // đã tồn tại, cập nhật lại registeredAt theo dữ liệu gốc
-        skipped: 0, // đã tồn tại, registeredAt đã đúng hoặc không có createdAt để đối chiếu
+        updated: 0,
+        skipped: 0,
         failed: []
       };
 
@@ -1202,45 +1211,39 @@ const CustomerController = {
             continue;
           }
 
-          // Kiểm tra đã tồn tại chưa theo phone_number
           const existing = await CustomerModel.findOne({
             app_id: app._id,
             phone_number: item.phone_number
           });
 
           if (existing) {
-            const customRegisteredAt = item.created_at ? new Date(item.created_at) : new Date();
-            const isValidDate = customRegisteredAt && !Number.isNaN(customRegisteredAt.getTime());
-            const isDifferent =
-              isValidDate && existing.registeredAt?.getTime() !== customRegisteredAt.getTime();
+            const parsed = item.created_at ? new Date(item.created_at) : null;
+            const registeredAtToSet =
+              parsed && !Number.isNaN(parsed.getTime()) ? parsed : existing.createdAt;
 
-            if (isDifferent) {
+            if (registeredAtToSet) {
               await CustomerModel.updateOne(
                 { _id: existing._id },
-                { $set: { registeredAt: customRegisteredAt } }
+                { $set: { registeredAt: registeredAtToSet } }
               );
               results.updated++;
             } else {
               results.skipped++;
             }
+
             continue;
           }
 
-          // Chuyển đổi gender: 0 → "male", 1 → "female"
           const genderMap = { 0: "male", 1: "female" };
           const mappedGender =
             item.gender !== undefined && item.gender !== null
               ? (genderMap[Number(item.gender)] ?? null)
               : null;
 
-          const customRegisteredAt = item.created_at ? new Date(item.created_at) : null;
-          const isValidRegisteredAt =
-            customRegisteredAt && !Number.isNaN(customRegisteredAt.getTime());
+          const parsed = item.created_at ? new Date(item.created_at) : null;
+          const isValidParsed = parsed && !Number.isNaN(parsed.getTime());
 
-          // Tạo mới — source_type = "marketing" vì KH cũ chưa biết thuộc ai.
-          // createdAt để Mongoose tự gán bình thường (đúng nghĩa: thời điểm sync vào hệ thống này).
-          // registeredAt lưu riêng ngày đăng ký gốc từ hệ thống cũ, dùng cho lọc/sort theo nghiệp vụ.
-          await CustomerModel.create({
+          const created = await CustomerModel.create({
             app_id: app._id,
             phone_number: item.phone_number,
             external_id: item.external_id,
@@ -1249,7 +1252,7 @@ const CustomerController = {
             agent_id: null,
             source_type: "marketing",
             status: item.is_kyc ? "kyc_verified" : "registered",
-            registeredAt: isValidRegisteredAt ? customRegisteredAt : new Date(),
+            registeredAt: isValidParsed ? parsed : null,
             identity: item.is_kyc
               ? {
                   full_name: item.full_name ?? null,
@@ -1268,6 +1271,13 @@ const CustomerController = {
                 }
               : {}
           });
+
+          if (!isValidParsed) {
+            await CustomerModel.updateOne(
+              { _id: created._id },
+              { $set: { registeredAt: created.createdAt } }
+            );
+          }
 
           results.created++;
         } catch (err) {
@@ -1679,7 +1689,8 @@ const CustomerController = {
 
       const customers = await CustomerModel.aggregate([
         ...pipeline,
-        { $sort: { registeredAt: -1 } },
+        { $addFields: { _sortRegisteredAt: { $ifNull: ["$registeredAt", "$createdAt"] } } },
+        { $sort: { _sortRegisteredAt: -1 } },
         {
           $project: {
             phone_number: 1,

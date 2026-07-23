@@ -82,7 +82,7 @@ const CustomerModel = new mongoose.Schema(
       granted_at: { type: Date, default: null }
     },
 
-    registeredAt: { type: Date, default: null },
+    registeredAt: { type: Date, required: true, default: Date.now },
 
     ...BaseSchema.obj
   },

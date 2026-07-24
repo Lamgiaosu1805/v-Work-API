@@ -7,20 +7,12 @@ function getCommentDepth(comment) {
   return 2;
 }
 
-/**
- * Xử lý vị trí lưu trữ reply (tối đa 3 cấp hiển thị).
- * - depth 1 → reply tạo depth 2 (parent = root)
- * - depth 2 → reply tạo depth 3 (parent = comment depth 2, lồng dưới)
- * - depth 3 → flatten: giữ depth 3, parent = target.parent_id, reply_to = target
- */
 function resolveReplyPlacement(parentComment) {
   if (!parentComment) {
     return {
       depth: 1,
       parent_id: null,
-      root_id: null,
-      reply_to_id: null,
-      reply_to_name: null
+      root_id: null
     };
   }
 
@@ -30,9 +22,7 @@ function resolveReplyPlacement(parentComment) {
     return {
       depth: 2,
       parent_id: parentComment._id,
-      root_id: parentComment._id,
-      reply_to_id: parentComment._id,
-      reply_to_name: parentComment.author_name
+      root_id: parentComment._id
     };
   }
 
@@ -40,18 +30,14 @@ function resolveReplyPlacement(parentComment) {
     return {
       depth: 3,
       parent_id: parentComment._id,
-      root_id: parentComment.root_id || parentComment.parent_id,
-      reply_to_id: parentComment._id,
-      reply_to_name: parentComment.author_name
+      root_id: parentComment.root_id || parentComment.parent_id
     };
   }
 
   return {
     depth: 3,
     parent_id: parentComment.parent_id,
-    root_id: parentComment.root_id,
-    reply_to_id: parentComment._id,
-    reply_to_name: parentComment.author_name
+    root_id: parentComment.root_id
   };
 }
 
@@ -69,15 +55,16 @@ async function normalizeCommentMentions(mentionsInput, replyToAuthorId = null) {
   }
 
   const mentionUserIds = new Set();
+
+  if (replyToAuthorId && mongoose.Types.ObjectId.isValid(replyToAuthorId)) {
+    mentionUserIds.add(replyToAuthorId.toString());
+  }
+
   rawMentions.forEach((item) => {
     if (item?.user_id && mongoose.Types.ObjectId.isValid(item.user_id)) {
       mentionUserIds.add(item.user_id.toString());
     }
   });
-
-  if (replyToAuthorId && mongoose.Types.ObjectId.isValid(replyToAuthorId)) {
-    mentionUserIds.add(replyToAuthorId.toString());
-  }
 
   const uniqueUserIds = Array.from(mentionUserIds).slice(0, 10);
   if (uniqueUserIds.length === 0) return [];
@@ -87,11 +74,17 @@ async function normalizeCommentMentions(mentionsInput, replyToAuthorId = null) {
     { id_account: 1, full_name: 1, avatar: 1 }
   ).lean();
 
-  return validUsers.map((user) => ({
-    user_id: user.id_account,
-    user_name: user.full_name,
-    avatar: user.avatar ?? null
-  }));
+  const userMap = new Map(validUsers.map((u) => [String(u.id_account), u]));
+  return uniqueUserIds
+    .filter((id) => userMap.has(id))
+    .map((id) => {
+      const user = userMap.get(id);
+      return {
+        user_id: user.id_account,
+        user_name: user.full_name,
+        avatar: user.avatar ?? null
+      };
+    });
 }
 
 function nestComments(roots, depth2List, depth3List) {

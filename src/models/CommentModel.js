@@ -20,8 +20,6 @@ const CommentSchema = new mongoose.Schema(
     ...BaseSchema.obj,
 
     parent_id: { type: ObjectId, ref: "comment", default: null },
-    reply_to_id: { type: ObjectId, ref: "comment", default: null },
-    reply_to_name: { type: String, default: null },
     mentions: [
       {
         user_id: { type: ObjectId, ref: "account", required: true },
@@ -29,10 +27,9 @@ const CommentSchema = new mongoose.Schema(
         avatar: { type: String, default: null }
       }
     ],
-    depth: { type: Number, enum: [1, 2, 3], default: 1 }, // cấp hiển thị
-    root_id: { type: ObjectId, ref: "comment", default: null }, // luôn trỏ A (comment gốc của nhánh)
-    // parent_id: null = root; depth 2 → parent = root; depth 3 → parent = comment depth 2
-    replies_count: { type: Number, default: 0 } // trên root (đếm depth 2) và trên depth 2 (đếm depth 3)
+    depth: { type: Number, enum: [1, 2, 3], default: 1 },
+    root_id: { type: ObjectId, ref: "comment", default: null },
+    replies_count: { type: Number, default: 0 }
   },
   {
     timestamps: BaseSchema.options.timestamps,

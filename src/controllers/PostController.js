@@ -15,6 +15,7 @@ const {
 } = require("../helpers/commentUtils");
 const cleanupUploadedFiles = require("../utils/cleanupUploadedFiles");
 const deletePhysicalFile = require("../utils/deletePhysicalFile");
+const { decryptFileToken } = require("../helpers/fileSignature");
 
 async function getAuthorInfo(accountId) {
   const userInfo = await UserInfoModel.findOne({ id_account: accountId });
@@ -310,7 +311,18 @@ const PostController = {
               typeof keep_images === "string" ? JSON.parse(keep_images) : keep_images;
 
             if (Array.isArray(parsedKeepImages)) {
-              finalImages = post.images.filter((img) => parsedKeepImages.includes(img));
+              const base = (process.env.BASE_URL || "").replace(/\/+$/, "");
+              const decodedKeepImages = parsedKeepImages
+                .map((url) => {
+                  if (url.startsWith(`${base}/f/`)) {
+                    const token = url.slice(`${base}/f/`.length);
+                    const result = decryptFileToken(token, { ignoreExpiry: true });
+                    return result?.path ?? null;
+                  }
+                  return url;
+                })
+                .filter(Boolean);
+              finalImages = post.images.filter((img) => decodedKeepImages.includes(img));
             }
           } catch (e) {
             finalImages = post.images;
@@ -528,8 +540,6 @@ const PostController = {
         return res.status(404).json({ message: "Không tìm thấy bài viết" });
       }
 
-      // 1. Khởi chạy resolveReplyPlacement với giá trị mặc định là null (cho comment gốc)
-      // Nếu có parentId, biến này sẽ được ghi đè sau khi tìm thấy parentComment hợp lệ.
       let placement = resolveReplyPlacement(null);
       let parentComment = null;
 
@@ -549,13 +559,13 @@ const PostController = {
           return res.status(404).json({ message: "Không tìm thấy bình luận được trả lời" });
         }
 
-        // Tận dụng hàm resolveReplyPlacement có sẵn để tự động tính toán depth, parent_id, root_id, reply_to
         placement = resolveReplyPlacement(parentComment);
         replyToAuthorId = parentComment.author_id;
       }
 
-      // Tận dụng hàm normalizeCommentMentions có sẵn để chuẩn hóa tag tên
       mentions = await normalizeCommentMentions(mentionsInput, replyToAuthorId);
+      console.log("DEBUG replyToAuthorId:", replyToAuthorId);
+      console.log("DEBUG mentions result:", mentions);
 
       const image = uploadedFile ? `feed/${uploadedFile.filename}` : null;
 
@@ -571,8 +581,6 @@ const PostController = {
             depth: placement.depth,
             parent_id: placement.parent_id,
             root_id: placement.root_id,
-            reply_to_id: placement.reply_to_id,
-            reply_to_name: placement.reply_to_name,
             mentions
           }
         ],

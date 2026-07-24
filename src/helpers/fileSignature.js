@@ -32,7 +32,7 @@ function encryptFilePath(relativePath, ttlSeconds = DEFAULT_TTL_SECONDS) {
   return Buffer.concat([iv, tag, ct]).toString("base64url");
 }
 
-function decryptFileToken(token) {
+function decryptFileToken(token, { ignoreExpiry = false } = {}) {
   if (!token || typeof token !== "string") return null;
   try {
     const raw = Buffer.from(token, "base64url");
@@ -47,7 +47,7 @@ function decryptFileToken(token) {
 
     const { p, e } = JSON.parse(plain);
     if (!p || !e) return null;
-    if (Math.floor(Date.now() / 1000) > Number(e)) return null;
+    if (!ignoreExpiry && Math.floor(Date.now() / 1000) > Number(e)) return null;
 
     return { path: normalizePath(p) };
   } catch {

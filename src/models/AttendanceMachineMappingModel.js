@@ -15,7 +15,10 @@ const AttendanceMachineMappingSchema = new mongoose.Schema(
   }
 );
 
-// AttendanceMachineMappingSchema.index({ machine_code: 1 }, { unique: true });
+AttendanceMachineMappingSchema.index(
+  { machine_code: 1 },
+  { unique: true, partialFilterExpression: { isDeleted: false } }
+);
 AttendanceMachineMappingSchema.index({ user_id: 1 });
 
 module.exports = mongoose.model("attendance_machine_mapping", AttendanceMachineMappingSchema);

@@ -28,6 +28,7 @@ const transactionManagementRouter = require("./transactionManagement");
 const rbacRouter = require("./rbac");
 const kpiMetricRouter = require("./kpiMetric");
 const dashboardRouter = require("./dashboard");
+const sharedFolderRouter = require("./sharedFolder");
 
 const route = (app) => {
   app.use(`/posts`, postRouter);
@@ -60,6 +61,7 @@ const route = (app) => {
   app.use(`/rbac`, rbacRouter);
   app.use(`/kpi/metrics`, kpiMetricRouter);
   app.use(`/dashboard`, dashboardRouter);
+  app.use("/shared-folders", sharedFolderRouter);
 };
 
 module.exports = route;

@@ -29,7 +29,15 @@ const PERMISSION = Object.freeze({
   HRM_MENU_HELP: "hrm.menu.help",
   HRM_MENU_ATTENDANCE_MAPPING: "hrm.menu.attendance_mapping",
   HRM_MENU_PERMISSIONS: "hrm.menu.permissions",
-  HRM_MENU_PERMISSIONS_RBAC: "hrm.menu.permissions_rbac"
+  HRM_MENU_PERMISSIONS_RBAC: "hrm.menu.permissions_rbac",
+  FOLDER_MENU_DOCUMENTS: "folder.menu.documents",
+  FOLDER_SHARED_VIEW: "folder.shared.view",
+  FOLDER_SHARED_DOWNLOAD: "folder.shared.download",
+  FOLDER_SHARED_UPLOAD: "folder.shared.upload",
+  FOLDER_SHARED_PUSH: "folder.shared.push",
+  FOLDER_SHARED_DELETE_FILE: "folder.shared.delete_file",
+  FOLDER_SHARED_CREATE: "folder.shared.create",
+  FOLDER_SHARED_MANAGE: "folder.shared.manage"
 });
 
 const PERMISSION_VALUES = Object.values(PERMISSION);

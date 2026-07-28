@@ -17,6 +17,7 @@ const { setIO } = require("./src/sockets/ioRegistry");
 const { startCronJobs } = require("./src/jobs");
 const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
 const { serveEncryptedFile } = require("./src/middlewares/serveEncryptedFile");
+const requestContextMiddleware = require("./src/middlewares/requestContextMiddleware");
 const swaggerSpec = require("./src/config/swagger");
 
 const app = express();
@@ -41,6 +42,8 @@ setIO(io);
 setupChatSocket(io);
 
 app.set("trust proxy", 1);
+
+app.use(requestContextMiddleware);
 
 app.use(compression());
 

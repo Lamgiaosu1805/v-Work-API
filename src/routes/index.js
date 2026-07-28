@@ -36,6 +36,7 @@ const kpiPeriodTargetRouter = require("./kpiPeriodTarget");
 const kpiAdjustmentRouter = require("./kpiAdjustment");
 const kpiDailyReportRouter = require("./kpiDailyReport");
 const kpiDashboardRouter = require("./kpiDashboard");
+const sharedFolderRouter = require("./sharedFolder");
 
 const route = (app) => {
   app.use(`/posts`, postRouter);
@@ -76,6 +77,7 @@ const route = (app) => {
   app.use(`/kpi/adjustments`, kpiAdjustmentRouter);
   app.use(`/kpi/daily-reports`, kpiDailyReportRouter);
   app.use(`/kpi/dashboard`, kpiDashboardRouter);
+  app.use("/shared-folders", sharedFolderRouter);
 };
 
 module.exports = route;

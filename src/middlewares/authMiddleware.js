@@ -65,6 +65,13 @@ function isAdmin(req, res, next) {
   return res.status(403).json({ errorCode: "FORBIDDEN", message: "Chỉ admin mới được phép thực hiện thao tác này" });
 }
 
+function isSuperAdmin(req, res, next) {
+    if (req.account?.username !== "admin") {
+        return res.status(403).json({ message: "Chỉ tài khoản quản trị mới có quyền thực hiện thao tác này" });
+    }
+    next();
+}
+
 // Xem/truy cập module — user hoặc manager có module trong module_access
 function hasModuleAccess(mod) {
   return (req, res, next) => {
@@ -88,4 +95,5 @@ module.exports = {
   isAdmin,
   hasModuleAccess,
   canManage,
+  isSuperAdmin
 };

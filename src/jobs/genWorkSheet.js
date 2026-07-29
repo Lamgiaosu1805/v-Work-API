@@ -10,6 +10,9 @@ const Shift = require("../models/ShiftModel");
 const TZ = "Asia/Ho_Chi_Minh";
 
 async function ensurePendingStatus(userId, worksheetId, date) {
+  const existing = await WorkDayStatus.findOne({ user_id: userId, date, isDeleted: false });
+  if (existing) return;
+
   await WorkDayStatus.updateOne(
     { user_id: userId, date, period: "full" },
     {

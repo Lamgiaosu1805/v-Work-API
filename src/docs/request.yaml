@@ -38,19 +38,105 @@ paths:
       tags: [Request]
       summary: Danh sách đơn (theo quyền duyệt)
       description: >-
-        Admin/HR (hrm.request.view_all) thấy tất cả. Người có hrm.request.review thấy đơn của
-        nhân viên thuộc phạm vi phòng ban mình quản lý (tính động qua cây phân cấp).
+        Admin/HR (hrm.request.view_all) thấy tất cả (trừ đơn của chính mình — luôn bị loại khỏi
+        danh sách này để tránh vừa thấy vừa được gợi ý duyệt đơn của mình). Người có
+        hrm.request.review (không có view_all) thấy đơn của nhân viên thuộc phạm vi phòng ban
+        mình quản lý (tính động qua cây phân cấp, getManagedUserIds).
+      parameters:
+        - in: query
+          name: request_type
+          schema:
+            type: string
+            enum:
+              [
+                leave,
+                late_early,
+                remote,
+                business_trip,
+                client_visit,
+                explanation,
+                forgot_checkin
+              ]
+          description: Lọc theo loại đơn — giá trị không hợp lệ trả 400
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, approved, rejected, cancelled] }
+          description: Lọc theo trạng thái
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+          description: Lọc từ ngày tạo đơn (yyyy-mm-dd, theo giờ Asia/Ho_Chi_Minh) — không parse được trả 400
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+          description: Lọc tới ngày tạo đơn (yyyy-mm-dd, theo giờ Asia/Ho_Chi_Minh) — không parse được trả 400
+        - in: query
+          name: search
+          schema: { type: string }
+          description: Tìm theo tên nhân viên hoặc mã nhân viên (không phân biệt hoa/thường, khớp 1 phần)
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+          description: Không phải số nguyên >= 1 sẽ tự fallback về 1, không lỗi
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+          description: Tối đa 100 (tự động giới hạn trần), không phải số nguyên >= 1 sẽ fallback về 20
       responses:
-        "200": { description: Danh sách đơn }
+        "200":
+          description: "Danh sách đơn, kèm pagination (total, page, limit, total_pages)"
+        "400":
+          description: "request_type không hợp lệ, hoặc from/to không parse được thành ngày"
         "403": { description: Không có quyền quản lý tính năng này }
+        "404": { description: Không tìm thấy thông tin nhân viên (có quyền review nhưng thiếu hồ sơ nhân viên) }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /requests/my:
     get:
       tags: [Request]
       summary: Đơn của tôi
+      parameters:
+        - in: query
+          name: request_type
+          schema:
+            type: string
+            enum:
+              [
+                leave,
+                late_early,
+                remote,
+                business_trip,
+                client_visit,
+                explanation,
+                forgot_checkin
+              ]
+          description: Lọc theo loại đơn — giá trị không hợp lệ trả 400
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, approved, rejected, cancelled] }
+          description: Lọc theo trạng thái
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+          description: Lọc từ ngày tạo đơn (yyyy-mm-dd, theo giờ Asia/Ho_Chi_Minh) — không parse được trả 400
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+          description: Lọc tới ngày tạo đơn (yyyy-mm-dd, theo giờ Asia/Ho_Chi_Minh) — không parse được trả 400
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+          description: Không phải số nguyên >= 1 sẽ tự fallback về 1, không lỗi
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+          description: Tối đa 100 (tự động giới hạn trần), không phải số nguyên >= 1 sẽ fallback về 20
       responses:
-        "200": { description: Danh sách đơn của tôi }
+        "200":
+          description: "Danh sách đơn của tôi, kèm pagination (total, page, limit, total_pages)"
+        "400":
+          description: "request_type không hợp lệ, hoặc from/to không parse được thành ngày"
+        "404": { description: Không tìm thấy thông tin nhân viên }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /requests/review/{id}:

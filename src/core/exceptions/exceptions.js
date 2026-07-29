@@ -1,7 +1,4 @@
-/* eslint-disable max-classes-per-file --
-   Intentional: a handful of small, closely-related exception classes grouped
-   in one file (matches docs/DDD-HEXAGONAL-MIGRATION-PLAN.md task 0.6), not a
-   file that grew unrelated classes over time. */
+/* eslint-disable max-classes-per-file  */
 const { ExceptionBase } = require("./exception.base");
 
 class ArgumentInvalidException extends ExceptionBase {
@@ -26,6 +23,18 @@ class ConflictException extends ExceptionBase {
   code = "GENERIC.CONFLICT";
 
   statusCode = 409;
+}
+
+class ForbiddenException extends ExceptionBase {
+  static defaultMessage = "Forbidden";
+
+  code = "GENERIC.FORBIDDEN";
+
+  statusCode = 403;
+
+  constructor(message = ForbiddenException.defaultMessage, options = {}) {
+    super(message, options);
+  }
 }
 
 class NotFoundException extends ExceptionBase {
@@ -57,6 +66,7 @@ module.exports = {
   ArgumentNotProvidedException,
   ArgumentOutOfRangeException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   InternalServerErrorException
 };

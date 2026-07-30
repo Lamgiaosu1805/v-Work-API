@@ -34,24 +34,37 @@ const PERMISSIONS = [
     code: PERMISSION.HRM_MENU_ATTENDANCE_SETTINGS,
     description: "Xem menu Quản lý chấm công (ca làm, WiFi)"
   },
-  { code: PERMISSION.HRM_MENU_ATTENDANCE_OVERVIEW, description: "Xem menu Tình trạng chấm công" },
   { code: PERMISSION.HRM_MENU_DEPARTMENT, description: "Xem menu Khối / Phòng ban" },
   { code: PERMISSION.HRM_MENU_BRANCH, description: "Xem menu Chi nhánh" },
-  { code: PERMISSION.HRM_MENU_PAYROLL, description: "Xem menu Bảng lương" },
   { code: PERMISSION.HRM_MENU_WORK_UNIT, description: "Xem menu Công & Chấm công" },
-  { code: PERMISSION.HRM_MENU_REPORTS, description: "Xem menu Báo cáo" },
   { code: PERMISSION.HRM_MENU_EVENTS, description: "Xem menu Sự kiện & Lịch" },
-  { code: PERMISSION.HRM_MENU_SETTINGS, description: "Xem menu Cài đặt" },
   { code: PERMISSION.HRM_MENU_DOCUMENTS, description: "Xem menu Hồ sơ đính kèm" },
   { code: PERMISSION.HRM_MENU_POSITIONS, description: "Xem menu Vị trí / Chức vụ" },
-  { code: PERMISSION.HRM_MENU_LOGS, description: "Xem menu Logs" },
-  { code: PERMISSION.HRM_MENU_HELP, description: "Xem menu Trợ giúp & Tài liệu" },
   {
     code: PERMISSION.HRM_MENU_ATTENDANCE_MAPPING,
     description: "Xem menu Mapping máy chấm công"
   },
   { code: PERMISSION.HRM_MENU_PERMISSIONS, description: "Xem menu Phân quyền" },
   { code: PERMISSION.HRM_MENU_PERMISSIONS_RBAC, description: "Xem menu Phân quyền chi tiết" },
+  { code: PERMISSION.HRM_MENU_HR_MANAGEMENT, description: "Xem menu Quản lý nhân sự" },
+  { code: PERMISSION.HRM_MENU_EMPLOYEE, description: "Xem menu Danh sách nhân sự" },
+  { code: PERMISSION.HRM_MENU_LABOR_CONTRACT, description: "Xem menu Hợp đồng lao động" },
+  { code: PERMISSION.HRM_MENU_RECRUITMENT, description: "Xem menu Tuyển dụng" },
+  { code: PERMISSION.HRM_MENU_RECRUITMENT_PLAN, description: "Xem menu Kế hoạch tuyển dụng" },
+  { code: PERMISSION.HRM_MENU_CANDIDATE_PROFILE, description: "Xem menu Hồ sơ ứng viên" },
+  { code: PERMISSION.HRM_MENU_TRAINING, description: "Xem menu Đào tạo" },
+  { code: PERMISSION.HRM_MENU_TRAINING_PLAN, description: "Xem menu Kế hoạch đào tạo" },
+  { code: PERMISSION.HRM_MENU_TRAINEE_MANAGEMENT, description: "Xem menu Quản lý học viên" },
+  { code: PERMISSION.HRM_MENU_REGULATION_DOCUMENT, description: "Xem menu Nội quy & Văn bản" },
+  { code: PERMISSION.HRM_MENU_REGULATION, description: "Xem menu Nội quy" },
+  { code: PERMISSION.HRM_MENU_DOCUMENT_MANAGEMENT, description: "Xem menu Quản lý văn bản" },
+  { code: PERMISSION.HRM_MENU_PERFORMANCE, description: "Xem menu Quản lý hiệu suất" },
+  { code: PERMISSION.HRM_MENU_KPI, description: "Xem menu Quản lý KPI" },
+  { code: PERMISSION.HRM_MENU_TASK_REPORT, description: "Xem menu Công việc & Báo cáo" },
+  { code: PERMISSION.HRM_MENU_ASSET_MANAGEMENT, description: "Xem menu Quản lý tài sản & VPP" },
+  { code: PERMISSION.HRM_MENU_ASSET_LIST, description: "Xem menu DS tài sản" },
+  { code: PERMISSION.HRM_MENU_ASSET_REQUEST, description: "Xem menu Đề nghị cấp tài sản" },
+  { code: PERMISSION.HRM_MENU_SYSTEM_SETTINGS, description: "Xem menu Cài đặt hệ thống" },
   { code: PERMISSION.FOLDER_MENU_DOCUMENTS, description: "Xem menu Tài liệu nội bộ" },
   { code: PERMISSION.FOLDER_SHARED_VIEW, description: "Xem thư mục/hồ sơ dùng chung" },
   { code: PERMISSION.FOLDER_SHARED_DOWNLOAD, description: "Tải hồ sơ dùng chung" },
@@ -65,7 +78,17 @@ const PERMISSIONS = [
   }
 ];
 
-const DEPRECATED_PERMISSION_CODES = ["hrm.menu.view_data", "hrm.menu.admin", "hrm.menu.system"];
+const DEPRECATED_PERMISSION_CODES = [
+  "hrm.menu.view_data",
+  "hrm.menu.admin",
+  "hrm.menu.system",
+  "hrm.menu.attendance_overview",
+  "hrm.menu.payroll",
+  "hrm.menu.reports",
+  "hrm.menu.settings",
+  "hrm.menu.logs",
+  "hrm.menu.help"
+];
 
 const ROLES = [
   {

@@ -12,10 +12,12 @@ jest.mock("../../../src/middlewares/authMiddleware", () => ({
 }));
 
 jest.mock("../../../src/helpers/rbac", () => ({ can: jest.fn() }));
-jest.mock("../../../src/helpers/approvalChain", () => ({ getManagedUserIds: jest.fn() }));
+jest.mock("../../../src/modules/request/domain/approval-chain", () => ({
+  getManagedUserIds: jest.fn()
+}));
 
 const { can } = require("../../../src/helpers/rbac");
-const { getManagedUserIds } = require("../../../src/helpers/approvalChain");
+const { getManagedUserIds } = require("../../../src/modules/request/domain/approval-chain");
 const UserInfoModel = require("../../../src/models/UserInfoModel");
 const AccountModel = require("../../../src/models/AccountModel");
 const { LeaveRequest } = require("../../../src/models/RequestModel");

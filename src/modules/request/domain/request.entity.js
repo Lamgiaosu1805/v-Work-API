@@ -128,6 +128,7 @@ class RequestEntity extends AggregateRoot {
   reject(reviewerId, reviewerNote = "") {
     this._assertNotSelfReview(reviewerId);
     this._assertPending();
+    const overriddenApprovals = [...this.props.approvals];
     this._setProps({
       status: "rejected",
       reviewed_by: reviewerId,
@@ -140,7 +141,8 @@ class RequestEntity extends AggregateRoot {
         userId: this.props.user_id,
         reviewerId,
         requestType: this.props.request_type,
-        reviewerNote
+        reviewerNote,
+        overriddenApprovals
       })
     );
   }

@@ -27,12 +27,30 @@ paths:
               type: object
               required: [request_type]
               properties:
-                request_type: { type: string, description: "Loại đơn (nghỉ phép, điều chỉnh công...)" }
+                request_type:
+                  type: string
+                  enum:
+                    [
+                      leave,
+                      late_early,
+                      remote,
+                      business_trip,
+                      client_visit,
+                      explanation,
+                      forgot_checkin
+                    ]
                 reason: { type: string }
+              description: >-
+                Các field còn lại phụ thuộc request_type (vd leave cần from_date/from_period/
+                to_date/to_period/leave_type — xem handler tương ứng ở helpers/*Handler.js, chưa
+                có schema chi tiết ở đây).
       responses:
         "201": { description: Tạo đơn thành công }
-        "400": { description: Loại đơn không hợp lệ }
+        "400":
+          description: "request_type không hợp lệ, hoặc input bị handler.validate()/validateAsync() từ chối"
+        "403": { description: "Bị handler.validateAsync() từ chối do không đủ điều kiện (vd loại hợp đồng)" }
         "404": { description: Không tìm thấy thông tin nhân viên }
+        "409": { description: "Trùng lịch với đơn khác đang pending/approved (do handler.validateAsync() phát hiện)" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     get:
       tags: [Request]
@@ -91,6 +109,29 @@ paths:
         "404": { description: Không tìm thấy thông tin nhân viên (có quyền review nhưng thiếu hồ sơ nhân viên) }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /requests/{id}:
+    get:
+      tags: [Request]
+      summary: Chi tiết 1 đơn
+      description: >-
+        Xem được nếu: là chủ đơn, HOẶC có quyền hrm.request.view_all, HOẶC có quyền
+        hrm.request.review VÀ nằm trong chuỗi phê duyệt của chủ đơn (getApprovalChain) — không
+        phải "quản lý toàn bộ nhân viên" như getAll, mà là chuỗi duyệt cụ thể của người tạo đơn
+        này. Response kèm approvals (đã enrich reviewer profile) và pending_reviewer (người tiếp
+        theo cần duyệt, null nếu đơn không còn pending).
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: "Chi tiết đơn, kèm approvals + reviewed_by_profile + pending_reviewer"
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "403": { description: Không có quyền xem đơn này }
+        "404": { description: Đơn không tồn tại }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /requests/my:
     get:
       tags: [Request]
@@ -143,6 +184,13 @@ paths:
     patch:
       tags: [Request]
       summary: Duyệt / từ chối đơn
+      description: >-
+        Đơn cần đa duyệt (leave total_days>3, forgot_checkin/late_early vượt ngưỡng occurrence) cần đủ
+        2 lượt approve từ 2 reviewer khác nhau mới finalize — lượt đầu trả về đơn vẫn "pending", message
+        báo đang chờ người duyệt tiếp theo. reject luôn finalize ngay (veto 1 người, kể cả khi đã có 1
+        lượt approve trước đó — approval cũ không bị xoá, chỉ không còn hiệu lực). Với forgot_checkin/
+        late_early đa duyệt, lượt approve đầu tiên bắt buộc phải là trưởng bộ phận (người gần nhất trong
+        chuỗi phê duyệt), trừ khi reviewer có quyền review toàn bộ.
       parameters:
         - in: path
           name: id
@@ -159,17 +207,29 @@ paths:
                 action: { type: string, enum: [approve, reject] }
                 reviewer_note: { type: string }
       responses:
-        "200": { description: Đã xử lý đơn }
-        "400": { description: ID không hợp lệ }
-        "403": { description: Không được chỉ định duyệt đơn này / không thể tự duyệt đơn của mình }
-        "404": { description: Đơn không tồn tại }
-        "409": { description: Đơn không ở trạng thái chờ duyệt }
+        "200":
+          description: >-
+            Đã ghi nhận duyệt. Nếu là lượt approve đầu của đơn đa duyệt, đơn vẫn ở trạng thái "pending"
+            (message báo đang chờ người duyệt tiếp theo); ngược lại đơn đã finalize (approved/rejected).
+        "400": { description: ID không hợp lệ / hành động không hợp lệ }
+        "403":
+          description: >-
+            Không được chỉ định duyệt đơn này / không thể tự duyệt đơn của mình / cần trưởng bộ phận
+            duyệt trước (forgot_checkin, late_early đa duyệt, lượt đầu)
+        "404": { description: "Đơn không tồn tại, hoặc tài khoản chưa gắn hồ sơ nhân viên" }
+        "409":
+          description: >-
+            Đơn không ở trạng thái chờ duyệt / bạn đã duyệt đơn này rồi / đơn đang được xử lý duyệt bởi
+            thao tác khác, vui lòng thử lại (Redis lock, chỉ áp dụng đơn đa duyệt)
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /requests/cancel/{id}:
     patch:
       tags: [Request]
       summary: Hủy đơn (người tạo)
+      description: >-
+        Chỉ chủ đơn được hủy, và chỉ khi đơn còn ở trạng thái pending. Nếu loại đơn có side-effect
+        khi bị từ chối (vd hoàn lại số ngày phép cho đơn nghỉ), side-effect đó cũng chạy khi hủy.
       parameters:
         - in: path
           name: id
@@ -177,7 +237,10 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: Hủy đơn thành công }
-        "400": { description: ID không hợp lệ }
-        "403": { description: Không có quyền hủy đơn này }
-        "404": { description: Đơn không tồn tại }
+        "400": { $ref: "#/components/responses/InvalidId" }
+        "403": { description: Không phải chủ đơn này }
+        "404":
+          description: "Đơn không tồn tại, hoặc tài khoản chưa gắn hồ sơ nhân viên"
+        "409":
+          description: "Đơn không còn ở trạng thái pending, hoặc đang được xử lý bởi thao tác khác (race condition — thử lại)"
         "401": { $ref: "#/components/responses/Unauthorized" }

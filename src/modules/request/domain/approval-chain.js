@@ -1,9 +1,9 @@
-const UserInfoModel = require("../models/UserInfoModel");
-const AccountModel = require("../models/AccountModel");
-const DepartmentModel = require("../models/DepartmentModel");
-const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
-const { can } = require("./rbac");
-const { PERMISSION } = require("../constants");
+const UserInfoModel = require("../../../models/UserInfoModel");
+const AccountModel = require("../../../models/AccountModel");
+const DepartmentModel = require("../../../models/DepartmentModel");
+const UserDepartmentPositionModel = require("../../../models/UserDepartmentPositionModel");
+const { can } = require("../../../helpers/rbac");
+const { PERMISSION } = require("../../../constants");
 
 async function buildCandidate(userInfo, account) {
   if (!userInfo || !account) return null;

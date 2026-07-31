@@ -1,5 +1,5 @@
 const UserInfoModel = require("../../../models/UserInfoModel");
-const { getApprovalChain } = require("../../../helpers/approvalChain");
+const { getApprovalChain } = require("../domain/approval-chain");
 const { NotFoundException } = require("../../../core/exceptions/exceptions");
 
 async function getEligibleReviewers(accountId) {

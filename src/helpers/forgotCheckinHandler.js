@@ -73,7 +73,11 @@ async function validateAsync(payload, userInfo, session) {
   }).session(session);
   if (dup) return { status: 409, message: "Đã có đơn quên chấm công cho ngày này" };
 
-  return null;
+  // Tính occurrence TRƯỚC khi tạo đơn — trả về để service merge vào entity lúc tạo,
+  // không tự ghi DB ở đây (đơn chưa tồn tại nên computeForgotOccurrence không cần biết
+  // gì về đơn đang tạo, chỉ đếm đơn "approved" đã có sẵn).
+  const occurrence = await computeForgotOccurrence(userInfo._id, payload.date, session);
+  return { occurrence };
 }
 
 async function computeForgotOccurrence(userId, date, session) {
@@ -158,9 +162,6 @@ async function onCreate(request, _userInfo, session) {
     { $addToSet: { sources: { ref_id: request._id, ref_type: "request" } } },
     { session }
   );
-
-  request.occurrence = await computeForgotOccurrence(request.user_id, request.date, session);
-  await request.save({ session });
 }
 
 async function onReject(request, session) {

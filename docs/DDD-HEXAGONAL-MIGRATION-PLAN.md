@@ -50,6 +50,22 @@ người cần thông báo — vì nó dùng chung cho nhiều use-case, không 
 chuyển file đã test kỹ, dùng ở nhiều nơi, là thay đổi cơ học rủi ro cao không có lợi ích kiến trúc
 thật). Việc cần làm chỉ là ghi rõ vai trò này trong tài liệu (mục 4), không đổi code.
 
+**Đính chính (task 1.9, sau khi verify thật bằng `grep` toàn repo — xem quy tắc mới ở mục 5):** lập
+luận "dùng ở nhiều nơi" ở trên **chỉ đúng với `rbac.js`/`can()`** (xác nhận dùng ở 12 route file,
+nhiều module không liên quan — cross-cutting thật). Với `getApprovalChain`/`getManagedUserIds`
+(`helpers/approvalChain.js`) và `resolveReviewerProfileByAccountId` (`helpers/requestUtils.js`) —
+grep toàn bộ 211 file cho thấy **CHỈ có `Request`** (`RequestController.js` cũ + các file
+`modules/request/` mới) từng gọi 3 hàm này, không consumer nào khác. Lập luận ban đầu dựa vào **cấu
+trúc bên trong** hàm (đi qua nhiều model: `Department`/`UserDepartmentPosition`/`Account`) — không
+phải tiêu chí đúng; Domain Service "dùng chung" phải xét theo **ai thực sự tiêu thụ nó**. Kết luận
+đúng hơn: đây là **Domain Service riêng của bounded context `Request`**, đặt sai chỗ (`helpers/`
+chung, thay vì `modules/request/domain/`).
+
+**Quyết định:** giữ nguyên vị trí trong lúc làm task 1.9 (`getById`, vẫn import từ `helpers/` như cũ,
+tránh trộn 2 loại thay đổi trong 1 task), **tách thành 1 task riêng ngay sau 1.9** để di chuyển 3 hàm
+này vào `modules/request/domain/`, sửa lại import ở mọi nơi đang dùng (kể cả `RequestController.js`
+cũ, vẫn còn sống tới task 1.15), review độc lập.
+
 ## 4. Cấu trúc thư mục
 
 ```
@@ -70,6 +86,8 @@ src/
       request-context.js                # AsyncLocalStorage — correlationId
     db/
       mongoose-repository.base.js       # bọc Mongoose Model + Mapper → trả Entity
+      run-in-transaction.js             # task 1.10 — bọc transaction, map TransientTransactionError
+                                         # -> ConflictException (409); dùng chung 1.10/1.11/1.12/1.13
     http/                                # thêm ở task 1.6 — dùng chung cho MỌI module mới (không riêng request)
       handle-exception.js               # map ExceptionBase -> { message } / lỗi lạ -> 500 { message, error }
       error-handler.middleware.js       # Express error middleware (err, req, res, next), gọi handle-exception
@@ -82,18 +100,25 @@ src/
       domain/
         request.entity.js               # AggregateRoot — invariant thật của Request
         request.errors.js
+        approval-chain.js               # task 1.9b — move từ helpers/approvalChain.js (chỉ Request dùng)
+        resolve-reviewer-profile.js     # task 1.9b — tách từ helpers/requestUtils.js (chỉ Request dùng)
+        request-type-handlers.js        # task 1.10 — registry request_type -> handler, dùng chung 1.10/1.11
         events/
           request-created.domain-event.js
           request-approved.domain-event.js
       application/                      # Application Service = 1 use-case, gọi thẳng infra/helper (không qua port)
-        create-request.service.js       # gọi lại helpers/approvalChain.js, helpers/rbac.js bên trong
+        create-request.service.js       # gọi lại domain/approval-chain.js, helpers/rbac.js bên trong
         review-request.service.js
         get-eligible-reviewers.service.js # đọc, không qua Entity — CQRS-lite (task 1.6)
         get-my-requests.service.js      # đọc thẳng Mongoose, KHÔNG .lean() (giữ toJSON format — task 1.7)
         get-all-requests.service.js     # getAll — task 1.8, gọi resolve-request-view-scope.js
+        get-request-by-id.service.js    # getById — task 1.9, KHÔNG dùng chung resolve-request-view-scope.js
+                                         # (rule khác shape — xem task 1.9), memoize getApprovalChain 1 lần
         resolve-request-view-scope.js   # tách theo Solution B (task 1.8) — {type: all|managed}
         request-query-filters.js        # applyRequestTypeFilter/applyDateRangeFilter/buildUserNameSearchFilter
                                          # dùng chung 1.7/1.8, escape regex cho search (task 1.8)
+        cancel-request.service.js       # task 1.10 — action GHI đầu tiên, dùng run-in-transaction.js
+        create-request.service.js       # task 1.11 — dispatch 7 handler, toHandlerException() cục bộ
       infrastructure/
         request.repository.js           # nơi DUY NHẤT được require RequestModel trực tiếp
         request.mapper.js
@@ -113,11 +138,15 @@ src/
     labor-contract/                     # Phase 7
     attendance/                         # Phase 8
 
-  helpers/                              # GIỮ NGUYÊN VỊ TRÍ — đóng vai trò Domain Service (mục 3)
-    approvalChain.js
-    rbac.js
+  helpers/                              # GIỮ NGUYÊN VỊ TRÍ NẾU dùng chung ≥2 module (xem quy tắc mục 5)
+    rbac.js                             # dùng thật ở 12 route file — Domain Service dùng chung, giữ nguyên
+    requestUtils.js                     # resolveReviewerProfileByAccountId đã tách ra (1.9b); phần còn lại
+                                         # (calcTotalDays, notify, acquireRequestReviewLock...) chờ move
+                                         # dần khi 1.11/1.13 đụng tới — xem lý do ở task 1.9b
     attendanceHelper.js
-    ...                                 # không di chuyển file nào trong Phase 0-8
+    ...                                 # approvalChain.js đã xoá (move hết sang modules/request/domain/,
+                                         # task 1.9b) — không còn đúng "1 file = giữ nguyên vị trí" mặc định
+                                         # nữa, phải grep verify từng lần đụng tới (xem mục 5)
 
   services/                             # 2 file cũ — reclassify, không xoá
     chatService.js                      # giữ nếu đúng nghĩa "orchestration + I/O ngoài" (Socket.io)
@@ -157,6 +186,12 @@ trước khi sang task tiếp theo — không dồn nhiều task rồi mới rev
 code mới đã chạy + test pass; test cũ phải luôn xanh (chỉ thêm test mới, không sửa test cũ để "cho
 pass").
 
+**Nhắc lại (2026-07-30) — dừng sau MỖI FILE, không phải mỗi task.** Trong lúc làm 1 task có nhiều
+file (vd application service + controller + route + test), sau khi viết/sửa xong **1 file duy nhất**
+phải dừng lại để người dùng xem/hỏi trước khi viết file tiếp theo — không viết liền một mạch nhiều
+file trong task rồi mới dừng. Áp dụng lại từ task 1.10 trở đi (đã lỏng lẻo dần từ task 1.6 khi task
+phức tạp lên, cần siết lại).
+
 **Ưu tiên dùng thư viện có sẵn, không tự build lại thứ đã được giải quyết tốt** (vd deep-equal, xử lý
 ngày giờ...) — nhưng phải là thư viện **còn được maintain**, không chọn gói đã ngừng cập nhật chỉ vì nó
 nhỏ/gọn. Cụ thể: dùng gói `lodash` chính (`require("lodash/isEqual")` — deep-import, không load cả
@@ -185,6 +220,15 @@ nguyên tắc "giữ nguyên hành vi nghiệp vụ cũ, không tự sửa" (áp
 hiện nghiệp vụ" ở task 1.1), nguyên tắc này áp dụng cho **cách tổ chức code** (ranh giới module, chỗ đặt
 route/middleware...). Phát hiện gì không hợp lý phải nêu ra + đề xuất sửa theo chuẩn senior ngay, không
 im lặng port theo, và cũng không tự ý sửa mà không xác nhận trước nếu ảnh hưởng ra ngoài phạm vi 1 task.
+
+**Quy tắc cụ thể cho `helpers/*.js` (hoặc bất kỳ hàm/module dùng chung nào) khi đụng tới trong lúc
+migrate — áp dụng MỌI lần, không chỉ 1 lần rồi thôi:** trước khi chấp nhận 1 hàm là "Domain Service
+dùng chung" (nên ở `helpers/`) hay "domain service riêng của 1 module" (nên chuyển vào
+`modules/<module>/domain/`), phải `grep` thật xem **ai đang thực sự gọi nó** trên toàn repo — không
+suy luận qua cấu trúc bên trong hàm (đi qua bao nhiêu model không nói lên nó dùng chung hay không).
+Nếu chỉ 1 module gọi → domain service riêng của module đó, đặt sai chỗ nếu còn ở `helpers/` chung;
+nếu ≥2 module không liên quan cùng gọi → đúng là dùng chung, giữ ở `helpers/`. Xem case cụ thể ở task
+1.9 ngay dưới đây — áp dụng đúng quy tắc này lật lại 1 kết luận đã chốt sai ở mục 3.
 
 **Case cụ thể đã áp dụng nguyên tắc trên (task 1.6) — router bị chẻ đôi giữa `src/routes/` và
 `src/modules/*/interface/`:** Phát hiện `src/routes/request.js` (ngoài module, thuộc composition root)
@@ -728,14 +772,261 @@ Application Service, đúng pattern đã áp dụng cho `helpers/approvalChain.j
       **Swagger:** cập nhật `GET /requests` — thêm đầy đủ query params (`request_type/status/from/to/
       search/page/limit`), response `400`/`404` mới, mô tả rõ hành vi loại trừ đơn của chính mình ở
       nhánh view_all. Verify lại `require("./src/config/swagger")` load đủ 192 path.
-- [ ] 1.9 — `getById` (đọc + enrich: `reviewed_by_profile`, `pending_reviewer`, `approvals` kèm reviewer
-      profile — authorization 3 tầng: owner / `canViewAll` / (`canReview` AND trong chuỗi)).
+- [x] 1.9 — `getById`: `application/get-request-by-id.service.js` — đọc `RequestModel` (populate
+      `user_id` + `reviewed_by`), enrich `approvals` (kèm `reviewer` profile qua
+      `resolveReviewerProfileByAccountId`), `reviewed_by_profile`, `pending_reviewer` — y hệt code
+      gốc, chỉ đổi cách tổ chức.
+
+      **Xác nhận giả thuyết ở task 1.8 — ĐÚNG, không dùng chung được với `resolveRequestViewScope`:**
+      đọc code gốc `getById` xác nhận rule authorization 3 tầng (owner / `canViewAll` / (`canReview`
+      AND **trong chuỗi phê duyệt cụ thể của chủ đơn**, qua `getApprovalChain(request.user_id._id)`)
+      — khác hẳn `getAll` (scope theo `getManagedUserIds`, toàn bộ cây quản lý, không phải 1 chuỗi cụ
+      thể của 1 người). Đúng như đã cảnh báo ở task 1.8: **không ép dùng chung**, viết logic riêng cho
+      `getById` — quyết định "chờ bằng chứng thật rồi mới trừu tượng hoá" (Rule of Three) đã đúng.
+
+      **Tối ưu zero-risk (khác 4 bug đã sửa trước — đây KHÔNG phải bug, chỉ tránh tính toán trùng):**
+      code gốc gọi `getApprovalChain(request.user_id._id)` **2 lần độc lập** trong cùng 1 request khi
+      cả 2 điều kiện cùng đúng (không phải owner/viewAll nhưng canReview — VÀ đơn đang pending) — 1 lần
+      để check "có nằm trong chuỗi không", 1 lần nữa để tính `pending_reviewer`. Cùng tham số, cùng
+      trạng thái DB trong 1 request → kết quả chắc chắn giống hệt nhau, an toàn để nhớ lại (memoize)
+      thay vì gọi lại. Đã cài `getChain()` closure cache trong service, verify bằng test đếm số lần
+      gọi mock (`getApprovalChain).toHaveBeenCalledTimes(1)`) — xác nhận đúng chỉ gọi 1 lần dù cả 2
+      nhánh cùng cần.
+
+      **Tối ưu zero-risk thứ 2 (phát hiện sau, cùng tinh thần):** `approvals` (N lần gọi
+      `resolveReviewerProfileByAccountId`, chạy song song qua `Promise.all`) và `reviewed_by_profile`
+      (1 lần gọi riêng) **độc lập với nhau** (không bên nào phụ thuộc kết quả bên kia) nhưng code ban
+      đầu chạy **tuần tự 2 pha** (`await Promise.all(approvals...)` xong mới `await
+      resolveReviewerProfileByAccountId(reviewed_by...)`). Gộp cả 2 vào chung 1 `Promise.all` ngoài
+      cùng — tổng số query không đổi, chỉ chạy đồng thời thay vì nối tiếp, giảm wall-clock time. Verify
+      lại 15 test cũ của 1.9 vẫn pass nguyên vẹn (không đổi kết quả, chỉ đổi thời điểm chạy).
+
+      **Phát hiện + đính chính lớn hơn phạm vi 1.9 (xem mục 3, "Đính chính"):** trong lúc viết service
+      này, phát hiện `getApprovalChain`/`getManagedUserIds`/`resolveReviewerProfileByAccountId` — cả 3
+      hàm ở `helpers/` — thực ra **chỉ được `Request` dùng** (verify bằng `grep` toàn repo, không có
+      consumer nào khác), khác với `can()`/`rbac.js` (dùng thật ở 12 route file). Đã thêm quy tắc mới
+      vào mục 5 ("Cách làm việc"): mọi lần đụng tới hàm ở `helpers/`, phải `grep` xác nhận ai dùng thật
+      trước khi kết luận nó là Domain Service dùng chung hay riêng của 1 module. **Quyết định:** giữ
+      nguyên import cũ trong 1.9 (tránh trộn 2 loại thay đổi), tách thành **task riêng ngay sau đây**
+      để di chuyển 3 hàm này vào `modules/request/domain/`.
+
+      **Test:** `get-request-by-id.test.js` (11 case: 400 id sai, 404 không tồn tại, owner xem được,
+      viewAll xem được, 403 không có gì, 403 canReview nhưng không trong chuỗi, 200 canReview và trong
+      chuỗi, pending_reviewer null khi không pending, pending_reviewer đúng người tiếp theo, memoize
+      `getApprovalChain` chỉ 1 lần, approvals enrich đúng reviewer profile) +
+      `get-request-by-id.http.test.js` (4 case end-to-end qua route thật). Tổng 15 test mới, tất cả
+      pass. `npm test` toàn repo: 307 pass / 17 fail — vẫn đúng 4 suite pre-existing, không regression.
+
+      **Swagger:** thêm mới hoàn toàn `GET /requests/{id}` (trước đây chưa có tài liệu gì) — mô tả rõ
+      khác biệt với `getAll` (chuỗi duyệt cụ thể, không phải toàn bộ scope quản lý). Gặp lại đúng lỗi
+      YAML comma-trong-flow-map như task 1.7 (`{ description: ..., kèm ... }` bị hiểu nhầm thành 2
+      key) — sửa bằng block-style như lần trước. Verify `require("./src/config/swagger")` load đủ 193
+      path (192 + 1 mới).
+
+- [x] 1.9b — **Task phụ (đã hứa ngay sau 1.9):** di chuyển `getApprovalChain`/`getManagedUserIds`
+      (từ `helpers/approvalChain.js`) và `resolveReviewerProfileByAccountId` (tách riêng khỏi
+      `helpers/requestUtils.js`, các export khác của file này KHÔNG di chuyển — xem lý do dưới) vào
+      `modules/request/domain/approval-chain.js` và `modules/request/domain/resolve-reviewer-profile.js`.
+
+      **Grep lại kỹ hơn trước khi move — không di chuyển nguyên cả file `requestUtils.js`:** áp dụng
+      đúng quy tắc mới (mục 5) ở cấp độ **từng hàm export**, không chỉ cấp file. Kết quả:
+      - `notify` — dùng cả ở `weeklyReportJob.js` (module khác hẳn) → **giữ nguyên ở `helpers/`**,
+        dùng chung thật.
+      - `calcTotalDays`/`buildWorkDatesWithStatus` — chỉ `Request` dùng, nhưng qua các
+        `*Handler.js` (`leaveHandler.js`...) **chưa migrate** (thuộc phạm vi task 1.11) → **chưa
+        move**, để dành khi làm 1.11 (tránh đụng file handler chưa tới lượt).
+      - `acquireRequestReviewLock`/`RequestReviewLockError` — chỉ `Request` dùng, nhưng thuộc luồng
+        `review` đa duyệt **chưa migrate** (task 1.13) → **chưa move**, để dành khi làm 1.13.
+      - `resolveReviewerProfileByAccountId` — chỉ `Request` dùng, VÀ đã có consumer thật ở code mới
+        (`get-request-by-id.service.js`) → **move ngay**, chín muồi nhất.
+
+      **Cập nhật import ở mọi nơi:** `RequestController.js` (legacy, vẫn còn sống tới 1.15),
+      3 application service (`get-eligible-reviewers`, `resolve-request-view-scope`,
+      `get-request-by-id`), và 5 file test (`__tests__/approvalChain.test.js` — test cũ tiền-migration,
+      chỉ sửa import path không sửa assertion — cộng 4 file test mới của `request` module có
+      `jest.mock(".../helpers/approvalChain")`).
+
+      **Verify kỹ trước khi kết luận xong** (đúng tinh thần "test thật, không đoán"): `node --check` +
+      `eslint` sạch trên toàn bộ 12 file đụng tới. Chạy `npm test` toàn repo lần đầu ra thêm 1 fail lạ
+      ở `get-request-by-id.http.test.js` ("Parse Error: Expected HTTP/...") — chạy lại riêng file đó
+      thì pass 4/4, chạy lại toàn bộ suite lần 2 cũng hết — kết luận đây là resource contention nhất
+      thời khi chạy `--runInBand` ~38 suite cùng lúc, không phải regression. Riêng `approvalChain.test.js`
+      (file vừa sửa import) fail đúng 5/16 case — **verify bằng `git stash`**: chạy lại đúng code gốc
+      (trước khi move) với file test gốc, **fail y hệt 5/16 case** — xác nhận 100% đây là vấn đề
+      pre-existing đã biết từ Phase 0 (nghi ngờ liên quan ngày/giờ), không phải do move file gây ra.
+      `requestApprovalFlow.test.js` (dùng `RequestController.js` vừa sửa import) fail đúng 3/26 — khớp
+      chính xác 3 case pre-existing đã biết. `requestControllerCreate.test.js` pass 100%. `npm test`
+      toàn repo (lần chạy sạch): 307 pass / 17 fail — vẫn đúng 4 suite pre-existing, không regression
+      nào từ việc move file.
+
+**Backlog kỹ thuật phát hiện sau 1.9b — CHƯA LÀM, ghi lại để không quên:**
+
+- **N+1 round-trip trong `resolveDepartmentHead` (`modules/request/domain/approval-chain.js`):**
+  vòng lặp `for (const account of accounts) { if (await can(account, ...)) ... }` gọi `can()` **tuần
+  tự, từng account 1** — mỗi account là 1 cache-key Redis riêng (`rbac:perms:${accountId}`), không
+  hưởng lợi cache như trường hợp "1 account, 2 permission code khác nhau" (đã verify ở task 1.8).
+  **Verify thật:** phòng ban 15 người, người có quyền nằm cuối danh sách → `UserRoleModel.find` bị
+  gọi đúng 15 lần tuần tự (31ms trên Mongo local — Mongo thật/phòng ban lớn hơn có thể chậm hơn nhiều).
+
+  **Đã bác 2 hướng sửa:**
+  1. Đổi sang aggregation Mongo 1 round-trip — **sai với schema thật**, tự ý viết lại logic
+     `can()`/`mergePermissions` (roles nhiều-nhiều qua `UserRoleModel`, permission qua
+     `RolePermissionModel`, override ALLOW/DENY qua `UserPermissionModel`, admin bypass) thành
+     pipeline riêng → nhân bản business logic phân quyền ở 2 nơi, rủi ro lệch nhau về sau nguy hiểm
+     hơn cả vấn đề hiệu năng ban đầu (sai âm thầm, không phải chậm).
+  2. Đổi `for...of` tuần tự → `Promise.all` song song — chỉ đổi CÁCH GỌI, không giảm số round-trip
+     (vẫn N), và làm mất lợi ích "dừng sớm" ở case phổ biến (trưởng phòng thường ở đầu danh sách).
+
+  **Hướng đúng (theo góp ý người dùng — tách đúng 2 concern):** `can()` không sai, chỉ sai
+  **granularity** (1 account/lần) cho nhu cầu này. `rbac.js` (chủ sở hữu duy nhất logic phân quyền)
+  cần thêm 1 hàm MỚI dạng batch — vd `getAccountIdsWithPermission(accounts, permissionCode)` — dùng
+  lại đúng `mergePermissions()` hiện có, chỉ đổi cách LẤY DỮ LIỆU ĐẦU VÀO từ "N query, 1 account/lần"
+  sang "~3 query cố định, tất cả account cùng lúc" (`UserRoleModel.find({user: {$in: ids}}})`,
+  `RolePermissionModel.find({role: {$in: allRoleIds}}})`, `UserPermissionModel.find({user: {$in: ids}}})`
+  rồi group lại per-account). `approvalChain.js` gọi hàm batch mới này thay vì loop gọi `can()`.
+
+  **⚠️ Lưu ý quan trọng khi triển khai (người dùng nhắc trực tiếp):** `AccountModel.role` hiện là
+  string enum `admin|user|manager`, dùng để short-circuit trong `can()`
+  (`if (account.role === ROLE.ADMIN) return true`). **Người dùng dự định BỎ field này trong tương
+  lai** (chuyển hẳn sang RBAC chi tiết qua `UserRoleModel`/`RolePermissionModel`, không còn khái niệm
+  "admin" cấp field). Hàm batch mới **phải xử lý được cả 2 kịch bản**: (a) hiện tại — còn field
+  `role`, admin bypass mọi permission; (b) tương lai — field này có thể không còn, phải suy ra quyền
+  hoàn toàn qua role/permission chi tiết. Không được viết cứng logic chỉ đúng cho kịch bản (a).
+
+  **Chưa làm — tách thành task riêng, ngoài phạm vi migrate `request` hiện tại** (đụng tới `rbac.js`
+  dùng chung ở 12+ route file khác, cần review/test riêng biệt do phạm vi ảnh hưởng rộng).
+
+- **7 file `helpers/*Handler.js` (task 1.11, người dùng chủ động nhắc "check lại logic helper trước
+  khi đưa vào nơi phù hợp"):** verify bằng grep toàn repo trước khi kết luận (đúng quy tắc mục 5):
+  - `remoteHandler`/`businessTripHandler`/`clientVisitHandler`/`explanationHandler` — chỉ `Request`
+    dùng, sạch, sẵn sàng move nguyên vẹn. `awayDayHandler.js` (factory `createOnApprove` dùng chung
+    bởi 3 handler trên) — cũng chỉ Request dùng, nhưng tự nó phụ thuộc `resolveLeaveConflictOnAttendance`
+    của `leaveHandler.js` — move cùng đợt với `leaveHandler` sau khi tách.
+  - `leaveHandler.js` — **file lai**: phần lớn (`validate`/`validateAsync`/`onCreate`/`onApprove`/
+    `onReject`) chỉ Request dùng, nhưng `resolveLeaveConflictOnAttendance` dùng chung thật với
+    `AttendanceController.js`/`helpers/attendanceHelper.js`/`helpers/awayDayHandler.js` — phải tách
+    hàm này ra riêng trước, không move nguyên cả file.
+  - **`lateEarlyHandler`/`forgotCheckinHandler` — KHÔNG move, để lại `helpers/` tới Phase 8:** 2 file
+    này phụ thuộc SÂU vào `attendanceHelper.js`/`attendancePenalty.js`/`jobs/finalizeWorkDay.js` —
+    những file này cũng được `AttendanceController.js` và cron job (`jobs/index.js`) dùng trực tiếp.
+    Đây là giao điểm thật giữa 2 domain, không phải "được Request gọi" đơn thuần — di chuyển 2 handler
+    này bây giờ có nguy cơ phải đụng lại khi Phase 8 (`attendance`) tới. Đã bàn 5 hướng kiến trúc cho
+    ranh giới Request↔Attendance (Shared Kernel / 1 chiều phụ thuộc / gộp module / Anti-Corruption
+    Layer / trì hoãn) — **chọn trì hoãn quyết định cấu trúc cuối cùng tới Phase 8**, nhưng đã chốt
+    hướng kỹ thuật cho 2 nhu cầu cụ thể ("trừ ngày phép", "chặn trùng ngày"): ưu tiên ép ở tầng DB/mô
+    hình hoá `LeaveBalance` thành aggregate riêng khi migrate chính thức, **không** dùng Saga hay chấp
+    nhận eventual-consistency cho 2 nhu cầu này (2 domain cùng 1 MongoDB, transaction ACID đã đủ dùng
+    và đã chứng minh chạy đúng ở task 1.10).
+
+    **Phát hiện phụ trong lúc bàn — race condition có thật, CÓ SẴN TỪ CODE GỐC, chưa sửa:** cơ chế
+    "MongoDB tự phát hiện write conflict" (verify ở task 1.10) chỉ bảo vệ khi 2 transaction cùng ghi
+    **1 document đã tồn tại**. Với việc TẠO MỚI 2 document khác nhau (2 đơn leave/remote/business_trip/
+    client_visit/forgot_checkin chồng lấn ngày, insert gần như đồng thời), MongoDB không coi là conflict
+    — `validateAsync()`'s check chồng lấn chỉ là query trong transaction, không có gì ở tầng DB chặn
+    cứng (unique index không giải quyết được vì đây là range-overlap, không phải trùng khoá). Cùng loại
+    phát hiện như các bug nghiệp vụ đã ghi ở task 1.1 — **không tự sửa, cần task riêng có xác nhận**
+    (hướng khả dĩ: lock theo `(user_id, request_type)` trước check+insert, theo pattern
+    `acquireRequestReviewLock`/`acquireUserLeaveLock` đã có sẵn).
+
+  - **Quyết định thời điểm move — đẩy xuống SAU task 1.15 (không phải ngay sau 1.11 như dự định ban
+    đầu):** lý do — `RequestController.js` (bị xoá ở 1.15) hiện import 7 handler này TRỰC TIẾP; move
+    ngay bây giờ phải sửa import ở file sắp xoá, tốn công thừa. Đợi tới sau 1.15: mọi code mới
+    (1.10-1.13) đều gọi qua `request-type-handlers.js`, không import handler trực tiếp — lúc đó move
+    chỉ cần sửa `request-type-handlers.js` + vài test file đang import trực tiếp để spy
+    (`leaveHandler` ở `create-request.test.js`/`cancel-request.test.js`).
+  - **Không đẩy Phase 8 (`attendance`) lên sớm hơn trong roadmap** dù phát hiện ràng buộc sâu với
+    Request — đã cân nhắc, quyết định hoàn thành nốt Phase 1 (1.12-1.16) trước, bàn lại thứ tự Phase
+    2-8 như 1 quyết định riêng sau khi Phase 1 xong hẳn (không phản ứng vội theo 1 phát hiện cục bộ).
 
 ### Action ghi (rủi ro cao hơn — characterization test trước nếu cần, mỗi task verify kỹ)
 
-- [ ] 1.10 — `cancel` (ghi đơn giản nhất: chỉ check ownership + status, set `cancelled`).
-- [ ] 1.11 — `create` (dispatch qua 7 handler theo `request_type`, transaction, gọi
-      `handler.validate/validateAsync/onCreate`).
+- [x] 1.10 — `cancel`: action GHI đầu tiên (khác hẳn 1.6-1.9, tất cả đều đọc). Load entity qua
+      `RequestRepository.findOneById` (không phải raw Mongoose document như code gốc), check tồn
+      tại → check hồ sơ nhân viên → check chủ sở hữu → `entity.cancel()` (tự check `pending` qua
+      invariant có sẵn từ task 1.1) → gọi `handler.onReject` nếu loại đơn có (side-effect, vd hoàn
+      ngày phép) → `requestRepository.updateById`.
+
+      **Building block mới, dùng chung cho mọi action ghi sau này:**
+      - `domain/request-type-handlers.js` — registry `request_type -> handler module`, tránh định
+        nghĩa lại object này ở cả `cancel` (1.10) và `create` (1.11).
+      - `core/db/run-in-transaction.js` — bọc `startSession/startTransaction/runChild/commit`,
+        **map lỗi transient transaction (MongoDB gắn nhãn `errorLabels: ["TransientTransactionError"]`
+        — cách chính thức MongoDB khuyến nghị để nhận diện, không hardcode `error.code`) thành
+        `ConflictException` (409)** thay vì để lỗi thô `MongoServerError` lộ ra ngoài. Dùng lại cho
+        1.11/1.12/1.13 (đã xác nhận trước khi viết — không phải đoán, vì biết chắc các task sau
+        cũng cần transaction y hệt).
+
+      **1 bug thật phát hiện + sửa TRƯỚC khi test (không đợi test fail):** `handler.onReject(request,
+      session, isCancel)` — cả `leaveHandler`/`forgotCheckinHandler` đọc `request._id` (quy ước
+      Mongoose document), nhưng `entity.getProps()` chỉ có `id`, không có `_id` — nếu truyền thẳng,
+      `adjustLeaveBalance({refId: request._id})` nhận `undefined`, sai dữ liệu tham chiếu âm thầm.
+      Đã map `{ ...props, _id: props.id }` khi gọi handler.
+
+      **Message 403 tách theo yêu cầu người dùng (khác code gốc — code gốc gộp chung, xem thảo
+      luận):** code gốc `if (!userInfo || !request.user_id.equals(userInfo._id))` → 1 message
+      403 duy nhất cho 2 điều kiện khác nhau. Đã tách: thiếu hồ sơ nhân viên → 404 "Không tìm thấy
+      thông tin nhân viên" (nhất quán với 1.6-1.9), có hồ sơ nhưng không phải chủ đơn → 403 "Bạn
+      không phải chủ đơn này, không thể hủy".
+
+      **Race condition — đã verify thật bằng transaction thật (`MongoMemoryReplSet`), không suy
+      luận:** 2 lần gọi `cancelRequest()` đồng thời cho CÙNG 1 đơn → verify bằng test thật: MongoDB
+      tự phát hiện write conflict ở tầng transaction (1 request FULFILLED, 1 REJECTED) — dữ liệu
+      `Request` document KHÔNG bị hỏng. Tưởng `handler.onReject` (gọi 2 lần ở tầng JS function) có
+      thể gây double-refund ngày phép — verify bằng cách đếm dòng thật trong `LeaveBalanceModel`:
+      **chỉ 1 dòng, không phải 2** — vì `adjustLeaveBalance` dùng đúng `session` truyền vào, ghi của
+      transaction bị abort tự động rollback theo cả transaction. **Không phải bug**, nhưng lỗi thô
+      MongoDB (`Write conflict during plan execution...`, `codeName: "WriteConflict"`,
+      `errorLabels: ["TransientTransactionError"]`) lộ ra client là vấn đề thật — đã sửa qua
+      `run-in-transaction.js` ở trên. Verify lại sau khi sửa: request thua cuộc nhận đúng
+      `ConflictException` (409, message rõ ràng), không còn lỗi thô.
+
+      **Test:** `cancel-request.test.js` (8 case: 400 id sai, 404 không tồn tại, 404 thiếu hồ sơ,
+      403 không phải chủ đơn, 409 sai trạng thái, 200 thành công kèm verify `handler.onReject` nhận
+      đúng `_id`/hoàn đúng số ngày phép vào `LeaveBalanceModel` thật, 200 loại đơn không có
+      `onReject` vẫn hoạt động, race concurrency 1 thành công/1 conflict sạch). Tất cả 8/8 pass.
+      `npm test` toàn repo: 315 pass / 17 fail — vẫn đúng 4 suite pre-existing, không regression.
+
+      **Swagger:** cập nhật `PATCH /requests/cancel/{id}` — mô tả rõ side-effect khi hủy, tách đúng
+      403/404, thêm `409` cho cả 2 lý do (sai trạng thái + race). Verify load đủ 193 path.
+- [x] 1.11 — `create`: `application/create-request.service.js` — action ghi phức tạp nhất. Luồng:
+      check `request_type` (tái dùng `VALID_TYPES` từ `request-query-filters.js`, không định nghĩa
+      lại) → tìm `userInfo` → `handler.validate(body, userInfo)` **ngoài** transaction (đúng y hệt
+      code gốc) → trong `runInTransaction` (task 1.10): `handler.validateAsync()` →
+      `RequestEntity.create()` (Entity, không phải raw document) → `requestRepository.insert()` →
+      `handler.onCreate()` nếu có (map `_id` như đã làm ở cancel) → sau khi commit, fire-and-forget
+      `notify()` người duyệt gần nhất qua `getApprovalChain` (y hệt code gốc, lỗi ở đây không ảnh
+      hưởng response đã trả về).
+
+      **Building block mới — `toHandlerException()`:** 7 handler (`helpers/*Handler.js`, chưa migrate
+      — xem backlog dưới) trả lỗi dạng `{status, message}` thô, không phải `ExceptionBase`. Đã grep
+      toàn bộ 7 handler xác nhận **chỉ 3 status code thật sự dùng** (400/403/409) trước khi viết map
+      — không đoán. Map đúng 3 case + fallback `ArgumentInvalidException` (400) an toàn cho case lạ.
+      Đã đọc kỹ `leaveHandler.js` (400+ dòng, phức tạp nhất) trước khi thiết kế — xác nhận
+      `onApprove`/`onReject` (dùng ở review, 1.12/1.13) **không** trả lỗi kiểu này, chỉ side-effect
+      thuần — nên `toHandlerException` chỉ cần cho `create`, không phải building block dùng chung
+      thêm cho review.
+
+      **Phát hiện thêm (người dùng chủ động yêu cầu kiểm tra) — xem "Backlog kỹ thuật" bên dưới:**
+      grep toàn bộ 7 file `helpers/*Handler.js` xác nhận 6/7 file chỉ `Request` dùng (sẵn sàng move),
+      riêng `leaveHandler.js` là **file lai** (phần lớn Request-only, nhưng
+      `resolveLeaveConflictOnAttendance` dùng chung thật với `AttendanceController.js`) — cần tách
+      trước khi move. **Quyết định: giữ nguyên vị trí lúc làm 1.11, tách thành task riêng ngay sau**
+      (theo đúng mẫu 1.9b) — đã ghi chi tiết vào backlog.
+
+      **Test:** `create-request.test.js` (9 case: 400 loại đơn sai, 404 thiếu hồ sơ, 400 lỗi validate
+      sync, 409 lỗi validateAsync — verify map đúng exception, 201 thành công remote không có
+      `onCreate` kèm verify `notify` gọi đúng người/đúng params sau commit, 201 khi chain rỗng không
+      throw không gọi notify, 201 nghỉ phép unpaid không side-effect, 201 nghỉ phép paid verify
+      `onCreate` trừ đúng số ngày phép vào `LeaveBalanceModel` thật + `_id` map đúng, rollback khi
+      `onCreate` lỗi — verify KHÔNG lưu document). Tự phát hiện 1 lỗi trong chính test (không phải
+      bug code): dùng ngày tương đối ban đầu có thể rơi vào Thứ 7 — nghiệp vụ công ty coi Thứ 7 là
+      nửa ngày công (`calcTotalDays`), làm `total_days` ra 0.5 không xác định tuỳ ngày chạy test thật
+      — sửa bằng helper `weekdayFromNow()` luôn nhảy qua Thứ 7/Chủ nhật. Tất cả 9/9 pass. `npm test`
+      toàn repo: 324 pass / 17 fail — vẫn đúng 4 suite pre-existing, không regression.
+
+      **Swagger:** cập nhật `POST /requests` — thêm enum `request_type`, tách rõ `400`/`403`/`404`/
+      `409` (trước đây chỉ có `400` chung chung + `404`). Verify load đủ 193 path (không tăng vì là
+      endpoint đã có, chỉ cập nhật docs).
 - [ ] 1.12 — `review` nhánh **1 người duyệt** (`!needsMultiApproval`): check tự duyệt, check trong
       chuỗi/`canReviewAll`, set status, gọi `handler.onApprove`/`onReject`.
 - [ ] 1.13 — `review` nhánh **đa duyệt** (mở rộng từ 1.12): Redis lock trước transaction, check đã duyệt
@@ -767,7 +1058,7 @@ thể đổi sau khi rút kinh nghiệm từ Phase 1).
 | 5 | `weekly-report` | Value Object cho status-flow (giống `resolveAttendanceDay`) |
 | 6 | `chat` | Quyết định phạm vi module (hrm/workplace/platform-wide) TRƯỚC khi domain modeling |
 | 7 | `post`, `labor-contract` | Rủi ro thấp, cùng khuôn Phase 1 |
-| 8 | `attendance` | Logic phần lớn đã an toàn (helper có test) — chủ yếu di dời cấu trúc; ghi chú idempotency nếu sau này có webhook máy chấm công |
+| 8 | `attendance` | Logic phần lớn đã an toàn (helper có test) — chủ yếu di dời cấu trúc; ghi chú idempotency nếu sau này có webhook máy chấm công. **Ràng buộc sâu với `request` (lateEarly/forgotCheckin handler) đã bàn kỹ ở mục 7, phần backlog task 1.11 — xem trước khi bắt đầu module này.** |
 
 ## 9. Verification (lặp lại sau mỗi task)
 

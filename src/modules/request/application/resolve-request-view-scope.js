@@ -1,6 +1,6 @@
 const UserInfoModel = require("../../../models/UserInfoModel");
 const { can } = require("../../../helpers/rbac");
-const { getManagedUserIds } = require("../../../helpers/approvalChain");
+const { getManagedUserIds } = require("../domain/approval-chain");
 const { PERMISSION } = require("../../../constants");
 const { ForbiddenException, NotFoundException } = require("../../../core/exceptions/exceptions");
 

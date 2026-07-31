@@ -4,10 +4,10 @@ const UserInfoModel = require("../../../models/UserInfoModel");
 const { can } = require("../../../helpers/rbac");
 const { getApprovalChain } = require("../domain/approval-chain");
 const { resolveReviewerProfileByAccountId } = require("../domain/resolve-reviewer-profile");
+const { RequestNotFoundError } = require("../domain/request.errors");
 const { PERMISSION } = require("../../../constants");
 const {
   ArgumentInvalidException,
-  NotFoundException,
   ForbiddenException
 } = require("../../../core/exceptions/exceptions");
 
@@ -19,7 +19,7 @@ async function getRequestById(account, id) {
   const request = await RequestModel.findOne({ _id: id, isDeleted: false })
     .populate("user_id", "full_name ma_nv phone_number")
     .populate("reviewed_by", "full_name id_account");
-  if (!request) throw new NotFoundException("Đơn không tồn tại");
+  if (!request) throw new RequestNotFoundError();
 
   const myUserInfo = await UserInfoModel.findOne({ id_account: account._id, isDeleted: false });
   const isOwner = Boolean(myUserInfo) && request.user_id._id.equals(myUserInfo._id);

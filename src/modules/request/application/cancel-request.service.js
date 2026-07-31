@@ -5,6 +5,7 @@ const { runInTransaction } = require("../../../core/db/run-in-transaction");
 const { eventBus } = require("../../../core/events/event-bus");
 require("./request-notification.handlers");
 const { REQUEST_TYPE_HANDLERS } = require("../domain/request-type-handlers");
+const { RequestNotFoundError } = require("../domain/request.errors");
 const {
   ArgumentInvalidException,
   NotFoundException,
@@ -25,7 +26,7 @@ async function cancelRequest(account, id) {
     }).session(session);
 
     const foundEntity = await requestRepository.findOneById(id);
-    if (!foundEntity) throw new NotFoundException("Đơn không tồn tại");
+    if (!foundEntity) throw new RequestNotFoundError();
 
     if (!myUserInfo) throw new NotFoundException("Không tìm thấy thông tin nhân viên");
     if (String(foundEntity.userId) !== String(myUserInfo._id)) {

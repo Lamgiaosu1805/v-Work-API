@@ -7,6 +7,7 @@ require("./request-notification.handlers");
 const { can } = require("../../../helpers/rbac");
 const { getApprovalChain } = require("../domain/approval-chain");
 const { REQUEST_TYPE_HANDLERS } = require("../domain/request-type-handlers");
+const { RequestNotFoundError } = require("../domain/request.errors");
 const {
   acquireRequestReviewLock,
   RequestReviewLockError
@@ -42,7 +43,7 @@ async function reviewRequest(account, id, { action, reviewer_note = "" }) {
   }
 
   const preCheckEntity = await requestRepository.findOneById(id);
-  if (!preCheckEntity) throw new NotFoundException("Đơn không tồn tại");
+  if (!preCheckEntity) throw new RequestNotFoundError();
 
   const release = await acquireLockIfNeeded(id, action, preCheckEntity);
 
@@ -55,7 +56,7 @@ async function reviewRequest(account, id, { action, reviewer_note = "" }) {
       if (!reviewerInfo) throw new NotFoundException("Không tìm thấy thông tin nhân viên");
 
       const entity = await requestRepository.findOneById(id);
-      if (!entity) throw new NotFoundException("Đơn không tồn tại");
+      if (!entity) throw new RequestNotFoundError();
 
       const canReviewAll = await can(account, PERMISSION.HRM_REQUEST_REVIEW_ALL);
       const chain = canReviewAll ? [] : await getApprovalChain(entity.userId);

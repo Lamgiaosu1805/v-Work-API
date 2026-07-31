@@ -2,24 +2,16 @@ import { RequestContextService } from "../core/context/request-context";
 
 const IS_PROD = process.env.NODE_ENV === "production";
 
-function serializeMeta(meta?: Record<string, unknown>): string {
-  if (!meta) return "";
-  try {
-    return ` ${JSON.stringify(meta)}`;
-  } catch {
-    return " [meta không serialize được]";
-  }
-}
-
 function print(level: string, message: string, meta?: Record<string, unknown>): void {
   const timestamp = new Date().toISOString();
   const requestId = RequestContextService.getRequestId();
   const requestIdPart = requestId ? ` [${requestId}]` : "";
-  const line = `[${timestamp}] [${level}]${requestIdPart} ${message}${serializeMeta(meta)}`;
+  const prefix = `[${timestamp}] [${level}]${requestIdPart} ${message}`;
+  const args: unknown[] = meta ? [prefix, meta] : [prefix];
   if (level === "ERROR" || level === "WARN") {
-    console.error(line);
+    console.error(...args);
   } else {
-    console.log(line);
+    console.log(...args);
   }
 }
 

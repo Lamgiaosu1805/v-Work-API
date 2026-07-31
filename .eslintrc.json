@@ -12,9 +12,38 @@
     "airbnb-base",
     "plugin:prettier/recommended"
   ],
+  "settings": {
+    "import/resolver": {
+      "node": {
+        "extensions": [".js", ".ts"]
+      }
+    }
+  },
   "overrides": [
     {
       "files": ["__tests__/**/*.js", "tests/**/*.js"],
+      "env": { "jest": true }
+    },
+    {
+      "files": ["**/*.ts"],
+      "parser": "@typescript-eslint/parser",
+      "parserOptions": {
+        "sourceType": "module",
+        "project": "./tsconfig.test.json"
+      },
+      "extends": ["airbnb-typescript/base", "plugin:prettier/recommended"],
+      "rules": {
+        "no-underscore-dangle": "off",
+        "import/prefer-default-export": "off",
+        "no-useless-constructor": "off",
+        "@typescript-eslint/no-unused-vars": [
+          "error",
+          { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
+        ]
+      }
+    },
+    {
+      "files": ["__tests__/**/*.ts"],
       "env": { "jest": true }
     }
   ],
@@ -29,6 +58,7 @@
     "no-restricted-syntax": "off",
     "no-await-in-loop": "off",
     "no-continue": "off",
-    "no-plusplus": "off"
+    "no-plusplus": "off",
+    "import/extensions": ["error", "ignorePackages", { "js": "never", "ts": "never" }]
   }
 }

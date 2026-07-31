@@ -16,7 +16,6 @@ const WorkSheetModel = new mongoose.Schema(
     minute_early: { type: Number, default: 0 },
     work_unit: { type: Number, default: null },
     penalty_amount: { type: Number, default: 0 },
-    // Snapshot lần sửa tay gần nhất (vd adminEditWorksheet) — không phải lịch sử đầy đủ
     edited_by: { type: mongoose.Schema.Types.ObjectId, ref: "account", default: null },
     edited_at: { type: Date, default: null },
     ...BaseSchema.obj

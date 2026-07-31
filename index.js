@@ -17,6 +17,8 @@ const { setIO } = require("./src/sockets/ioRegistry");
 const { startCronJobs } = require("./src/jobs");
 const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
 const { serveEncryptedFile } = require("./src/middlewares/serveEncryptedFile");
+const requestContextMiddleware = require("./src/middlewares/requestContextMiddleware");
+const { errorHandlerMiddleware } = require("./src/core/http/error-handler.middleware");
 const swaggerSpec = require("./src/config/swagger");
 
 const app = express();
@@ -41,6 +43,8 @@ setIO(io);
 setupChatSocket(io);
 
 app.set("trust proxy", 1);
+
+app.use(requestContextMiddleware);
 
 app.use(compression());
 
@@ -95,6 +99,8 @@ app.get("/api-docs.json", (req, res) => res.json(swaggerSpec));
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 route(app);
+
+app.use(errorHandlerMiddleware);
 
 (async () => {
   try {

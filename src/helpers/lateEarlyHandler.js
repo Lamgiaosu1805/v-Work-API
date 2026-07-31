@@ -40,22 +40,18 @@ async function validateAsync(payload, userInfo, session) {
     type: payload.type,
     isDeleted: false
   }).session(session);
-  return dup ? { status: 409, message: "Đã có đơn cho ca này" } : null;
-}
+  if (dup) return { status: 409, message: "Đã có đơn cho ca này" };
 
-async function onCreate(request, _userInfo, session) {
-  const { start: periodStart, end: periodEnd } = getPayrollPeriodRange(request.date);
+  const { start: periodStart, end: periodEnd } = getPayrollPeriodRange(payload.date);
   const priorCount = await RequestModel.countDocuments({
-    user_id: request.user_id,
+    user_id: userInfo._id,
     request_type: "late_early",
     status: { $in: ["pending", "approved"] },
     isDeleted: false,
-    _id: { $ne: request._id },
     date: { $gte: periodStart, $lte: periodEnd }
   }).session(session);
 
-  request.occurrence = priorCount + 1;
-  await request.save({ session });
+  return { occurrence: priorCount + 1 };
 }
 
 async function onApprove(request, session) {
@@ -104,4 +100,4 @@ async function onApprove(request, session) {
   await saveAttendanceDay({ userId: request.user_id, dateKey, worksheet, computed, session });
 }
 
-module.exports = { validate, validateAsync, onCreate, onApprove };
+module.exports = { validate, validateAsync, onApprove };

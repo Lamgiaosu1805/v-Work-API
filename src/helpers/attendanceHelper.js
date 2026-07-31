@@ -310,30 +310,28 @@ async function persistAttendanceDay({ userId, dateKey, worksheet, computed, sess
 
   if (morningStatus === afternoonStatus) {
     const newStatus = morningStatus;
-    const result = await WorkDayStatusModel.updateMany(
+    await WorkDayStatusModel.deleteMany(
       {
         user_id: userId,
         date: { $gte: dayStart, $lt: dayEnd },
         status: { $in: OVERRIDABLE },
+        period: { $ne: "full" },
         isDeleted: false
       },
-      { status: newStatus },
       { session }
     );
-    if (result.matchedCount === 0) {
-      await WorkDayStatusModel.updateOne(
-        { user_id: userId, date: dayStart, period: "full" },
-        {
-          $set: { status: newStatus },
-          $setOnInsert: {
-            worksheet_id: worksheet._id,
-            sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
-            isDeleted: false
-          }
-        },
-        { upsert: true, session }
-      );
-    }
+    await WorkDayStatusModel.updateOne(
+      { user_id: userId, date: dayStart, period: "full" },
+      {
+        $set: { status: newStatus },
+        $setOnInsert: {
+          worksheet_id: worksheet._id,
+          sources: [{ ref_id: worksheet._id, ref_type: "attendance" }],
+          isDeleted: false
+        }
+      },
+      { upsert: true, session }
+    );
   } else {
     await WorkDayStatusModel.deleteMany(
       {
@@ -391,10 +389,6 @@ const NON_DERIVABLE_STATUSES = new Set([
   "client_visit"
 ]);
 
-// Đối chiếu day_statuses với check_in/check_out thật của worksheet trước khi trả về client,
-// đề phòng status lưu cũ/lệch (vd: checkout đã bị sửa/xoá sau khi status được tính lần trước).
-// Đối chiếu theo TỪNG buổi: "morning" ứng với check_in, "afternoon" ứng với check_out,
-// "full" ứng với cả 2 (đủ cả 2 mới coi là có dữ liệu).
 function correctDayStatuses(statuses, ws) {
   const hasCheckIn = !!ws?.check_in;
   const hasCheckOut = !!ws?.check_out;

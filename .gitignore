@@ -3,4 +3,5 @@ uploads/internal
 .env
 serviceAccountKey.json
 tests/
+dist/
 

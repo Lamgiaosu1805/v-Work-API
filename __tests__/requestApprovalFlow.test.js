@@ -1,7 +1,11 @@
 const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 
-const RequestController = require("../src/controllers/RequestController");
+const {
+  requestHttpController
+} = require("../src/modules/request/interface/request.http.controller");
+const { asyncHandler } = require("../src/core/http/async-handler");
+const { errorHandlerMiddleware } = require("../src/core/http/error-handler.middleware");
 const AccountModel = require("../src/models/AccountModel");
 const UserInfoModel = require("../src/models/UserInfoModel");
 const DepartmentModel = require("../src/models/DepartmentModel");
@@ -30,9 +34,22 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
+  // createRequest/reviewRequest publish domain event fire-and-forget (không await) —
+  // đợi 1 nhịp để notify của lần gọi cuối cùng kịp query xong trước khi ngắt kết nối,
+  // tránh "MongoClientClosedError: Operation interrupted" do disconnect giữa chừng.
+  await new Promise((resolve) => {
+    setTimeout(resolve, 50);
+  });
   await mongoose.disconnect();
   await mongod.stop();
 });
+
+// Gọi đúng như Express thật sẽ gọi: asyncHandler bắt reject rồi chuyển cho
+// errorHandlerMiddleware format response — tái dùng nguyên request.http.controller.js +
+// core/http thay vì gọi thẳng RequestController.js (đã xoá ở task 1.15).
+async function callController(action, req, res) {
+  await asyncHandler(action)(req, res, (error) => errorHandlerMiddleware(error, req, res));
+}
 
 beforeEach(async () => {
   await Promise.all([
@@ -193,7 +210,7 @@ describe("getAll — authorization động theo approval chain", () => {
       query: {}
     };
     const res = makeRes();
-    await RequestController.getAll(req, res);
+    await callController(requestHttpController.getAll, req, res);
 
     expect(res.status).not.toHaveBeenCalledWith(403);
     const { data } = res.json.mock.calls[0][0];
@@ -209,7 +226,7 @@ describe("getAll — authorization động theo approval chain", () => {
       query: {}
     };
     const res = makeRes();
-    await RequestController.getAll(req, res);
+    await callController(requestHttpController.getAll, req, res);
     expect(res.status).toHaveBeenCalledWith(403);
   });
 
@@ -233,7 +250,7 @@ describe("getAll — authorization động theo approval chain", () => {
       query: {}
     };
     const res = makeRes();
-    await RequestController.getAll(req, res);
+    await callController(requestHttpController.getAll, req, res);
 
     const { data } = res.json.mock.calls[0][0];
     expect(data.length).toBe(2);
@@ -262,7 +279,7 @@ describe("review — authorization động + thông báo dedupe", () => {
       body: { action: "approve" }
     };
     const res = makeRes();
-    await RequestController.review(req, res);
+    await callController(requestHttpController.review, req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
     const updated = await LeaveRequest.findById(request._id);
@@ -284,7 +301,7 @@ describe("review — authorization động + thông báo dedupe", () => {
       body: { action: "approve" }
     };
     const res = makeRes();
-    await RequestController.review(req, res);
+    await callController(requestHttpController.review, req, res);
 
     expect(res.status).toHaveBeenCalledWith(403);
   });
@@ -311,7 +328,7 @@ describe("review — authorization động + thông báo dedupe", () => {
       body: { action: "approve" }
     };
     const res = makeRes();
-    await RequestController.review(req, res);
+    await callController(requestHttpController.review, req, res);
     expect(res.status).toHaveBeenCalledWith(200);
 
     await waitFor(async () => {
@@ -342,7 +359,7 @@ describe("review — authorization động + thông báo dedupe", () => {
       body: { action: "approve" }
     };
     const res = makeRes();
-    await RequestController.review(req, res);
+    await callController(requestHttpController.review, req, res);
     expect(res.status).toHaveBeenCalledWith(200);
 
     await waitFor(async () => {
@@ -381,7 +398,7 @@ describe("review — tier-2 (department.manager) có thể duyệt dù không ph
       body: { action: "approve" }
     };
     const res = makeRes();
-    await RequestController.review(req, res);
+    await callController(requestHttpController.review, req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
     const updated = await LeaveRequest.findById(request._id);
@@ -410,7 +427,7 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
       body: { action: "approve" }
     };
     const res = makeRes();
-    await RequestController.review(req, res);
+    await callController(requestHttpController.review, req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
     const updated = await LeaveRequest.findById(request._id);
@@ -430,7 +447,8 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     const onApproveSpy = jest.spyOn(leaveHandler, "onApprove");
 
     const res1 = makeRes();
-    await RequestController.review(
+    await callController(
+      requestHttpController.review,
       {
         account: { _id: a1._id.toString(), role: "user" },
         params: { id: request._id.toString() },
@@ -440,7 +458,8 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     );
 
     const res2 = makeRes();
-    await RequestController.review(
+    await callController(
+      requestHttpController.review,
       {
         account: { _id: a2._id.toString(), role: "user" },
         params: { id: request._id.toString() },
@@ -470,9 +489,9 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
       body: { action: "approve" }
     };
 
-    await RequestController.review(reqPayload, makeRes());
+    await callController(requestHttpController.review, reqPayload, makeRes());
     const res2 = makeRes();
-    await RequestController.review(reqPayload, res2);
+    await callController(requestHttpController.review, reqPayload, res2);
 
     expect(res2.status).toHaveBeenCalledWith(409);
     const updated = await LeaveRequest.findById(request._id);
@@ -496,7 +515,7 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
       body: { action: "reject" }
     };
     const res = makeRes();
-    await RequestController.review(req, res);
+    await callController(requestHttpController.review, req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
     const updated = await LeaveRequest.findById(request._id);
@@ -518,7 +537,7 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
       body: { action: "approve" }
     };
     const res = makeRes();
-    await RequestController.review(req, res);
+    await callController(requestHttpController.review, req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
     const updated = await LeaveRequest.findById(request._id);
@@ -541,7 +560,7 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
       body: { action: "approve" }
     };
     const res = makeRes();
-    await RequestController.review(req, res);
+    await callController(requestHttpController.review, req, res);
 
     // review_all chỉ bypass yêu cầu "phải nằm trong chuỗi duyệt" — KHÔNG bypass yêu cầu
     // đủ 2 người của đơn nghỉ dài ngày. 1 mình admin không được tự ý duyệt xong.
@@ -561,7 +580,8 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     const { account: adminA } = await createEmployee({ branchId, role: "admin" });
     const { account: adminB } = await createEmployee({ branchId, role: "admin" });
 
-    await RequestController.review(
+    await callController(
+      requestHttpController.review,
       {
         account: { _id: adminA._id.toString(), role: "admin" },
         params: { id: request._id.toString() },
@@ -571,7 +591,8 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     );
 
     const res2 = makeRes();
-    await RequestController.review(
+    await callController(
+      requestHttpController.review,
       {
         account: { _id: adminB._id.toString(), role: "admin" },
         params: { id: request._id.toString() },
@@ -608,8 +629,8 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     };
 
     const results = await Promise.allSettled([
-      RequestController.review(reqA, makeRes()),
-      RequestController.review(reqB, makeRes())
+      callController(requestHttpController.review, reqA, makeRes()),
+      callController(requestHttpController.review, reqB, makeRes())
     ]);
 
     expect(results.every((r) => r.status === "fulfilled")).toBe(true);

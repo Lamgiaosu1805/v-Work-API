@@ -19,7 +19,7 @@ async function getRequestById(account, id) {
   const request = await RequestModel.findOne({ _id: id, isDeleted: false })
     .populate("user_id", "full_name ma_nv phone_number")
     .populate("reviewed_by", "full_name id_account");
-  if (!request) throw new RequestNotFoundError();
+  if (!request) throw new RequestNotFoundError(undefined, { metadata: { requestId: id } });
 
   const myUserInfo = await UserInfoModel.findOne({ id_account: account._id, isDeleted: false });
   const isOwner = Boolean(myUserInfo) && request.user_id._id.equals(myUserInfo._id);

@@ -33,7 +33,16 @@ src/
     firebase.js                 # Firebase Admin SDK (push notification)
     redis.js                    # Redis client
     common/utils.js
-  controllers/                  # Xử lý logic request/response
+  core/                         # DDD/Hexagonal building blocks dùng chung — xem mục "DDD + Hexagonal"
+    ddd/                        # Entity, AggregateRoot, DomainEvent base class
+    db/                         # MongooseRepositoryBase, runInTransaction
+    events/                     # event-bus.js (EventEmitter2 singleton)
+    exceptions/                 # ExceptionBase + Exception cụ thể (404/403/409/400)
+    context/                    # RequestContextService (AsyncLocalStorage — requestId, transaction session)
+    http/                       # asyncHandler, error-handler middleware, parsePagination
+  modules/                      # Module theo DDD/Hexagonal — MỚI, xem mục "DDD + Hexagonal"
+    request/                    # Module tham chiếu đầu tiên (hoàn thành)
+  controllers/                  # Pattern CŨ — xử lý logic request/response trực tiếp (chưa migrate)
   middlewares/
     authMiddleware.js           # authenticate + isAdmin + isManager + hasCrmAccess
     uploadFile.js               # Multer upload chung
@@ -51,6 +60,59 @@ src/
     commissionCalculator.js
 uploads/                        # Thư mục upload (dev), gitignored
 ```
+
+---
+
+## DDD + Hexagonal Architecture (module mới)
+
+Từ module `request` (`src/modules/request/`) trở đi, module mới áp dụng DDD + Hexagonal thay cho
+pattern `controllers/` + `routes/` cũ. Chi tiết lộ trình đầy đủ + mọi quyết định kiến trúc/deviation:
+xem `docs/DDD-HEXAGONAL-MIGRATION-PLAN.md`. **Dùng `src/modules/request/` làm ví dụ tham chiếu khi bắt
+đầu module tiếp theo.**
+
+### Cấu trúc 1 module
+
+```
+src/modules/<name>/
+  domain/                 # Entity, AggregateRoot, DomainEvent, business invariant — KHÔNG import Mongoose
+    events/
+    <name>.entity.js
+    <name>.errors.js
+  infrastructure/         # Nơi DUY NHẤT trong module biết Mongoose
+    <name>.repository.js  # extends MongooseRepositoryBase
+    <name>.mapper.js      # Mongoose doc <-> Entity <-> persistence object
+  application/            # Service — orchestrate domain + repository + gọi runInTransaction
+    <use-case>.service.js
+  interface/              # HTTP — mỏng, chỉ map request -> service -> response
+    <name>.http.controller.js
+    <name>.routes.js
+```
+
+### Quy ước đã chốt
+
+- **Đọc bypass domain (CQRS-lite):** API đọc (list/getById) query thẳng Mongoose, KHÔNG dựng Entity —
+  chỉ API ghi (create/update/cancel/review...) mới đi qua Entity + Repository.
+- **Transaction:** dùng `core/db/run-in-transaction.js` (`runInTransaction(work)`), không tự quản
+  session thủ công. Tự map lỗi MongoDB write-conflict (`TransientTransactionError`) thành
+  `ConflictException` (409) sạch, không rò `MongoServerError` ra ngoài.
+- **Domain Event:** `AggregateRoot.addEvent()` buffer event trong entity; gọi
+  `entity.publishEvents(eventBus)` (fire-and-forget, sau khi transaction đã commit) để publish.
+  `eventBus` là singleton `EventEmitter2` ở `core/events/event-bus.js`. Handler side-effect (vd
+  notify) đăng ký qua `eventBus.on(...)` trong 1 file riêng ở `application/`, và **mỗi service publish
+  event đó tự `require()` file handler** (side-effect import, không chỉ wire ở composition root) — để
+  listener luôn sẵn sàng kể cả khi test gọi thẳng service, không qua route.
+- **Exception:** ném `core/exceptions/*` (`NotFoundException`, `ForbiddenException`,
+  `ConflictException`, `ArgumentInvalidException`...) từ domain/application — route dùng `asyncHandler`
+  (bắt reject) + `errorHandlerMiddleware` tự format response, controller không cần try/catch thủ công.
+- **Request-type handler** (riêng module `request`): mỗi loại đơn (`leave`, `late_early`, `remote`,
+  `business_trip`, `client_visit`, `explanation`, `forgot_checkin`) có 1 file
+  `helpers/<type>Handler.js` theo contract `validate`/`validateAsync`/`onCreate`/`onApprove`/
+  `onReject` — **chưa di chuyển vào `domain/`** (2 handler phụ thuộc sâu vào Attendance, dời Phase 8).
+
+### Trạng thái
+
+Chỉ module `request` đã hoàn thành theo pattern này. Các module khác vẫn dùng `controllers/` +
+`routes/` cũ cho tới khi tới lượt migrate (xem thứ tự ở migration plan).
 
 ---
 

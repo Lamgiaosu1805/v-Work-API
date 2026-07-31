@@ -1,21 +1,32 @@
-const UserInfoModel = require("../../../models/UserInfoModel");
-const { RequestModel } = require("../../../models/RequestModel");
-const { parsePagination } = require("../../../core/http/parse-pagination");
-const {
+import UserInfoModel from "../../../models/UserInfoModel";
+import { RequestModel } from "../../../models/RequestModel";
+import { parsePagination } from "../../../core/http/parse-pagination";
+import {
   applyRequestTypeFilter,
   applyDateRangeFilter,
-  buildUserNameSearchFilter
-} = require("./request-query-filters");
-const { resolveRequestViewScope } = require("./resolve-request-view-scope");
+  buildUserNameSearchFilter,
+  RequestFilter
+} from "./request-query-filters";
+import { resolveRequestViewScope } from "./resolve-request-view-scope";
 
-async function getAllRequests(account, query) {
+interface GetAllRequestsQuery {
+  request_type?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+  search?: string;
+  page?: unknown;
+  limit?: unknown;
+}
+
+export async function getAllRequests(account: any, query: GetAllRequestsQuery) {
   const { request_type, status, from, to, search } = query;
   const { page, limit, skip } = parsePagination(query);
-  const filter = { isDeleted: false };
+  const filter: RequestFilter = { isDeleted: false };
 
   const scope = await resolveRequestViewScope(account);
   const { myUserInfo } = scope;
-  let scopedUserIds = scope.type === "managed" ? scope.userIds : null;
+  let scopedUserIds: unknown[] | null = scope.type === "managed" ? (scope.userIds ?? null) : null;
 
   applyRequestTypeFilter(filter, request_type);
   if (status) filter.status = status;
@@ -23,11 +34,11 @@ async function getAllRequests(account, query) {
 
   if (search) {
     const matchedUsers = await UserInfoModel.find(buildUserNameSearchFilter(search)).select("_id");
-    const matchedIds = matchedUsers.map((u) => u._id);
+    const matchedIds = matchedUsers.map((u: any) => u._id);
 
     if (scopedUserIds) {
-      const matchedSet = new Set(matchedIds.map((id) => id.toString()));
-      scopedUserIds = scopedUserIds.filter((id) => matchedSet.has(id.toString()));
+      const matchedSet = new Set(matchedIds.map((id: any) => id.toString()));
+      scopedUserIds = scopedUserIds.filter((id: any) => matchedSet.has(id.toString()));
     } else {
       scopedUserIds = matchedIds;
     }
@@ -35,7 +46,10 @@ async function getAllRequests(account, query) {
 
   if (scopedUserIds) filter.user_id = { $in: scopedUserIds };
   if (myUserInfo) {
-    filter.user_id = { ...(filter.user_id ?? {}), $ne: myUserInfo._id };
+    filter.user_id = {
+      ...((filter.user_id as Record<string, unknown>) ?? {}),
+      $ne: myUserInfo._id
+    };
   }
 
   const [requests, total] = await Promise.all([
@@ -58,5 +72,3 @@ async function getAllRequests(account, query) {
     }
   };
 }
-
-module.exports = { getAllRequests };

@@ -1,18 +1,16 @@
-const UserInfoModel = require("../../../models/UserInfoModel");
-const { notify } = require("../../../helpers/requestUtils");
-const { getApprovalChain } = require("../domain/approval-chain");
-const { getAccountsWithPermission } = require("../../../helpers/rbac");
-const { TYPE_LABELS } = require("../domain/request-type-labels");
-const { PERMISSION } = require("../../../constants");
-const { eventBus } = require("../../../core/events/event-bus");
-const { RequestCreatedDomainEvent } = require("../domain/events/request-created.domain-event");
-const {
-  RequestPartiallyApprovedDomainEvent
-} = require("../domain/events/request-partially-approved.domain-event");
-const { RequestApprovedDomainEvent } = require("../domain/events/request-approved.domain-event");
-const { RequestRejectedDomainEvent } = require("../domain/events/request-rejected.domain-event");
+import UserInfoModel from "../../../models/UserInfoModel";
+import { notify } from "../../../helpers/requestUtils";
+import { getApprovalChain } from "../domain/approval-chain";
+import { getAccountsWithPermission } from "../../../helpers/rbac";
+import { TYPE_LABELS } from "../domain/request-type-labels";
+import { PERMISSION } from "../../../constants";
+import { eventBus } from "../../../core/events/event-bus";
+import { RequestCreatedDomainEvent } from "../domain/events/request-created.domain-event";
+import { RequestPartiallyApprovedDomainEvent } from "../domain/events/request-partially-approved.domain-event";
+import { RequestApprovedDomainEvent } from "../domain/events/request-approved.domain-event";
+import { RequestRejectedDomainEvent } from "../domain/events/request-rejected.domain-event";
 
-async function onRequestCreated(event) {
+async function onRequestCreated(event: RequestCreatedDomainEvent): Promise<void> {
   const [userInfo, chain] = await Promise.all([
     UserInfoModel.findById(event.userId).select("full_name"),
     getApprovalChain(event.userId)
@@ -30,7 +28,9 @@ async function onRequestCreated(event) {
   });
 }
 
-async function onRequestPartiallyApproved(event) {
+async function onRequestPartiallyApproved(
+  event: RequestPartiallyApprovedDomainEvent
+): Promise<void> {
   const [employeeInfo, reviewerInfo] = await Promise.all([
     UserInfoModel.findById(event.userId).select("id_account full_name"),
     UserInfoModel.findById(event.reviewerId).select("id_account full_name")
@@ -49,7 +49,16 @@ async function onRequestPartiallyApproved(event) {
   });
 }
 
-async function notifyFinalDecision(event, { action, hadPriorApproval, reviewerNote }) {
+interface FinalDecisionOptions {
+  action: "approve" | "reject";
+  hadPriorApproval: boolean;
+  reviewerNote: string;
+}
+
+async function notifyFinalDecision(
+  event: RequestApprovedDomainEvent | RequestRejectedDomainEvent,
+  { action, hadPriorApproval, reviewerNote }: FinalDecisionOptions
+): Promise<void> {
   const [employeeInfo, reviewerInfo, hrAccountIds] = await Promise.all([
     UserInfoModel.findById(event.userId).select("id_account full_name"),
     UserInfoModel.findById(event.reviewerId).select("id_account full_name"),
@@ -65,7 +74,7 @@ async function notifyFinalDecision(event, { action, hadPriorApproval, reviewerNo
     action === "approve" ? `${event.requestType}_approved` : `${event.requestType}_rejected`;
   const rejectSuffix = reviewerNote ? `: ${reviewerNote}` : "";
 
-  let employeeBody;
+  let employeeBody: string;
   if (action === "approve") {
     employeeBody = `Đơn ${label} của bạn đã được ${reviewerInfo.full_name} duyệt`;
   } else if (hadPriorApproval) {
@@ -74,7 +83,7 @@ async function notifyFinalDecision(event, { action, hadPriorApproval, reviewerNo
     employeeBody = `Đơn ${label} của bạn đã bị ${reviewerInfo.full_name} từ chối${rejectSuffix}`;
   }
 
-  const notifications = [];
+  const notifications: Promise<unknown>[] = [];
   if (employeeAccountId !== reviewerAccountId) {
     notifications.push(
       notify(employeeInfo.id_account, {
@@ -89,12 +98,12 @@ async function notifyFinalDecision(event, { action, hadPriorApproval, reviewerNo
   }
 
   const nearestChain = await getApprovalChain(event.userId);
-  const broadcastIds = new Set(hrAccountIds.map((accId) => String(accId)));
+  const broadcastIds = new Set(hrAccountIds.map((accId: unknown) => String(accId)));
   if (nearestChain[0]) broadcastIds.add(String(nearestChain[0].accountId));
   broadcastIds.delete(reviewerAccountId);
   broadcastIds.delete(employeeAccountId);
 
-  let broadcastBody;
+  let broadcastBody: string;
   if (action === "approve") {
     broadcastBody = `Đơn ${label} của ${employeeInfo.full_name} đã được ${reviewerInfo.full_name} duyệt`;
   } else if (hadPriorApproval) {
@@ -119,7 +128,7 @@ async function notifyFinalDecision(event, { action, hadPriorApproval, reviewerNo
   await Promise.all(notifications);
 }
 
-async function onRequestApproved(event) {
+async function onRequestApproved(event: RequestApprovedDomainEvent): Promise<void> {
   await notifyFinalDecision(event, {
     action: "approve",
     hadPriorApproval: false,
@@ -127,11 +136,11 @@ async function onRequestApproved(event) {
   });
 }
 
-async function onRequestRejected(event) {
+async function onRequestRejected(event: RequestRejectedDomainEvent): Promise<void> {
   await notifyFinalDecision(event, {
     action: "reject",
     hadPriorApproval: event.overriddenApprovals.length > 0,
-    reviewerNote: event.reviewerNote
+    reviewerNote: event.reviewerNote ?? ""
   });
 }
 
@@ -140,9 +149,4 @@ eventBus.on(RequestPartiallyApprovedDomainEvent.name, onRequestPartiallyApproved
 eventBus.on(RequestApprovedDomainEvent.name, onRequestApproved);
 eventBus.on(RequestRejectedDomainEvent.name, onRequestRejected);
 
-module.exports = {
-  onRequestCreated,
-  onRequestPartiallyApproved,
-  onRequestApproved,
-  onRequestRejected
-};
+export { onRequestCreated, onRequestPartiallyApproved, onRequestApproved, onRequestRejected };

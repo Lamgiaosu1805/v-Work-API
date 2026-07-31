@@ -26,7 +26,7 @@ async function cancelRequest(account, id) {
     }).session(session);
 
     const foundEntity = await requestRepository.findOneById(id);
-    if (!foundEntity) throw new RequestNotFoundError();
+    if (!foundEntity) throw new RequestNotFoundError(undefined, { metadata: { requestId: id } });
 
     if (!myUserInfo) throw new NotFoundException("Không tìm thấy thông tin nhân viên");
     if (String(foundEntity.userId) !== String(myUserInfo._id)) {

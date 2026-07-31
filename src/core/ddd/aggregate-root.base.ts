@@ -1,7 +1,11 @@
-const { Entity } = require("./entity.base");
+import { Entity, EntityConstructorProps, EntityOptions } from "./entity.base";
+import { DomainEvent } from "./domain-event.base";
+import { EventBus } from "./types";
 
-class AggregateRoot extends Entity {
-  constructor(entityProps, options) {
+export abstract class AggregateRoot<Props extends object> extends Entity<Props> {
+  private _domainEvents: DomainEvent[];
+
+  constructor(entityProps: EntityConstructorProps<Props>, options?: EntityOptions) {
     super(entityProps, options);
     if (new.target === AggregateRoot) {
       throw new Error("AggregateRoot is abstract and cannot be instantiated directly.");
@@ -9,19 +13,19 @@ class AggregateRoot extends Entity {
     this._domainEvents = [];
   }
 
-  get domainEvents() {
+  get domainEvents(): DomainEvent[] {
     return [...this._domainEvents];
   }
 
-  addEvent(domainEvent) {
+  addEvent(domainEvent: DomainEvent): void {
     this._domainEvents.push(domainEvent);
   }
 
-  clearEvents() {
+  clearEvents(): void {
     this._domainEvents = [];
   }
 
-  async publishEvents(eventBus) {
+  async publishEvents(eventBus: EventBus): Promise<void> {
     const events = this._domainEvents;
     this.clearEvents();
 
@@ -29,7 +33,9 @@ class AggregateRoot extends Entity {
       events.map((event) => eventBus.emitAsync(event.constructor.name, event))
     );
 
-    const failures = results.filter((result) => result.status === "rejected");
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
     if (failures.length > 0) {
       throw new AggregateError(
         failures.map((failure) => failure.reason),
@@ -38,5 +44,3 @@ class AggregateRoot extends Entity {
     }
   }
 }
-
-module.exports = { AggregateRoot };

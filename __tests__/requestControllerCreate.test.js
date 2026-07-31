@@ -2,7 +2,11 @@ const mongoose = require("mongoose");
 const moment = require("moment-timezone");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 
-const RequestController = require("../src/controllers/RequestController");
+const {
+  requestHttpController
+} = require("../src/modules/request/interface/request.http.controller");
+const { asyncHandler } = require("../src/core/http/async-handler");
+const { errorHandlerMiddleware } = require("../src/core/http/error-handler.middleware");
 const UserInfoModel = require("../src/models/UserInfoModel");
 const AccountModel = require("../src/models/AccountModel");
 const { RequestModel } = require("../src/models/RequestModel");
@@ -31,6 +35,12 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
+  // createRequest/reviewRequest publish domain event fire-and-forget (không await) —
+  // đợi 1 nhịp để notify của lần gọi cuối cùng kịp query xong trước khi ngắt kết nối,
+  // tránh "MongoClientClosedError: Operation interrupted" do disconnect giữa chừng.
+  await new Promise((resolve) => {
+    setTimeout(resolve, 50);
+  });
   await mongoose.disconnect();
   await mongod.stop();
 });
@@ -39,6 +49,13 @@ const makeRes = () => ({
   status: jest.fn().mockReturnThis(),
   json: jest.fn().mockReturnThis()
 });
+
+// Gọi đúng như Express thật sẽ gọi: asyncHandler bắt reject rồi chuyển cho
+// errorHandlerMiddleware format response — tái dùng nguyên request.http.controller.js +
+// core/http thay vì gọi thẳng RequestController.js (đã xoá ở task 1.15).
+async function callController(action, req, res) {
+  await asyncHandler(action)(req, res, (error) => errorHandlerMiddleware(error, req, res));
+}
 
 // calcTotalDays/buildWorkDatesWithStatus tính khác nhau cho T7 (weight 0.5) và Chủ Nhật
 // (bỏ qua hẳn) so với ngày thường (weight 1) — test cần 1 ngày thường bất kỳ, không phụ
@@ -96,7 +113,7 @@ test("tạo đơn leave unpaid: validate() được await đúng, trả 201 (kh�
   };
   const res = makeRes();
 
-  await RequestController.create(req, res);
+  await callController(requestHttpController.create, req, res);
 
   expect(res.status).not.toHaveBeenCalledWith(500);
   expect(res.status).toHaveBeenCalledWith(201);
@@ -145,14 +162,16 @@ test("tạo 2 đơn nghỉ phép trùng đúng 1 ngày: đơn thứ 2 phải b�
   };
 
   const firstRes = makeRes();
-  await RequestController.create(
+  await callController(
+    requestHttpController.create,
     { account: { _id: employeeAccount._id }, body: { ...baseBody } },
     firstRes
   );
   expect(firstRes.status).toHaveBeenCalledWith(201);
 
   const secondRes = makeRes();
-  await RequestController.create(
+  await callController(
+    requestHttpController.create,
     { account: { _id: employeeAccount._id }, body: { ...baseBody } },
     secondRes
   );
@@ -200,7 +219,7 @@ test("tạo đơn business_trip: 201, request_type lưu đúng", async () => {
   };
   const res = makeRes();
 
-  await RequestController.create(req, res);
+  await callController(requestHttpController.create, req, res);
 
   expect(res.status).toHaveBeenCalledWith(201);
 
@@ -259,7 +278,8 @@ test("duyệt đơn business_trip: WorkSheet có check_in/check_out/work_unit đ
   const toDate = nextWeekday(1);
 
   const createRes = makeRes();
-  await RequestController.create(
+  await callController(
+    requestHttpController.create,
     {
       account: { _id: employeeAccount._id },
       body: {
@@ -279,7 +299,8 @@ test("duyệt đơn business_trip: WorkSheet có check_in/check_out/work_unit đ
   });
 
   const reviewRes = makeRes();
-  await RequestController.review(
+  await callController(
+    requestHttpController.review,
     {
       params: { id: created._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
@@ -299,9 +320,11 @@ test("duyệt đơn business_trip: WorkSheet có check_in/check_out/work_unit đ
   expect(worksheet.check_out).not.toBeNull();
   expect(worksheet.work_unit).toBeGreaterThan(0);
 
-  const dayStatus = await (
-    require("../src/models/WorkDayStatusModel")
-  ).findOne({ user_id: employeeInfo._id, date: dayStart, period: "full" });
+  const dayStatus = await WorkDayStatusModel.findOne({
+    user_id: employeeInfo._id,
+    date: dayStart,
+    period: "full"
+  });
   expect(dayStatus).not.toBeNull();
   expect(dayStatus.status).toBe("business_trip");
 });
@@ -342,9 +365,7 @@ test("tạo đơn quên chấm công dù WorkSheet đã có check_in (sửa dữ
     check_in: wrongCheckIn
   });
 
-  const expectedCheckIn = moment
-    .tz(`${targetDate} 08:00`, "YYYY-MM-DD HH:mm", TZ)
-    .toISOString();
+  const expectedCheckIn = moment.tz(`${targetDate} 08:00`, "YYYY-MM-DD HH:mm", TZ).toISOString();
 
   const req = {
     account: { _id: employeeAccount._id },
@@ -358,7 +379,7 @@ test("tạo đơn quên chấm công dù WorkSheet đã có check_in (sửa dữ
   };
   const res = makeRes();
 
-  await RequestController.create(req, res);
+  await callController(requestHttpController.create, req, res);
 
   expect(res.status).toHaveBeenCalledWith(201);
 
@@ -423,7 +444,8 @@ test("duyệt đơn nghỉ phép có lương (1 ngày): WorkSheet.work_unit ph�
   const targetDate = nextWeekday(1);
 
   const createRes = makeRes();
-  await RequestController.create(
+  await callController(
+    requestHttpController.create,
     {
       account: { _id: employeeAccount._id },
       body: {
@@ -443,7 +465,8 @@ test("duyệt đơn nghỉ phép có lương (1 ngày): WorkSheet.work_unit ph�
   const created = await RequestModel.findOne({ user_id: employeeInfo._id, request_type: "leave" });
 
   const reviewRes = makeRes();
-  await RequestController.review(
+  await callController(
+    requestHttpController.review,
     {
       params: { id: created._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
@@ -496,7 +519,8 @@ test("duyệt đơn business_trip đè lên ngày đã nghỉ phép có lương:
 
   // 1. Tạo + duyệt đơn nghỉ phép có lương cho targetDate.
   const leaveCreateRes = makeRes();
-  await RequestController.create(
+  await callController(
+    requestHttpController.create,
     {
       account: { _id: employeeAccount._id },
       body: {
@@ -518,7 +542,8 @@ test("duyệt đơn business_trip đè lên ngày đã nghỉ phép có lương:
   });
 
   const leaveReviewRes = makeRes();
-  await RequestController.review(
+  await callController(
+    requestHttpController.review,
     {
       params: { id: leaveRequest._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
@@ -533,7 +558,8 @@ test("duyệt đơn business_trip đè lên ngày đã nghỉ phép có lương:
 
   // 2. Tạo + duyệt đơn business_trip đúng ngày đó — kỳ vọng tự hoàn lại phép.
   const tripCreateRes = makeRes();
-  await RequestController.create(
+  await callController(
+    requestHttpController.create,
     {
       account: { _id: employeeAccount._id },
       body: {
@@ -552,7 +578,8 @@ test("duyệt đơn business_trip đè lên ngày đã nghỉ phép có lương:
   });
 
   const tripReviewRes = makeRes();
-  await RequestController.review(
+  await callController(
+    requestHttpController.review,
     {
       params: { id: tripRequest._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
@@ -613,7 +640,8 @@ test("duyệt đơn nghỉ phép (nửa ngày) đè lên ngày đã có công t�
 
   // 1. Tạo + duyệt đơn business_trip cho targetDate — status=business_trip, có check_in/out.
   const tripCreateRes = makeRes();
-  await RequestController.create(
+  await callController(
+    requestHttpController.create,
     {
       account: { _id: employeeAccount._id },
       body: {
@@ -632,7 +660,8 @@ test("duyệt đơn nghỉ phép (nửa ngày) đè lên ngày đã có công t�
   });
 
   const tripReviewRes = makeRes();
-  await RequestController.review(
+  await callController(
+    requestHttpController.review,
     {
       params: { id: tripRequest._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
@@ -652,7 +681,8 @@ test("duyệt đơn nghỉ phép (nửa ngày) đè lên ngày đã có công t�
 
   // 2. Tạo + duyệt đơn nghỉ phép NỬA NGÀY (buổi sáng) cho đúng ngày đó.
   const leaveCreateRes = makeRes();
-  await RequestController.create(
+  await callController(
+    requestHttpController.create,
     {
       account: { _id: employeeAccount._id },
       body: {
@@ -674,7 +704,8 @@ test("duyệt đơn nghỉ phép (nửa ngày) đè lên ngày đã có công t�
   });
 
   const leaveReviewRes = makeRes();
-  await RequestController.review(
+  await callController(
+    requestHttpController.review,
     {
       params: { id: leaveRequest._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
@@ -732,7 +763,11 @@ test("duyệt đơn nghỉ phép đè lên ngày đã CHẤM CÔNG THẬT: giữ
     reason: LEAVE_BALANCE_REASON.HR_MANUAL_ADJUSTMENT
   });
 
-  const adminAccount = await makeAdminReviewer("admin_real_attendance_leave_test", "ADMIN05", branchId);
+  const adminAccount = await makeAdminReviewer(
+    "admin_real_attendance_leave_test",
+    "ADMIN05",
+    branchId
+  );
 
   const targetDate = nextWeekday(1);
   const dayStart = moment.tz(targetDate, TZ).startOf("day").toDate();
@@ -768,7 +803,8 @@ test("duyệt đơn nghỉ phép đè lên ngày đã CHẤM CÔNG THẬT: giữ
   const balanceBefore = await getLeaveBalance(employeeInfo._id);
 
   const leaveCreateRes = makeRes();
-  await RequestController.create(
+  await callController(
+    requestHttpController.create,
     {
       account: { _id: employeeAccount._id },
       body: {
@@ -793,7 +829,8 @@ test("duyệt đơn nghỉ phép đè lên ngày đã CHẤM CÔNG THẬT: giữ
   expect(balanceAfterCreate).toBeLessThan(balanceBefore);
 
   const leaveReviewRes = makeRes();
-  await RequestController.review(
+  await callController(
+    requestHttpController.review,
     {
       params: { id: leaveRequest._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
@@ -810,7 +847,10 @@ test("duyệt đơn nghỉ phép đè lên ngày đã CHẤM CÔNG THẬT: giữ
   });
   expect(dayStatus.status).toBe("present");
 
-  const worksheetAfter = await WorkSheetModel.findOne({ user_id: employeeInfo._id, date: dayStart });
+  const worksheetAfter = await WorkSheetModel.findOne({
+    user_id: employeeInfo._id,
+    date: dayStart
+  });
   expect(worksheetAfter.check_in).toEqual(realCheckIn);
   expect(worksheetAfter.check_out).toEqual(realCheckOut);
 
@@ -848,7 +888,8 @@ test("duyệt đơn remote (làm việc từ xa): WorkSheet có check_in/check_o
   const targetDate = nextWeekday(1);
 
   const createRes = makeRes();
-  await RequestController.create(
+  await callController(
+    requestHttpController.create,
     {
       account: { _id: employeeAccount._id },
       body: {
@@ -864,7 +905,8 @@ test("duyệt đơn remote (làm việc từ xa): WorkSheet có check_in/check_o
   const created = await RequestModel.findOne({ user_id: employeeInfo._id, request_type: "remote" });
 
   const reviewRes = makeRes();
-  await RequestController.review(
+  await callController(
+    requestHttpController.review,
     {
       params: { id: created._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },

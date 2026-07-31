@@ -1,10 +1,32 @@
-const {
-  ArgumentNotProvidedException,
-  ArgumentInvalidException
-} = require("../exceptions/exceptions");
+import { ArgumentNotProvidedException, ArgumentInvalidException } from "../exceptions/exceptions";
 
-class Entity {
-  constructor({ id, props, createdAt, updatedAt, isDeleted }, { validate = true } = {}) {
+export interface EntityConstructorProps<Props> {
+  id: string;
+  props: Props;
+  createdAt?: Date;
+  updatedAt?: Date;
+  isDeleted?: boolean;
+}
+
+export interface EntityOptions {
+  validate?: boolean;
+}
+
+export abstract class Entity<Props extends object> {
+  private readonly _id: string;
+
+  protected props: Props;
+
+  private _createdAt: Date;
+
+  private _updatedAt: Date;
+
+  private _isDeleted: boolean;
+
+  constructor(
+    { id, props, createdAt, updatedAt, isDeleted }: EntityConstructorProps<Props>,
+    { validate = true }: EntityOptions = {}
+  ) {
     if (new.target === Entity) {
       throw new Error("Entity is abstract and cannot be instantiated directly.");
     }
@@ -29,58 +51,58 @@ class Entity {
     }
   }
 
-  _setProps(newProps) {
+  protected _setProps(newProps: Partial<Props>): void {
     this.props = { ...this.props, ...newProps };
     this._updatedAt = new Date();
     this.validate();
   }
 
-  get id() {
+  get id(): string {
     return this._id;
   }
 
-  get createdAt() {
+  get createdAt(): Date {
     return this._createdAt;
   }
 
-  get updatedAt() {
+  get updatedAt(): Date {
     return this._updatedAt;
   }
 
-  get isDeleted() {
+  get isDeleted(): boolean {
     return this._isDeleted;
   }
 
-  static isEntity(candidate) {
+  static isEntity(candidate: unknown): candidate is Entity<object> {
     return candidate instanceof Entity;
   }
 
-  equals(other) {
-    if (other == null) return false;
+  equals(other?: unknown): boolean {
+    if (other === null || other === undefined) return false;
     if (this === other) return true;
     if (!Entity.isEntity(other)) return false;
     return this._id === other.id;
   }
 
-  getProps() {
+  getProps(): Readonly<
+    { id: string; createdAt: Date; updatedAt: Date; isDeleted: boolean } & Props
+  > {
     return Object.freeze({
       id: this._id,
       createdAt: this._createdAt,
       updatedAt: this._updatedAt,
       isDeleted: this._isDeleted,
       ...this.props
-    });
+    }) as Readonly<{ id: string; createdAt: Date; updatedAt: Date; isDeleted: boolean } & Props>;
   }
 
-  markAsDeleted() {
+  markAsDeleted(): void {
     this._isDeleted = true;
     this._updatedAt = new Date();
   }
 
   // eslint-disable-next-line class-methods-use-this
-  validate() {
+  validate(): void {
     throw new Error("Entity.validate() must be implemented by a subclass.");
   }
 }
-
-module.exports = { Entity };

@@ -1,9 +1,20 @@
-const { randomUUID } = require("crypto");
-const { ArgumentNotProvidedException } = require("../exceptions/exceptions");
-const { RequestContextService } = require("../context/request-context");
+import { randomUUID } from "crypto";
+import { ArgumentNotProvidedException } from "../exceptions/exceptions";
+import { RequestContextService } from "../context/request-context";
+import { Metadata } from "./types";
 
-class Command {
-  constructor(props) {
+export interface CommandProps {
+  id?: string;
+  metadata?: Partial<Metadata>;
+  [key: string]: unknown;
+}
+
+export class Command {
+  readonly id: string;
+
+  readonly metadata: Metadata;
+
+  constructor(props: CommandProps) {
     if (!props || typeof props !== "object") {
       throw new ArgumentNotProvidedException("Command props should not be empty.");
     }
@@ -17,5 +28,3 @@ class Command {
     };
   }
 }
-
-module.exports = { Command };

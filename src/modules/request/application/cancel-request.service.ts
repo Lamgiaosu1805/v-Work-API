@@ -1,20 +1,20 @@
-const mongoose = require("mongoose");
-const UserInfoModel = require("../../../models/UserInfoModel");
-const { RequestRepository } = require("../infrastructure/request.repository");
-const { runInTransaction } = require("../../../core/db/run-in-transaction");
-const { eventBus } = require("../../../core/events/event-bus");
-require("./request-notification.handlers");
-const { REQUEST_TYPE_HANDLERS } = require("../domain/request-type-handlers");
-const { RequestNotFoundError } = require("../domain/request.errors");
-const {
+import mongoose from "mongoose";
+import UserInfoModel from "../../../models/UserInfoModel";
+import { RequestRepository } from "../infrastructure/request.repository";
+import { runInTransaction } from "../../../core/db/run-in-transaction";
+import { eventBus } from "../../../core/events/event-bus";
+import "./request-notification.handlers";
+import { REQUEST_TYPE_HANDLERS } from "../domain/request-type-handlers";
+import { RequestNotFoundError } from "../domain/request.errors";
+import {
   ArgumentInvalidException,
   NotFoundException,
   ForbiddenException
-} = require("../../../core/exceptions/exceptions");
+} from "../../../core/exceptions/exceptions";
 
 const requestRepository = new RequestRepository();
 
-async function cancelRequest(account, id) {
+export async function cancelRequest(account: any, id: string): Promise<void> {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new ArgumentInvalidException("ID không hợp lệ");
   }
@@ -47,5 +47,3 @@ async function cancelRequest(account, id) {
 
   entity.publishEvents(eventBus).catch(() => {});
 }
-
-module.exports = { cancelRequest };

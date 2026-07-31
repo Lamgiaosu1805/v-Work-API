@@ -1,16 +1,29 @@
-const UserInfoModel = require("../../../models/UserInfoModel");
-const { RequestModel } = require("../../../models/RequestModel");
-const { NotFoundException } = require("../../../core/exceptions/exceptions");
-const { parsePagination } = require("../../../core/http/parse-pagination");
-const { applyRequestTypeFilter, applyDateRangeFilter } = require("./request-query-filters");
+import UserInfoModel from "../../../models/UserInfoModel";
+import { RequestModel } from "../../../models/RequestModel";
+import { NotFoundException } from "../../../core/exceptions/exceptions";
+import { parsePagination } from "../../../core/http/parse-pagination";
+import {
+  applyRequestTypeFilter,
+  applyDateRangeFilter,
+  RequestFilter
+} from "./request-query-filters";
 
-async function getMyRequests(accountId, query) {
+interface GetMyRequestsQuery {
+  request_type?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+  page?: unknown;
+  limit?: unknown;
+}
+
+export async function getMyRequests(accountId: unknown, query: GetMyRequestsQuery) {
   const userInfo = await UserInfoModel.findOne({ id_account: accountId, isDeleted: false });
   if (!userInfo) throw new NotFoundException("Không tìm thấy thông tin nhân viên");
 
   const { request_type, status, from, to } = query;
   const { page, limit, skip } = parsePagination(query);
-  const filter = { user_id: userInfo._id, isDeleted: false };
+  const filter: RequestFilter = { user_id: userInfo._id, isDeleted: false };
 
   applyRequestTypeFilter(filter, request_type);
   if (status) filter.status = status;
@@ -35,5 +48,3 @@ async function getMyRequests(accountId, query) {
     }
   };
 }
-
-module.exports = { getMyRequests };

@@ -1,50 +1,51 @@
-const { getEligibleReviewers } = require("../application/get-eligible-reviewers.service");
-const { getMyRequests } = require("../application/get-my-requests.service");
-const { getAllRequests } = require("../application/get-all-requests.service");
-const { getRequestById } = require("../application/get-request-by-id.service");
-const { cancelRequest } = require("../application/cancel-request.service");
-const { createRequest } = require("../application/create-request.service");
-const { reviewRequest } = require("../application/review-request.service");
+import { Request, Response } from "express";
+import { getEligibleReviewers } from "../application/get-eligible-reviewers.service";
+import { getMyRequests } from "../application/get-my-requests.service";
+import { getAllRequests } from "../application/get-all-requests.service";
+import { getRequestById } from "../application/get-request-by-id.service";
+import { cancelRequest } from "../application/cancel-request.service";
+import { createRequest } from "../application/create-request.service";
+import { reviewRequest } from "../application/review-request.service";
 
-const requestHttpController = {
-  async getEligibleReviewers(req, res) {
-    const reviewer = await getEligibleReviewers(req.account._id);
+export const requestHttpController = {
+  async getEligibleReviewers(req: Request, res: Response) {
+    const reviewer = await getEligibleReviewers(req.account!._id);
     return res.status(200).json({ message: "OK", data: reviewer });
   },
 
-  async getMyRequests(req, res) {
-    const result = await getMyRequests(req.account._id, req.query);
+  async getMyRequests(req: Request, res: Response) {
+    const result = await getMyRequests(req.account!._id, req.query);
     return res.status(200).json({ message: "OK", ...result });
   },
 
-  async getAll(req, res) {
+  async getAll(req: Request, res: Response) {
     const result = await getAllRequests(req.account, req.query);
     return res.status(200).json({ message: "OK", ...result });
   },
 
-  async getById(req, res) {
+  async getById(req: Request, res: Response) {
     const data = await getRequestById(req.account, req.params.id);
     return res.status(200).json({ message: "OK", data });
   },
 
-  async cancel(req, res) {
+  async cancel(req: Request, res: Response) {
     await cancelRequest(req.account, req.params.id);
     return res.status(200).json({ message: "Hủy đơn thành công" });
   },
 
-  async create(req, res) {
+  async create(req: Request, res: Response) {
     const entity = await createRequest(req.account, req.body);
     return res.status(201).json({ message: "Tạo đơn thành công", data: entity.getProps() });
   },
 
-  async review(req, res) {
+  async review(req: Request, res: Response) {
     const { action, reviewer_note } = req.body;
     const { entity, isFinal } = await reviewRequest(req.account, req.params.id, {
       action,
       reviewer_note
     });
 
-    let message;
+    let message: string;
     if (!isFinal) {
       message = "Đã ghi nhận duyệt, đang chờ người duyệt tiếp theo";
     } else {
@@ -54,5 +55,3 @@ const requestHttpController = {
     return res.status(200).json({ message, data: entity.getProps() });
   }
 };
-
-module.exports = { requestHttpController };

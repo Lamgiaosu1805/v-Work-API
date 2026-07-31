@@ -1,7 +1,7 @@
-const express = require("express");
-const { authenticate } = require("../../../middlewares/authMiddleware");
-const { asyncHandler } = require("../../../core/http/async-handler");
-const { requestHttpController } = require("./request.http.controller");
+import express from "express";
+import { authenticate } from "../../../middlewares/authMiddleware";
+import { asyncHandler } from "../../../core/http/async-handler";
+import { requestHttpController } from "./request.http.controller";
 
 const router = express.Router();
 
@@ -22,4 +22,4 @@ router.post("/", authenticate, asyncHandler(requestHttpController.create));
 
 router.patch("/review/:id", authenticate, asyncHandler(requestHttpController.review));
 
-module.exports = router;
+export = router;

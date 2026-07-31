@@ -1,30 +1,33 @@
-const mongoose = require("mongoose");
-const UserInfoModel = require("../../../models/UserInfoModel");
-const { RequestRepository } = require("../infrastructure/request.repository");
-const { runInTransaction } = require("../../../core/db/run-in-transaction");
-const { eventBus } = require("../../../core/events/event-bus");
-require("./request-notification.handlers");
-const { can } = require("../../../helpers/rbac");
-const { getApprovalChain } = require("../domain/approval-chain");
-const { REQUEST_TYPE_HANDLERS } = require("../domain/request-type-handlers");
-const { RequestNotFoundError } = require("../domain/request.errors");
-const {
-  acquireRequestReviewLock,
-  RequestReviewLockError
-} = require("../../../helpers/requestUtils");
-const { PERMISSION } = require("../../../constants");
-const {
+import mongoose from "mongoose";
+import UserInfoModel from "../../../models/UserInfoModel";
+import { RequestRepository } from "../infrastructure/request.repository";
+import { runInTransaction } from "../../../core/db/run-in-transaction";
+import { eventBus } from "../../../core/events/event-bus";
+import "./request-notification.handlers";
+import { can } from "../../../helpers/rbac";
+import { getApprovalChain } from "../domain/approval-chain";
+import { REQUEST_TYPE_HANDLERS } from "../domain/request-type-handlers";
+import { RequestNotFoundError } from "../domain/request.errors";
+import { acquireRequestReviewLock, RequestReviewLockError } from "../../../helpers/requestUtils";
+import { PERMISSION } from "../../../constants";
+import {
   ArgumentInvalidException,
   NotFoundException,
   ForbiddenException,
   ConflictException
-} = require("../../../core/exceptions/exceptions");
+} from "../../../core/exceptions/exceptions";
+import { RequestEntity } from "../domain/request.entity";
+import { RequestType } from "../domain/types";
 
 const requestRepository = new RequestRepository();
 const VALID_ACTIONS = ["approve", "reject"];
-const LEVEL1_FIRST_TYPES = ["forgot_checkin", "late_early"];
+const LEVEL1_FIRST_TYPES: RequestType[] = ["forgot_checkin", "late_early"];
 
-async function acquireLockIfNeeded(id, action, preCheckEntity) {
+async function acquireLockIfNeeded(
+  id: string,
+  action: string,
+  preCheckEntity: RequestEntity
+): Promise<(() => Promise<void>) | null> {
   if (action !== "approve" || !preCheckEntity.needsMultiApproval()) return null;
   try {
     return await acquireRequestReviewLock(id);
@@ -34,7 +37,16 @@ async function acquireLockIfNeeded(id, action, preCheckEntity) {
   }
 }
 
-async function reviewRequest(account, id, { action, reviewer_note = "" }) {
+interface ReviewRequestOptions {
+  action: string;
+  reviewer_note?: string;
+}
+
+export async function reviewRequest(
+  account: any,
+  id: string,
+  { action, reviewer_note = "" }: ReviewRequestOptions
+) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new ArgumentInvalidException("ID không hợp lệ");
   }
@@ -61,7 +73,7 @@ async function reviewRequest(account, id, { action, reviewer_note = "" }) {
       const canReviewAll = await can(account, PERMISSION.HRM_REQUEST_REVIEW_ALL);
       const chain = canReviewAll ? [] : await getApprovalChain(entity.userId);
       if (!canReviewAll) {
-        const isInChain = chain.some((c) => c.accountId.toString() === account._id.toString());
+        const isInChain = chain.some((c) => String(c.accountId) === account._id.toString());
         if (!isInChain) throw new ForbiddenException("Bạn không được chỉ định duyệt đơn này");
       }
 
@@ -72,7 +84,9 @@ async function reviewRequest(account, id, { action, reviewer_note = "" }) {
         LEVEL1_FIRST_TYPES.includes(entity.requestType) &&
         entity.approvals.length === 0
       ) {
-        const isLevel1 = chain[0]?.accountId?.toString() === account._id.toString();
+        const isLevel1 = chain[0]?.accountId
+          ? String(chain[0].accountId) === account._id.toString()
+          : false;
         if (!isLevel1) throw new ForbiddenException("Cần trưởng bộ phận duyệt trước");
       }
 
@@ -107,5 +121,3 @@ async function reviewRequest(account, id, { action, reviewer_note = "" }) {
     if (release) await release();
   }
 }
-
-module.exports = { reviewRequest };

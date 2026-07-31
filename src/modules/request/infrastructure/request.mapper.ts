@@ -1,15 +1,17 @@
-const { RequestEntity, REQUEST_TYPE_FIELDS } = require("../domain/request.entity");
+import { RequestEntity, REQUEST_TYPE_FIELDS } from "../domain/request.entity";
+import { RequestType, RequestProps } from "../domain/types";
+import { Mapper } from "../../../core/db/mongoose-repository.base";
 
-function pickTypeSpecificFields(record, requestType) {
+function pickTypeSpecificFields(record: any, requestType: RequestType): Record<string, unknown> {
   const fields = REQUEST_TYPE_FIELDS[requestType] || [];
-  const picked = {};
+  const picked: Record<string, unknown> = {};
   fields.forEach((field) => {
     if (record[field] !== undefined) picked[field] = record[field];
   });
   return picked;
 }
 
-const requestMapper = {
+export const requestMapper: Mapper<RequestEntity, any> = {
   toDomain(record) {
     return new RequestEntity(
       {
@@ -22,12 +24,12 @@ const requestMapper = {
           reviewed_by: record.reviewed_by ? String(record.reviewed_by) : null,
           reviewed_at: record.reviewed_at ?? null,
           reviewer_note: record.reviewer_note ?? "",
-          approvals: (record.approvals ?? []).map((approval) => ({
+          approvals: (record.approvals ?? []).map((approval: any) => ({
             account: String(approval.account),
             reviewed_at: approval.reviewed_at
           })),
           ...pickTypeSpecificFields(record, record.request_type)
-        },
+        } as RequestProps,
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
         isDeleted: record.isDeleted
@@ -41,5 +43,3 @@ const requestMapper = {
     return { _id: id, ...rest };
   }
 };
-
-module.exports = { requestMapper };

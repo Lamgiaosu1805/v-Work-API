@@ -7,6 +7,7 @@ class RequestRejectedDomainEvent extends DomainEvent {
     this.reviewerId = props.reviewerId;
     this.requestType = props.requestType;
     this.reviewerNote = props.reviewerNote;
+    this.overriddenApprovals = props.overriddenApprovals ?? [];
   }
 }
 

@@ -1,7 +1,10 @@
 const mongoose = require("mongoose");
 const { MongoMemoryServer } = require("mongodb-memory-server");
 
-const { getApprovalChain, getManagedUserIds } = require("../src/helpers/approvalChain");
+const {
+  getApprovalChain,
+  getManagedUserIds
+} = require("../src/modules/request/domain/approval-chain");
 const { getAccountsWithPermission } = require("../src/helpers/rbac");
 const AccountModel = require("../src/models/AccountModel");
 const UserInfoModel = require("../src/models/UserInfoModel");

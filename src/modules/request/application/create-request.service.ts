@@ -1,34 +1,41 @@
-const UserInfoModel = require("../../../models/UserInfoModel");
-const { RequestEntity } = require("../domain/request.entity");
-const { RequestRepository } = require("../infrastructure/request.repository");
-const { REQUEST_TYPE_HANDLERS } = require("../domain/request-type-handlers");
-const { VALID_TYPES } = require("./request-query-filters");
-const { runInTransaction } = require("../../../core/db/run-in-transaction");
-const { eventBus } = require("../../../core/events/event-bus");
-require("./request-notification.handlers");
-const {
+import UserInfoModel from "../../../models/UserInfoModel";
+import { RequestEntity } from "../domain/request.entity";
+import { RequestRepository } from "../infrastructure/request.repository";
+import { REQUEST_TYPE_HANDLERS } from "../domain/request-type-handlers";
+import { VALID_TYPES } from "./request-query-filters";
+import { runInTransaction } from "../../../core/db/run-in-transaction";
+import { eventBus } from "../../../core/events/event-bus";
+import "./request-notification.handlers";
+import {
   ArgumentInvalidException,
   NotFoundException,
   ForbiddenException,
   ConflictException
-} = require("../../../core/exceptions/exceptions");
+} from "../../../core/exceptions/exceptions";
+import { ExceptionBase } from "../../../core/exceptions/exception.base";
+import { RequestType } from "../domain/types";
 
 const requestRepository = new RequestRepository();
 
-function toHandlerException({ status, message }) {
+interface HandlerError {
+  status?: number;
+  message: string;
+}
+
+function toHandlerException({ status, message }: HandlerError): ExceptionBase {
   if (status === 403) return new ForbiddenException(message);
   if (status === 404) return new NotFoundException(message);
   if (status === 409) return new ConflictException(message);
   return new ArgumentInvalidException(message);
 }
 
-async function createRequest(account, body) {
+export async function createRequest(account: any, body: any) {
   const { request_type, reason } = body;
   if (!VALID_TYPES.includes(request_type)) {
     throw new ArgumentInvalidException("Loại đơn không hợp lệ");
   }
 
-  const handler = REQUEST_TYPE_HANDLERS[request_type];
+  const handler = REQUEST_TYPE_HANDLERS[request_type as RequestType];
 
   const userInfo = await UserInfoModel.findOne({ id_account: account._id, isDeleted: false });
   if (!userInfo) throw new NotFoundException("Không tìm thấy thông tin nhân viên");
@@ -67,5 +74,3 @@ async function createRequest(account, body) {
 
   return entity;
 }
-
-module.exports = { createRequest };

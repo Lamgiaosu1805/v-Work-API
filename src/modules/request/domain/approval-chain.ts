@@ -1,11 +1,16 @@
-const UserInfoModel = require("../../../models/UserInfoModel");
-const AccountModel = require("../../../models/AccountModel");
-const DepartmentModel = require("../../../models/DepartmentModel");
-const UserDepartmentPositionModel = require("../../../models/UserDepartmentPositionModel");
-const { can } = require("../../../helpers/rbac");
-const { PERMISSION } = require("../../../constants");
+import UserInfoModel from "../../../models/UserInfoModel";
+import AccountModel from "../../../models/AccountModel";
+import DepartmentModel from "../../../models/DepartmentModel";
+import UserDepartmentPositionModel from "../../../models/UserDepartmentPositionModel";
+import { can } from "../../../helpers/rbac";
+import { PERMISSION } from "../../../constants";
+import { ReviewerProfile } from "./types";
 
-async function buildCandidate(userInfo, account) {
+export interface ApprovalCandidate extends ReviewerProfile {
+  accountId: unknown;
+}
+
+async function buildCandidate(userInfo: any, account: any): Promise<ApprovalCandidate | null> {
   if (!userInfo || !account) return null;
 
   const membership = await UserDepartmentPositionModel.findOne({
@@ -19,12 +24,15 @@ async function buildCandidate(userInfo, account) {
     userInfoId: userInfo._id,
     accountId: account._id,
     full_name: userInfo.full_name,
-    position_name: membership?.position?.position_name ?? null,
-    department_name: membership?.department?.department_name ?? null
+    position_name: (membership?.position as { position_name?: string })?.position_name ?? null,
+    department_name:
+      (membership?.department as { department_name?: string })?.department_name ?? null
   };
 }
 
-async function resolveDepartmentHead(employeeUserInfoId) {
+async function resolveDepartmentHead(
+  employeeUserInfoId: unknown
+): Promise<ApprovalCandidate | null> {
   const membership = await UserDepartmentPositionModel.findOne({
     user: employeeUserInfoId,
     isDeleted: false
@@ -45,13 +53,13 @@ async function resolveDepartmentHead(employeeUserInfoId) {
   if (!userInfos.length) return null;
 
   const accounts = await AccountModel.find({
-    _id: { $in: userInfos.map((u) => u.id_account) },
+    _id: { $in: userInfos.map((u: any) => u.id_account) },
     isDeleted: false
   }).sort({ createdAt: 1 });
 
   for (const account of accounts) {
     if (await can(account, PERMISSION.HRM_REQUEST_REVIEW)) {
-      const userInfo = userInfos.find((u) => String(u.id_account) === String(account._id));
+      const userInfo = userInfos.find((u: any) => String(u.id_account) === String(account._id));
       return buildCandidate(userInfo, account);
     }
   }
@@ -59,7 +67,9 @@ async function resolveDepartmentHead(employeeUserInfoId) {
   return null;
 }
 
-async function resolveIndirectManagerOrAdmin(employeeUserInfoId) {
+async function resolveIndirectManagerOrAdmin(
+  employeeUserInfoId: unknown
+): Promise<ApprovalCandidate | null> {
   const membership = await UserDepartmentPositionModel.findOne({
     user: employeeUserInfoId,
     isDeleted: false
@@ -95,14 +105,14 @@ async function resolveIndirectManagerOrAdmin(employeeUserInfoId) {
   return buildCandidate(adminUserInfo, adminAccount);
 }
 
-async function getApprovalChain(employeeUserInfoId) {
+export async function getApprovalChain(employeeUserInfoId: unknown): Promise<ApprovalCandidate[]> {
   const [level1, level2] = await Promise.all([
     resolveDepartmentHead(employeeUserInfoId),
     resolveIndirectManagerOrAdmin(employeeUserInfoId)
   ]);
 
-  const seenAccounts = new Set();
-  return [level1, level2].filter((c) => {
+  const seenAccounts = new Set<string>();
+  return [level1, level2].filter((c): c is ApprovalCandidate => {
     if (!c) return false;
     if (String(c.userInfoId) === String(employeeUserInfoId)) return false;
     const key = String(c.accountId);
@@ -112,8 +122,11 @@ async function getApprovalChain(employeeUserInfoId) {
   });
 }
 
-async function getManagedUserIds(managerUserInfoId) {
-  const manager = await UserInfoModel.findById(managerUserInfoId, { branch_id: 1, isDeleted: 1 });
+export async function getManagedUserIds(managerUserInfoId: unknown): Promise<unknown[]> {
+  const manager: any = await UserInfoModel.findById(managerUserInfoId, {
+    branch_id: 1,
+    isDeleted: 1
+  });
   if (!manager || manager.isDeleted) return [];
 
   const [ownDepts, managedDepts] = await Promise.all([
@@ -135,7 +148,7 @@ async function getManagedUserIds(managerUserInfoId) {
       { parent: { $in: frontier }, isDeleted: false },
       { _id: 1 }
     );
-    const newIds = children.map((d) => String(d._id)).filter((id) => !seenDeptIds.has(id));
+    const newIds = children.map((d: any) => String(d._id)).filter((id) => !seenDeptIds.has(id));
     if (!newIds.length) break;
     newIds.forEach((id) => seenDeptIds.add(id));
     frontier = newIds;
@@ -148,12 +161,13 @@ async function getManagedUserIds(managerUserInfoId) {
   }).distinct("user");
   if (!members.length) return [];
 
-  const employeeFilter = { _id: { $in: members }, isDeleted: false };
+  const employeeFilter: { _id: unknown; isDeleted: boolean; branch_id?: unknown } = {
+    _id: { $in: members },
+    isDeleted: false
+  };
   if (!isTier2Manager) employeeFilter.branch_id = manager.branch_id;
 
   const employees = await UserInfoModel.find(employeeFilter, { _id: 1 });
 
-  return employees.map((e) => e._id);
+  return employees.map((e: any) => e._id);
 }
-
-module.exports = { getApprovalChain, getManagedUserIds };

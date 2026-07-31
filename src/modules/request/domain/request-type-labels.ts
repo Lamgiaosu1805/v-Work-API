@@ -1,4 +1,6 @@
-const TYPE_LABELS = {
+import { RequestType } from "./types";
+
+export const TYPE_LABELS: Record<RequestType, string> = {
   leave: "xin nghỉ phép",
   late_early: "đi muộn/về sớm",
   remote: "làm việc từ xa",
@@ -7,5 +9,3 @@ const TYPE_LABELS = {
   explanation: "giải trình",
   forgot_checkin: "quên chấm công"
 };
-
-module.exports = { TYPE_LABELS };

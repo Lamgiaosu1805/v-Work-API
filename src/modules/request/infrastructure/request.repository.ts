@@ -1,4 +1,4 @@
-const {
+import {
   RequestModel,
   LeaveRequest,
   LateEarlyRequest,
@@ -7,11 +7,13 @@ const {
   ClientVisitRequest,
   ExplanationRequest,
   ForgotCheckinRequest
-} = require("../../../models/RequestModel");
-const { MongooseRepositoryBase } = require("../../../core/db/mongoose-repository.base");
-const { requestMapper } = require("./request.mapper");
+} from "../../../models/RequestModel";
+import { MongooseRepositoryBase } from "../../../core/db/mongoose-repository.base";
+import { requestMapper } from "./request.mapper";
+import { RequestEntity } from "../domain/request.entity";
+import { RequestType } from "../domain/types";
 
-const DISCRIMINATOR_MODELS = {
+const DISCRIMINATOR_MODELS: Record<RequestType, any> = {
   leave: LeaveRequest,
   late_early: LateEarlyRequest,
   remote: RemoteRequest,
@@ -21,22 +23,22 @@ const DISCRIMINATOR_MODELS = {
   forgot_checkin: ForgotCheckinRequest
 };
 
-class RequestRepository extends MongooseRepositoryBase {
+export class RequestRepository extends MongooseRepositoryBase<RequestEntity, any> {
   constructor() {
     super(RequestModel, requestMapper);
   }
 
-  _modelFor(entity) {
+  private _modelFor(entity: RequestEntity) {
     return DISCRIMINATOR_MODELS[entity.requestType] || this.model;
   }
 
-  async insert(entity) {
+  async insert(entity: RequestEntity): Promise<void> {
     entity.validate();
     const record = this.mapper.toPersistence(entity);
     await this._modelFor(entity).create([record], { session: this.session });
   }
 
-  async updateById(id, entity) {
+  async updateById(id: string, entity: RequestEntity): Promise<RequestEntity | null> {
     entity.validate();
     const record = this.mapper.toPersistence(entity);
     const doc = await this._modelFor(entity)
@@ -45,5 +47,3 @@ class RequestRepository extends MongooseRepositoryBase {
     return doc ? this.mapper.toDomain(doc) : null;
   }
 }
-
-module.exports = { RequestRepository };

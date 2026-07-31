@@ -102,13 +102,16 @@ src/
         request.errors.js
         approval-chain.js               # task 1.9b — move từ helpers/approvalChain.js (chỉ Request dùng)
         resolve-reviewer-profile.js     # task 1.9b — tách từ helpers/requestUtils.js (chỉ Request dùng)
-        request-type-handlers.js        # task 1.10 — registry request_type -> handler, dùng chung 1.10/1.11
+        request-type-handlers.js        # task 1.10 — registry request_type -> handler, dùng chung 1.10/1.11/1.12
+        request-type-labels.js          # task 1.12 — tách từ create-request.service.js, dùng chung create/review
         events/
           request-created.domain-event.js
           request-approved.domain-event.js
+          request-rejected.domain-event.js # task 1.12 — thêm field overriddenApprovals (đề xuất A)
       application/                      # Application Service = 1 use-case, gọi thẳng infra/helper (không qua port)
         create-request.service.js       # gọi lại domain/approval-chain.js, helpers/rbac.js bên trong
-        review-request.service.js
+        review-request.service.js       # task 1.12 — nhánh 1 người duyệt; entity.approve() lo cả đa duyệt
+                                         # (tuần tự) nhưng CHƯA có Redis lock/rule trưởng bộ phận (1.13)
         get-eligible-reviewers.service.js # đọc, không qua Entity — CQRS-lite (task 1.6)
         get-my-requests.service.js      # đọc thẳng Mongoose, KHÔNG .lean() (giữ toJSON format — task 1.7)
         get-all-requests.service.js     # getAll — task 1.8, gọi resolve-request-view-scope.js
@@ -517,6 +520,15 @@ Application Service, đúng pattern đã áp dụng cho `helpers/approvalChain.j
       Không tự sửa — nếu muốn chặn (vd: đã có ≥1 approval thì reject phải yêu cầu xác nhận, hoặc chỉ
       người trong `approvals` mới được reject phần còn lại), đây cũng là **thay đổi hành vi có chủ đích,
       cần task riêng**, ngoài phạm vi lần migrate này.
+
+      **Cập nhật (task 1.12) — phạm vi ảnh hưởng rộng hơn đã ghi ban đầu, không chỉ dữ liệu domain:**
+      viết xong `review-request.service.js`/`notifyAfterReview()` mới thấy rõ gap này còn lộ ra ở
+      **tầng notify**, không chỉ tầng dữ liệu — khi 1 đơn đã duyệt 1/2 bị reject, `notifyAfterReview`
+      (nhánh `action === "reject"`, `isFinal`) chỉ nhắc tới `reviewerInfo.full_name` (người vừa reject),
+      **không hề đề cập** người đã approve (1/2) trước đó — thông tin approval trước bị bỏ qua hoàn
+      toàn cả ở dữ liệu lẫn nội dung thông báo gửi cho nhân viên/broadcast. Vẫn là câu hỏi nghiệp vụ
+      treo, chưa quyết định sửa hay giữ nguyên — nhắc lại ở đây vì giờ thấy rõ mức độ ảnh hưởng thật
+      (không chỉ lý thuyết) lớn hơn ban đầu tưởng.
 
       **Bug thật do chính mình tạo ra (không phải port từ code gốc) — đã sửa ngay, không phải nợ:**
       thiết kế ban đầu của `request.mapper.js` (task 1.4) có `TYPE_SPECIFIC_FIELDS` chỉ lọc field lúc
@@ -1027,24 +1039,595 @@ Application Service, đúng pattern đã áp dụng cho `helpers/approvalChain.j
       **Swagger:** cập nhật `POST /requests` — thêm enum `request_type`, tách rõ `400`/`403`/`404`/
       `409` (trước đây chỉ có `400` chung chung + `404`). Verify load đủ 193 path (không tăng vì là
       endpoint đã có, chỉ cập nhật docs).
-- [ ] 1.12 — `review` nhánh **1 người duyệt** (`!needsMultiApproval`): check tự duyệt, check trong
-      chuỗi/`canReviewAll`, set status, gọi `handler.onApprove`/`onReject`.
-- [ ] 1.13 — `review` nhánh **đa duyệt** (mở rộng từ 1.12): Redis lock trước transaction, check đã duyệt
-      chưa, push vào `approvals`, đủ 2 mới set `approved` + gọi `onApprove`.
+- [x] 1.12 — `review` nhánh **1 người duyệt**: `application/review-request.service.js`.
+
+      **Nhờ entity đã đúng từ task 1.1, application service gọn hơn nhiều so với code gốc:**
+      `entity.approve()`/`entity.reject()` tự check self-review (`CannotSelfReviewError` 403), trạng
+      thái pending (`InvalidStatusTransitionError` 409), đã duyệt rồi (`AlreadyReviewedError` 409) —
+      service chỉ còn lo phần entity không biết: authorization (`canReviewAll` hoặc trong
+      `approvalChain`) và notify. `entity.approve()` cũng đã tự xử lý đúng CẢ nhánh đơn/đa duyệt (thiết
+      kế từ task 1.1) — nên dù đây là task "nhánh 1 người duyệt", code đã chạy đúng cho case tuần tự
+      (không đồng thời) của cả 2 nhánh; `isFinal` xác định bằng `entity.status !== "pending"` sau khi
+      gọi approve/reject.
+
+      **Phạm vi cố ý giới hạn (ghi rõ trong code) — dành cho 1.13:** chưa có Redis lock, chưa có check
+      "trưởng bộ phận phải duyệt trước" cho `forgot_checkin`/`late_early` đa duyệt. **Route
+      `/review/:id` CHƯA cutover** — cố tình giữ nguyên `RequestController.review` cũ, vì thiếu rule
+      "trưởng bộ phận trước" sẽ là regression thật cho 2 loại đơn đó nếu route đổi ngay bây giờ. Cutover
+      dời tới khi 1.13 xong hoàn chỉnh.
+
+      **Message nhất quán:** đổi "Không tìm thấy thông tin quản lý" (gốc) → "Không tìm thấy thông tin
+      nhân viên", theo đúng tiền lệ 1.8/1.10.
+
+      **1 khác biệt nhỏ so với gốc, chấp nhận được:** code gốc check tự-duyệt TRƯỚC check trong-chuỗi;
+      ở đây ngược lại (trong-chuỗi trước, vì tự-duyệt nằm trong `entity.approve()` gọi sau) — chỉ lộ
+      khác biệt (về MESSAGE, không phải kết quả chặn) nếu 1 người không có `canReviewAll` cố tự duyệt
+      đơn mình. Không sửa vì thêm check trùng lặp chỉ để khớp message ở edge-case hiếm không đáng.
+
+      **Verify thật bằng transaction thật (không suy luận) — theo đúng câu hỏi của người dùng về lost
+      update:** 2 reviewer khác nhau approve đồng thời cùng 1 đơn đa duyệt → MongoDB tự phát hiện write
+      conflict (giống hệt cơ chế đã verify ở task 1.10) — 1 request FULFILLED (approvals=1), 1
+      REJECTED sạch với `ConflictException` (409, đã map sẵn từ `run-in-transaction.js`) — **không có
+      lost update**, dù `updateById` là "load toàn bộ, tính trong app, ghi đè toàn bộ" chứ không dùng
+      optimistic-lock version field tường minh. Lý do: MongoDB multi-document transaction tự cung cấp
+      đúng optimistic concurrency control cần thiết ở tầng storage engine — không cần version field.
+      **Điều chỉnh hiểu biết về vai trò Redis lock (1.13):** không phải để chống mất dữ liệu (đã có
+      transaction lo) — mà để tránh trải nghiệm xấu (reviewer thứ 2 hiện phải tự retry khi gặp 409; có
+      lock sẽ tự chờ rồi xử lý êm).
+
+      **Đề xuất A đã triển khai (theo yêu cầu người dùng) — vá lỗ hổng minh bạch cho case "reject đè
+      lên approval đã có" (phát hiện từ task 1.1, giữ nguyên veto-1-người, không đổi state machine):**
+      - `RequestRejectedDomainEvent` — thêm field `overriddenApprovals` (snapshot `approvals` trước khi
+        reject), để không mất dấu vết approval đã có khi bị override.
+      - `RequestEntity.reject()` — snapshot `approvals` trước khi mutate, truyền vào event.
+      - `notifyAfterReview()` — khi reject 1 đơn đã có ≥1 approval, đổi nội dung thông báo (cho cả
+        người nhận đơn lẫn broadcast) thành "đã được duyệt 1 phần trước đó, nhưng bị... từ chối" thay
+        vì chỉ nhắc người từ chối, không còn im lặng bỏ qua approval đã ghi nhận.
+      - Test mới `request-entity-reject.test.js` (3 case, riêng cho entity — chưa từng có file test
+        persist cho `RequestEntity` từ task 1.1, chỉ có smoke test tạm) khoá đúng hành vi: veto-1-người
+        vẫn hoạt động y hệt gốc, nhưng event giờ mang `overriddenApprovals` đúng.
+
+      **Test:** `review-request.test.js` (15 case: 400 id/action sai, 404 thiếu hồ sơ/không tồn tại,
+      403 không có quyền/tự duyệt, 409 sai trạng thái, 200 approve/reject 1-người-duyệt, đa duyệt lần
+      1 không finalize không gọi `onApprove`, đa duyệt lần 2 finalize gọi đúng `onApprove` với `_id`
+      map đúng, 409 duyệt 2 lần cùng 1 người, reject đè lên approval đã có vẫn cho phép + gọi đúng
+      `onReject`, notify đúng nội dung 1/2 và nội dung khi reject có approval trước đó) + 3 case entity.
+      Tổng 18 test mới, tất cả pass. `npm test` toàn repo: 342 pass / 17 fail — vẫn đúng 4 suite
+      pre-existing, không regression.
+
+      **Swagger:** chưa cập nhật (route chưa cutover, hành vi thật vẫn là code gốc) — dời tới khi 1.13
+      xong.
+- [x] 1.13 — `review` nhánh **đa duyệt** (mở rộng từ 1.12): thêm Redis lock (`acquireRequestReviewLock`,
+      giữ nguyên hàm gốc trong `helpers/requestUtils.js`, không viết lại) trước transaction khi
+      `action === "approve"` và `entity.needsMultiApproval()` — check/push/finalize approvals đã có sẵn
+      từ `RequestEntity.approve()` (task 1.1), service chỉ cần acquire/release lock quanh nó. Thêm rule
+      "trưởng bộ phận phải duyệt trước" cho `forgot_checkin`/`late_early` đa duyệt (`LEVEL1_FIRST_TYPES`,
+      chỉ áp dụng khi `approvals.length === 0 && !canReviewAll`, y hệt điều kiện code gốc).
+
+      **Khác biệt nhỏ so với gốc, chấp nhận được:** code gốc dùng 1 query projection tối giản
+      (`{request_type,total_days,occurrence}`) để quyết định có cần lock hay không trước khi mở
+      transaction; ở đây dùng luôn `requestRepository.findOneById()` (trả full Entity) cho cả pre-check
+      lẫn fetch thật trong transaction — không có method load-partial-fields trong `RequestRepository`
+      hiện tại, và chi phí thêm không đáng kể so với round-trip DB đã có sẵn. Không thêm method mới chỉ
+      để tối ưu vi mô này.
+
+      `RequestReviewLockError` (không phải `ExceptionBase`, không tự map qua `handle-exception.js`) —
+      bọc lại thành `ConflictException` (409) ngay tại nơi gọi (`acquireLockIfNeeded`), để lỗi hết hạn
+      chờ lock cũng trả JSON `{message}` nhất quán thay vì rơi vào nhánh 500 mặc định.
+
+      **Verify thật (không suy luận):** test "2 reviewer approve đồng thời" dùng `Promise.all` thật trên
+      cùng 1 đơn đa duyệt — với lock, cả 2 lời gọi đều **fulfilled** (không có bên nào nhận
+      `ConflictException` như ở 1.12 khi chưa có lock), đúng 1 lần finalize, approvals đủ 2 — xác nhận
+      lock thực sự loại bỏ tình huống phải retry phía client (vai trò UX, không phải data-integrity, đã
+      ghi ở note 1.12).
+
+      **Route cutover:** `/review/:id` giờ trỏ `requestHttpController.review` (module mới); xoá import
+      `RequestController` khỏi `request.routes.js`. `RequestController.js` cũ CHƯA xoá file (dời task
+      1.15) — 3 file test gọi thẳng `RequestController.review()` không qua route
+      (`requestApprovalFlow.test.js`, `forgotCheckinApprove.test.js`) nên không bị ảnh hưởng bởi cutover
+      này, tiếp tục nằm trong 17 fail pre-existing đã biết từ trước, xác nhận lại bằng cách so khớp tên
+      test fail trước/sau cutover — không đổi.
+
+      **Swagger** (`src/docs/request.yaml`, endpoint `/requests/review/{id}`): thêm mô tả hành vi đa
+      duyệt (lượt đầu không finalize), rule trưởng bộ phận duyệt trước (403), lock timeout (409).
+
+      **Test:** `review-request.test.js` thêm 5 case mới (tổng 20): 1 case đa duyệt-đồng-thời qua lock,
+      4 case rule trưởng-bộ-phận (chặn khi không phải chain[0], cho phép khi là chain[0], bỏ qua rule khi
+      approvals đã có ≥1, bỏ qua rule khi `canReviewAll`). `npm test` toàn repo: 347 pass / 17 fail —
+      đúng 4 suite pre-existing, không regression (tăng đúng 5 test mới).
 
 ### Hoàn thiện
 
-- [ ] 1.14 — Đăng ký event handler cho 5 domain event (thông báo — logic y hệt hiện tại, chỉ đổi chỗ
-      gọi từ inline trong controller sang subscribe theo event).
-- [ ] 1.15 — Xoá `RequestController.js` cũ + code chết liên quan trong `requestUtils.js`; xác nhận 3
+- [x] 1.14 — Đăng ký event handler cho domain event (thông báo — logic y hệt hiện tại, chỉ đổi chỗ gọi
+      từ inline trong service sang subscribe theo event).
+
+      **Hạ tầng mới:** thêm dependency `eventemitter2` (bắt buộc — `aggregate-root.base.js` từ Phase 0
+      đã viết `publishEvents()` dùng `eventBus.emitAsync()`, API riêng của thư viện này, native
+      `EventEmitter` không có). Kiểm tra trước khi thêm: 67.8M lượt tải/tháng, 0 dependency, ổn định lâu
+      năm — không phải gói bị bỏ rơi dù ít release, đạt tiêu chí "còn maintain" ở nguyên tắc 2b.
+      `src/core/events/event-bus.js` — 1 singleton `EventEmitter2` dùng chung toàn app.
+
+      **`src/modules/request/application/request-notification.handlers.js`** — 4 handler
+      (`onRequestCreated`, `onRequestPartiallyApproved`, `onRequestApproved`, `onRequestRejected`),
+      logic notify giữ nguyên y hệt bản inline cũ (nội dung, người nhận, dedupe), chỉ khác: handler nhận
+      `event` (chỉ có id + primitive field) thay vì object đã load sẵn, nên tự query lại `full_name`/
+      `id_account` từ `event.userId`/`event.reviewerId` qua `UserInfoModel` — đúng tinh thần "domain
+      event mang dữ liệu tối thiểu, handler tự tra cứu", không phình event ra thành DTO đầy đủ.
+      `RequestCancelledDomainEvent` chưa có handler nào subscribe (đúng hành vi gốc — cancel không từng
+      gửi thông báo), chỉ publish để không bỏ phí event đã buffer, sẵn sàng cho handler sau này nếu cần.
+
+      **3 service (`create-request`, `review-request`, `cancel-request`) đổi thành:** gọi
+      `entity.publishEvents(eventBus).catch(() => {})` sau khi transaction commit, thay cho khối
+      `notify(...).catch(() => {})` inline. `review-request.service.js` giảm ~90 dòng (xoá hẳn hàm
+      `notifyAfterReview` — logic rẽ nhánh `isFinal`/`action` giờ không cần nữa vì đã nằm sẵn trong việc
+      `entity.approve()`/`.reject()` chọn đúng loại event để add).
+
+      **Quyết định wiring (đã bàn kỹ, không phải "textbook" Hexagonal thuần tuý):** mỗi service tự
+      `require("./request-notification.handlers")` (side-effect, không destructure gì) thay vì chỉ wire
+      1 lần ở composition root (vd `request.routes.js`). Lý do: test hiện tại `require` thẳng service,
+      không qua route — nếu chỉ wire ở routes, listener sẽ chưa đăng ký khi test gọi `publishEvents`,
+      notify sẽ im lặng không chạy. Node cache module theo path nên `require` lặp lại nhiều service vẫn
+      chỉ chạy đúng 1 lần, không đăng ký trùng/không notify lặp.
+
+      **Test:** không thêm file test riêng cho `request-notification.handlers.js` — toàn bộ hành vi
+      notify (nội dung, người nhận, dedupe, message khi reject đè lên approval trước đó) đã được
+      `create-request.test.js`/`review-request.test.js` assert sẵn qua `notify.mock.calls`, và các test
+      đó **giữ nguyên xanh sau khi refactor** — chính là bài test hồi quy cho việc chuyển sang event-
+      driven, viết thêm unit test riêng chỉ lặp lại cùng 1 hành vi. `npm test` toàn repo: 347 pass / 17
+      fail — không đổi so với trước 1.14, xác nhận refactor không đổi hành vi quan sát được.
+- [x] 1.15 — Xoá `RequestController.js` cũ + code chết liên quan trong `requestUtils.js`; xác nhận 3
       file test cũ (`approvalChain.test.js`, `requestApprovalFlow.test.js`,
       `requestControllerCreate.test.js`) pass không sửa.
-- [ ] 1.16 — Cập nhật `CLAUDE.md` — thêm mục pattern DDD/Hexagonal, trỏ `request` làm ví dụ tham chiếu.
+
+      **Đổi kế hoạch so với dự kiến ban đầu (đã hỏi và được xác nhận):** 2/3 file
+      (`requestControllerCreate.test.js`, `requestApprovalFlow.test.js`) gọi THẲNG
+      `RequestController.create()`/`.review()`/`.getAll()`, không qua HTTP route — xoá controller sẽ
+      làm 2 file này vỡ hoàn toàn, không thể "pass không sửa" như dự kiến. Quan trọng hơn:
+      `requestControllerCreate.test.js` có nhiều test verify sâu side-effect WorkSheet/Attendance khi
+      duyệt đơn (business_trip/leave/remote ghi đúng check_in/check_out/work_unit, dọn sạch dữ liệu cũ
+      khi đè lên nhau...) — verify bằng grep xác nhận KHÔNG có file test nào khác cover phần này (test
+      mới ở Phase 1 luôn mock hẳn `handler.onApprove`/`onCreate`). Quyết định: **port cả 2 file sang gọi
+      service mới**, giữ nguyên mọi assertion, thay vì xoá/giản lược — không đánh đổi coverage.
+
+      **Cách port (không cần sửa từng assertion):** cả 2 file đổi từ gọi `RequestController.create/
+      review/getAll` sang gọi qua 1 helper `callController(action, req, res)` tái dùng đúng
+      `asyncHandler` + `errorHandlerMiddleware` + `requestHttpController.*` thật — mô phỏng chính xác
+      cách Express thật xử lý (bắt reject → format response), nên toàn bộ assertion trên `res.status`/
+      `res.json` giữ nguyên không đổi 1 dòng nào ngoài lệnh gọi.
+
+      **Bug thật phát hiện khi port (do migration ở task 1.11 gây ra, không phải pre-existing) — verify
+      bằng cách gọi thẳng `createRequest()` qua script, thấy `TypeError: request.save is not a
+      function`:** `lateEarlyHandler.onCreate`/`forgotCheckinHandler.onCreate` tính `occurrence` (đơn
+      thứ mấy trong kỳ, dùng cho ngưỡng đa duyệt task 1.13) rồi tự `request.save()` — nhưng
+      `create-request.service.js` truyền vào `{...entity.getProps(), _id}` (plain object), không phải
+      Mongoose document thật → tạo đơn `late_early`/`forgot_checkin` lỗi 500 **100% các lần**. Không bị
+      bắt bởi test cũ vì `create-request.test.js` (Phase 1) chưa từng test 2 loại này với handler thật.
+
+      **Đã bàn kỹ hướng sửa (2 phương án), chọn phương án gọn nhất:** thay vì giữ nguyên thời điểm tính
+      occurrence (sau khi insert, cần patch ngược — cách này cần thêm method
+      `applyTypeSpecificPatch`/`assignOccurrence` trên entity + 1 lần ghi DB nữa), chuyển hẳn việc tính
+      occurrence sang **trước khi tạo đơn**, trong `validateAsync` (hook async có sẵn, chạy trước
+      `RequestEntity.create()`). Nhờ vậy KHÔNG cần filter loại trừ chính đơn đang tạo (`_id: {$ne:
+      ...}` như bản gốc) vì đơn chưa tồn tại lúc tính — đơn giản hơn, chỉ 1 lần ghi DB, không cần thêm
+      method mới trên entity, không đụng `RequestRepository`.
+      - `validateAsync` đổi contract: `null` (không có gì thêm) | `{status, message}` (lỗi, như cũ) |
+        `{...field}` (field bổ sung merge vào entity lúc tạo, vd `{occurrence}`) — chỉ 2 handler
+        (`late_early`, `forgot_checkin`) dùng nhánh thứ 3, 5 handler còn lại không đổi gì (vẫn trả
+        `null`/lỗi như cũ).
+      - `lateEarlyHandler.onCreate` xoá hẳn (toàn bộ nội dung chỉ là tính+lưu occurrence, giờ dời sang
+        `validateAsync`, không còn việc gì để làm ở `onCreate`).
+      - `forgotCheckinHandler.onCreate` chỉ còn giữ side-effect `WorkDayStatusModel.updateMany` (không
+        cần `.save()`, hoạt động bình thường với plain object).
+      - Verify: `computeForgotOccurrence` chỉ đếm đơn `status: "approved"` — đơn mới tạo luôn `pending`
+        nên tính trước/sau insert cho kết quả giống hệt nhau, không rủi ro sai lệch khi đổi thời điểm.
+      - Audit thêm (theo yêu cầu người dùng): grep `.save(` trên toàn bộ 8 handler — xác nhận CHỈ 2 chỗ
+        vừa sửa, không có handler nào ẩn `.save()` trong `onApprove`/`onReject`, không cần sửa thêm.
+      - Verify thật bằng script gọi `createRequest()` trực tiếp (không suy luận): cả `late_early` và
+        `forgot_checkin` tạo thành công, `occurrence` đúng cả ở entity trả về lẫn document trong DB.
+
+      **Phát hiện thêm, KHÔNG sửa (pre-existing business-logic gap, ngoài phạm vi task này):** 3 test
+      trong `requestApprovalFlow.test.js` (quản lý cấp trên — không phải cấp gần nhất — vẫn duyệt được;
+      2 người khác nhau duyệt đơn đa duyệt; race 2 người duyệt đồng thời) fail vì `getApprovalChain`
+      (`resolveDepartmentHead`/`resolveIndirectManagerOrAdmin`) chưa từng có logic "đi lên phòng ban cha
+      (division)" để tìm reviewer — chỉ tìm trong đúng phòng ban của nhân viên hoặc field `manager` của
+      chính phòng ban đó. Verify bằng `git show HEAD:src/helpers/approvalChain.js | diff -
+      domain/approval-chain.js` — logic giống hệt 100% bản đã commit trước khi migration bắt đầu (chỉ
+      khác import path do di dời ở 1.9b) → xác nhận đây là gap có sẵn từ trước, không phải do migration,
+      cần bàn riêng với người dùng nếu muốn sửa (ảnh hưởng logic phân quyền duyệt đơn).
+
+      **Dọn code chết trong `requestUtils.js`:** xoá `calcWorkUnit` (grep xác nhận 0 nơi sử dụng, kể cả
+      trước khi `RequestController.js` bị xoá).
+
+      **Test:** `requestControllerCreate.test.js` (10 test, port nguyên vẹn + fix thêm 1 lỗi teardown
+      nhỏ — `afterAll` disconnect DB trước khi fire-and-forget notify của lần gọi cuối kịp xong, thêm
+      chờ 50ms), `requestApprovalFlow.test.js` (16 test, port nguyên vẹn, 3 fail như đã giải thích ở
+      trên). `npm test` toàn repo: 347 pass / 17 fail — **giữ nguyên y hệt** trước khi làm task này (bug
+      500 đã ẩn sau lớp mock ở Phase 1 giờ được fix, không đổi tổng số fail vì 2 file test này vốn đã
+      không exercise 2 loại đơn đó qua handler thật cho tới khi port xong).
+- [x] 1.16 — Cập nhật `CLAUDE.md` — thêm mục pattern DDD/Hexagonal, trỏ `request` làm ví dụ tham chiếu.
+
+      Cập nhật "Cấu trúc thư mục" (thêm `core/`, `modules/`, đánh dấu `controllers/` là pattern cũ chưa
+      migrate) + thêm mục mới "## DDD + Hexagonal Architecture (module mới)": cấu trúc 1 module chuẩn
+      (domain/infrastructure/application/interface), 5 quy ước đã chốt (CQRS-lite đọc bypass domain,
+      `runInTransaction`, domain event qua `eventBus` + quy ước mỗi service tự `require()` file handler,
+      exception ném thẳng qua `core/exceptions/*` + `asyncHandler`/`errorHandlerMiddleware`, request-type
+      handler pattern riêng module `request` chưa di chuyển vào domain), và trạng thái migration hiện
+      tại (chỉ `request` đã xong). Trỏ `docs/DDD-HEXAGONAL-MIGRATION-PLAN.md` cho chi tiết đầy đủ.
 
 **Definition of done:** test cũ + mới pass, `RequestController.js` cũ không còn được require ở đâu,
 `CLAUDE.md` có ví dụ tham chiếu.
 
-## 8. Phase 2+ — Các module còn lại
+## 8. Phase 1.5 — Migrate sang TypeScript
+
+Đặt ngay sau Phase 1 (trước khi mở rộng sang các module khác) vì lúc đó đã có `request` làm module tham
+chiếu đầy đủ (domain/infrastructure/application/interface) — dùng chính module này để pilot TS trước
+khi áp cho các module tiếp theo, tránh vừa học TS vừa migrate module mới cùng lúc.
+
+**Đã xác nhận qua log Dokploy/Nixpacks thật (không phải suy đoán):**
+- Không cần đổi gì trong cấu hình Dokploy. Nixpacks tự chạy `npm run build` (nếu `package.json` có
+  script `"build"`) sau `npm ci`, trước khi chạy `npm run start` — cơ chế có sẵn cho đúng case này.
+- Việc cần làm chỉ nằm trong repo:
+  1. Thêm `typescript` + `@types/*` cần thiết vào `devDependencies`.
+  2. Thêm script `"build": "tsc"`.
+  3. Đổi `"start": "node index.js"` → `"start": "node dist/index.js"` (theo `outDir` thật sự chọn).
+  4. `tsconfig.json`: `outDir`, `rootDir`, target/module CommonJS (giữ nguyên hành vi runtime, chỉ thêm
+     type-check + compile step).
+- `npm ci` hiện tại cài cả `devDependencies` (không có `.npmrc`/config nào set `production=true` chặn
+  điều này) — xác nhận bằng cách đọc trực tiếp repo, không phải đoán từ log.
+
+**Lưu ý riêng, KHÔNG thuộc phạm vi phase này, chỉ ghi nhận:**
+- Production hiện chạy Node 18.20.5, trong khi nhiều dependency (`mongodb`, `bson`,
+  `mongodb-memory-server`, `swagger-jsdoc`, `glob`, `lru-cache`...) khai báo `engines` yêu cầu Node ≥20
+  (warning có sẵn, không do TS gây ra). Nên cân nhắc nâng Node version production trước hoặc trong lúc
+  làm phase này, vì toolchain TS mới cũng có thể đòi Node ≥20 — nhưng đây là quyết định hạ tầng riêng,
+  cần bạn xác nhận trước khi đụng.
+- Dockerfile do Nixpacks tự sinh truyền secrets qua `ARG`/`ENV` (Docker linter cảnh báo
+  `SecretsUsedInArgOrEnv`) — vấn đề có sẵn, không liên quan TS, không tự sửa.
+
+**Đã chốt (xác nhận với người dùng trước khi bắt đầu):**
+- Chiến lược migrate: **dần theo module**, bắt đầu từ `src/core/` + `src/modules/request/` (đã có test
+  bảo vệ đầy đủ), phần `.js` còn lại giữ nguyên qua `allowJs`.
+- Strict mode: **bật dần từng flag** (bắt đầu `noImplicitAny`, thêm `strictNullChecks`... sau khi phần
+  đã migrate ổn định), không bật `strict: true` ngay từ đầu.
+
+- [x] 1.5.1 — Setup tooling, CHƯA đụng file code nào:
+      - Thêm `devDependencies`: `typescript`, `ts-jest`, `@types/jest`, `@types/node@18` (pin đúng
+        major 18, khớp Node production 18.20.5 đã xác nhận qua log Dokploy — KHÔNG dùng bản mới nhất
+        `@types/node@26` dù đó là latest, vì sẽ khai báo API của Node 26 không tồn tại ở production).
+        Verify tương thích trước khi cài: `typescript@7` yêu cầu Node ≥16.20, `ts-jest@29` yêu cầu Node
+        18.x hoặc ≥20, `jest@30` (đã có sẵn) yêu cầu `^18.14.0 || ^20 || ^22 || >=24` — Node 18.20.5
+        production thoả tất cả, không cần nâng Node chỉ vì TypeScript (khác với gap Node ≥20 của
+        `mongodb`/`bson`/`mongodb-memory-server` đã ghi nhận ở trên, vẫn chưa đụng).
+      - `tsconfig.json` mới ở root: `allowJs: true, checkJs: false` (chỉ .ts được type-check đầy đủ,
+        .js pass-through nguyên trạng), `outDir: "dist"`, `rootDir: "."` (vì `index.js` nằm ở root,
+        không phải trong `src/`), `module: "CommonJS"` (giữ nguyên `require`/`module.exports`, file
+        `.ts` mới có thể dùng `import`/`export` — tsc tự biên dịch xuống CommonJS, không cần đổi cách
+        `require()` ở các file `.js` khác), `noImplicitAny: true` (flag strict đầu tiên theo quyết định
+        trên). **Lưu ý:** TypeScript 7 đã bỏ hẳn `moduleResolution: "node"` (`node10`) — không khai báo
+        `moduleResolution`, để tsc tự chọn mặc định phù hợp với `module: "CommonJS"`.
+      - `package.json`: thêm `"build": "tsc"`, đổi `"start": "node index.js"` →
+        `"start": "node dist/index.js"`. Chưa đổi `"dev"` (vẫn `nodemon index.js` chạy thẳng .js) — sẽ
+        cần đổi sang `ts-node` khi bắt đầu có file `.ts` thật (task sau).
+      - `.gitignore`: thêm `dist/` (build artifact).
+      - **Verify thật (không suy đoán):** `npm run build` chạy sạch (502 file output = 250 `.js` gốc ×
+        2 vì kèm `.map`, cộng `index.js`+`.map` — đúng số lượng, không file nào bị bỏ sót dù chưa có
+        `.ts` nào). Chạy thật `node dist/index.js` (không phải chỉ `--check`) — kết nối Redis + MongoDB
+        thành công, chạy xong job đồng bộ folder, chỉ dừng ở bước `listen(2345)` vì cổng đã bị process
+        dev khác chiếm — xác nhận toàn bộ path resolution (`require("./src/...")`, `dotenv` đọc `.env`
+        theo cwd, `path.join(__dirname, "public")`...) hoạt động đúng từ `dist/` dù cấu trúc thư mục
+        được mirror sang đó. `npm test` toàn repo: vẫn 347 pass / 17 fail, không đổi (chưa có gì dùng
+        `ts-jest` nên chưa ảnh hưởng).
+
+- [x] 1.5.2 — Wire `ts-jest` vào `jest.config.js` để chạy được `.test.ts`, giữ nguyên `.test.js` hiện có.
+      - `testMatch` thêm `**/*.test.ts`; thêm `transform: { "^.+\\.tsx?$": ["ts-jest", {...}] }`.
+      - **Bug thật phát hiện ngay khi thử (không phải suy đoán):** `typescript@7.0.2` (bản mới nhất,
+        đã cài ở 1.5.1) là bản viết lại native, KHÔNG còn expose Compiler API kiểu JS mà `ts-jest`
+        (bản `29.x`, dòng hiện tại duy nhất tương thích `jest@30`) cần — lỗi thẳng: *"does not expose
+        the JavaScript compiler API required by ts-jest"*. Hạ xuống `typescript@6.0.3` (bản ổn định mới
+        nhất dòng 6.x, dòng cũ mà `ts-jest` thực sự hỗ trợ) — build/type-check ở 1.5.1 verify lại vẫn
+        hoạt động bình thường với bản này.
+      - **Vấn đề thứ 2:** dùng chung `tsconfig.json` cho `ts-jest` bị thiếu global type của
+        `@types/jest` (`test`/`expect` báo "Cannot find name") — do `tsconfig.json` gốc cố tình
+        `exclude: ["__tests__"]` (đúng cho `npm run build`, không muốn build production kéo theo test).
+        Tách riêng `tsconfig.test.json` (extends tsconfig gốc, `include` thêm `__tests__/**/*`,
+        `types: ["jest","node"]`), trỏ `ts-jest` dùng file này thay vì `tsconfig.json`.
+      - **Verify thật bằng file `.ts` tạm** (tạo rồi xoá ngay sau khi xác nhận, không phải suy luận):
+        (1) test pass bình thường qua `ts-jest`; (2) cố tình truyền sai kiểu (`add("2", 3)`) — `ts-jest`
+        báo đúng lỗi biên dịch `TS2345`, xác nhận type-check thật sự chạy chứ không chỉ transpile bỏ
+        qua kiểu.
+      - `npm test` toàn repo: vẫn 347 pass / 17 fail, không đổi.
+
+- [x] 1.5.3 — Convert `src/core/ddd/` (5 file) sang `.ts`: `entity.base.ts`, `domain-event.base.ts`,
+      `aggregate-root.base.ts`, `value-object.base.ts`, `command.base.ts`.
+
+      **Thiết kế kiểu:** `Entity<Props extends object>`/`AggregateRoot<Props>`/`ValueObject<Props>`
+      generic hoá theo props riêng từng subclass. `Entity`/`AggregateRoot`/`DomainEvent`/`ValueObject`
+      đánh dấu `abstract class` (khớp đúng ý định thiết kế gốc — không dùng trực tiếp), nhưng
+      **`validate()` vẫn giữ cụ thể (throw runtime), KHÔNG khai báo abstract thật sự** — vì subclass
+      thật (`RequestEntity`) vẫn còn `.js` chưa convert, TS không type-check được nó; nếu `validate()`
+      là abstract thật, TS sẽ xoá hẳn method khỏi output biên dịch, mất luôn lưới an toàn runtime hiện
+      tại (`Entity.validate() must be implemented...`) mà không có gì bù lại cho code `.js` chưa gõ
+      kiểu. Giữ nguyên đúng hành vi cũ, chỉ nâng cấp kiểu — sẽ cân nhắc chuyển hẳn sang abstract khi
+      chính `RequestEntity` convert sang `.ts` (task sau).
+
+      **Dependency mới:** `@types/lodash` (cho `value-object.base.ts` dùng `import isEqual from
+      "lodash/isEqual"` đúng kiểu thay vì `require()` bỏ qua type-check).
+
+      **Vấn đề vận hành thật phát hiện + fix (không phải suy đoán):** các file domain event con
+      (`request-created.domain-event.js`...) vẫn `.js`, `require()` thẳng `domain-event.base` — khi file
+      đó đổi sang `.ts`, `node index.js`/`nodemon` (script `dev` cũ) KHÔNG tự hiểu được `.ts`, sẽ vỡ ngay.
+      Thêm `ts-node`, đổi `"dev": "nodemon index.js"` → `"dev": "nodemon -r ts-node/register/transpile-only index.js"`
+      (`transpile-only` để không chậm mỗi lần nodemon restart — type-check đầy đủ đã có ở
+      `npm run build`/`npm test`/editor). Verify thật: boot cả qua `dist/index.js` (build) lẫn qua
+      `ts-node` (dev) — cả 2 đều kết nối Redis/Mongo, chạy xong cron sync folder, listen cổng thành
+      công.
+
+      **Gap thứ 2 phát hiện:** ESLint hiện tại **không hề lint file `.ts`** (`eslint .`/`npm run lint`
+      mặc định chỉ quét `.js`, `.ts` bị bỏ qua im lặng, không báo lỗi gì). Thêm
+      `@typescript-eslint/parser` + `@typescript-eslint/eslint-plugin@7` + `eslint-config-airbnb-typescript`
+      (bản tương thích `eslint@8.57`/airbnb-base đang dùng) qua `overrides` cho `**/*.ts` trong
+      `.eslintrc.json`, dùng `tsconfig.test.json` cho type-aware lint. 2 vấn đề phụ lộ ra khi bật lint
+      cho `.ts`: (1) `import/no-unresolved` — file `.js` cũ `require()` module giờ là `.ts` không
+      resolve được — fix bằng `settings.import/resolver.node.extensions` thêm `.ts`; (2)
+      `import/extensions` đòi khai rõ đuôi `.ts` — fix bằng rule `{js:"never", ts:"never"}` (khớp quy
+      ước extensionless-require có sẵn). Đổi script `lint`/`lint:fix` thêm `--ext .js,.ts`. Verify: tổng
+      số lỗi lint toàn repo **giữ nguyên 4266** (pre-existing, không liên quan) dù bật `--ext .ts` hay
+      không — xác nhận phần `.ts` mới hoàn toàn sạch, không phát sinh thêm.
+
+      **Verify tổng:** từng file có test riêng (`entity.test.js` 11, `domain-event.test.js` 6,
+      `aggregate-root.test.js` 7, `value-object.test.js` 11, `command.test.js` 6 — tổng 41 test, đều
+      pass không sửa 1 dòng). `npm test` toàn repo: 347 pass / 17 fail, không đổi. `npm run build` +
+      boot `dist/index.js` thành công. `npm run lint` sạch (không thêm lỗi mới).
+
+      **Sửa tiếp theo góp ý người dùng — gom type dùng chung, tránh khai trùng:** review lại phát hiện
+      `DomainEventMetadata` (trong `domain-event.base.ts`) và `CommandMetadata` (trong `command.base.ts`)
+      là **2 type giống hệt nhau** (`correlationId?/causationId?/timestamp/userId?`) — khai trùng vì mỗi
+      file được viết độc lập, không tra lại type đã có. Tạo `src/core/ddd/types.ts` chứa 2 type thực sự
+      dùng chung ≥2 nơi: `Metadata` (gộp 2 type trùng), `EventBus` (trước ở `aggregate-root.base.ts`,
+      bản chất là hợp đồng chung cho mọi nơi publish event sau này). Type chỉ dùng đúng 1 file
+      (`EntityConstructorProps`, `EntityOptions`, `DomainEventProps`, `DomainPrimitive`, `CommandProps`)
+      **giữ nguyên tại chỗ khai báo** — không dồn vào `types.ts` vì không lặp lại ở đâu khác, dồn vào chỉ
+      thêm gián tiếp không cần thiết. `types.ts` cố tình **không** import ngược bất kỳ file class nào
+      trong `ddd/` (vd `EventBus.emitAsync`'s param kiểu `object` thay vì import `DomainEvent`) — nếu
+      import ngược sẽ tạo vòng phụ thuộc (`types.ts` → `domain-event.base.ts` → `types.ts`); nơi cần kiểu
+      cụ thể hơn (`aggregate-root.base.ts`) tự thắt chặt lại khi dùng.
+
+      **Quy ước từ giờ (áp dụng cho mọi task convert `.ts` sau này, không riêng `core/ddd/`):**
+      1. Trước khi khai 1 interface/type mới, kiểm tra `types.ts` cùng cấp thư mục + các file `.ts`
+         khác trong cùng thư mục xem đã có type cùng hình dạng chưa (không chỉ trùng tên, mà trùng cấu
+         trúc field).
+      2. Nếu phát hiện trùng/gần trùng: quyết định (a) dùng lại y nguyên type đã có, (b) tổng quát hoá
+         type đã có để phục vụ cả 2 chỗ (như `Metadata` ở trên), hoặc (c) giữ tách riêng NẾU có lý do
+         nghiệp vụ thật sự khác nhau dù cấu trúc giống — phải ghi rõ lý do tại sao không gộp.
+      3. Mỗi thư mục con của `core/` (và sau này mỗi `module/<name>/domain|application|...`) có
+         `types.ts` **riêng** khi cần — không dồn toàn bộ repo vào 1 file `types.ts` chung (tránh phình
+         to + coupling chéo giữa các phần vốn độc lập).
+
+      **Bảng kiểm kê type dùng chung hiện tại** (cập nhật mỗi khi thêm/gộp type mới):
+
+      | File | Type | Dùng bởi |
+      |---|---|---|
+      | `core/ddd/types.ts` | `Metadata` | `DomainEvent`, `Command` |
+      | `core/ddd/types.ts` | `EventBus` | `AggregateRoot.publishEvents()` |
+
+      Verify lại sau khi gộp: `npx tsc --noEmit` sạch, `eslint src/core/ddd/` sạch, 82 test
+      `__tests__/core/` pass, `npm test` toàn repo 347/17 không đổi, `npm run build` thành công.
+
+- [x] 1.5.4 — Convert 9 file còn lại của `src/core/`: `exceptions/exception.base.ts`,
+      `exceptions/exceptions.ts`, `context/request-context.ts`, `events/event-bus.ts`,
+      `db/mongoose-repository.base.ts`, `db/run-in-transaction.ts`, `http/async-handler.ts`,
+      `http/handle-exception.ts`, `http/error-handler.middleware.ts`, `http/parse-pagination.ts`.
+      `src/core/` giờ 100% `.ts`, không còn file `.js` nào.
+
+      **Dependency mới:** `@types/express@4` (khớp `express@^4.19.2` đang dùng — bản mới nhất
+      `@types/express` là dòng 5.x cho Express 5, phải pin dòng 4.x tương ứng). `ExceptionBase` đánh
+      dấu `abstract class` với `code`/`statusCode` là `abstract` property thật (khác với `validate()`
+      của Entity/ValueObject) — an toàn vì không có nơi nào `new ExceptionBase(...)` trực tiếp (đã grep
+      xác nhận), và mọi subclass hiện tại đều implement đủ 2 field qua class field initializer.
+
+      **BUG THẬT phát hiện qua chạy `npm test` TOÀN REPO (không phải qua test riêng của file) — bài
+      học quan trọng:** khi convert `async-handler.js`, đã vô tình đổi arrow function từ **expression-
+      body** (`(req,res,next) => Promise.resolve(fn(...)).catch(next)` — tự động `return` promise
+      chain) sang **block-body** (`{ Promise.resolve(...).catch(next); }` — tự động `return undefined`).
+      Production (Express) không quan tâm giá trị trả về nên KHÔNG lộ lỗi gì — nhưng helper
+      `callController` (viết ở task 1.15 để port `requestControllerCreate.test.js`/
+      `requestApprovalFlow.test.js`) dựa vào đúng giá trị trả về đó để `await` cho xong việc async bên
+      trong, nên khi mất, `await callController(...)` resolve ngay lập tức (trước khi service chạy
+      xong) — **41 test fail** (tăng từ 17 lên 41, đúng 2 file test vừa port ở 1.15 vỡ hoàn toàn). Chỉ
+      82 test `__tests__/core/` (chạy riêng lẻ theo từng file) đều xanh — không phát hiện được vì
+      không có test nào assert trực tiếp giá trị trả về của `asyncHandler`. Đây chính là lý do phải luôn
+      chạy `npm test` TOÀN REPO sau mỗi file, không chỉ test riêng của file đó.
+
+      **Fix:** khai kiểu trả về trung thực `(req,res,next) => Promise<void>` (không dùng `RequestHandler`
+      của `@types/express` — type đó ngầm định `void`, không phản ánh đúng việc hàm này CÓ trả về
+      Promise, thứ mà test harness cần dựa vào), dùng `.then(() => undefined, (error) => next(error))`
+      thay cho `.catch(next)` để cả 2 nhánh (thành công/lỗi) đều resolve về `undefined` — khớp kiểu khai
+      báo mà không cần ép kiểu (`as`).
+
+      **Verify sau khi fix:** `npm test` toàn repo trở lại đúng 347 pass / 17 fail. `npm run build` +
+      boot `dist/index.js` thành công. `npm run lint` toàn repo vẫn 4266 vấn đề (pre-existing, không
+      đổi). `find src/core -name "*.js"` trả về rỗng — xác nhận `core/` 100% `.ts`.
+
+      **Kiểm tra type trùng lặp (theo quy ước đã ghi ở 1.5.3):** phát hiện 1 cặp gần giống —
+      `PaginationParams`/`PaginatedResult` (`db/mongoose-repository.base.ts`) và `PaginationQuery`/
+      `PaginationResult` (`http/parse-pagination.ts`). **Quyết định giữ tách riêng, không gộp** — khác
+      tầng thật sự: 1 bên là kết quả đã parse từ query string HTTP (`skip` tính sẵn, input `unknown`
+      chưa validate), bên kia là tham số đầu vào cho repository (chỉ `limit`/`page`, không cần `skip`
+      vì tự tính bên trong). Không phải khai trùng vô ý như `Metadata` ở 1.5.3.
+
+- [x] 1.5.5 — Convert `src/config/logger.ts` (ngoài phạm vi `core/`+`modules/request/` đã định, làm theo
+      yêu cầu riêng của người dùng) + wire vào 2 chỗ trước đó chưa dùng logger nào:
+
+      **Phát hiện trước khi làm (trả lời câu hỏi người dùng):** `logger.js` được viết sẵn nhưng
+      **chưa được require ở bất kỳ đâu trong repo** (grep xác nhận). Hệ thống log thật hiện tại là 212
+      lệnh `console.log/error/warn` rải rác không format thống nhất + `morgan("dev")` chỉ log access
+      HTTP, khác concern. So sánh: `logger.js` tốt hơn ở format thống nhất, phân stdout/stderr theo
+      level, `debug()` tự tắt production, `serializeMeta` an toàn khi log object phức tạp — nhưng chưa
+      tận dụng được 2 hạ tầng đã có sẵn từ Phase 0/1.5: `RequestContextService` (chưa tự gắn
+      correlationId) và error-handling middleware (chưa log gì cả, lỗi 500 chỉ client thấy).
+
+      **Convert + cải thiện:**
+      - `logger.ts`: thêm `RequestContextService.getRequestId()` vào mỗi dòng log (`[timestamp] [LEVEL]
+        [requestId] message {meta}` — bỏ qua phần `[requestId]` nếu gọi ngoài request context, vd cron
+        job). Verify thật bằng script gọi trực tiếp qua `ts-node`: có context → có requestId, không
+        context → không có, đúng format.
+      - `core/http/error-handler.middleware.ts`: gọi `logger.error(message, {stack})` — **chỉ log khi
+        lỗi thật sự bất ngờ** (`statusCode >= 500` hoặc không phải `ExceptionBase`). Lỗi nghiệp vụ đã
+        biết (400/403/404/409 — `NotFoundException`, `ForbiddenException`...) là luồng bình thường,
+        cố tình KHÔNG log để tránh nhiễu (hàng chục test trong suite tạo ra các lỗi 4xx này có chủ đích,
+        nếu log hết sẽ ngập log mỗi lần chạy test/production mà không có giá trị gì).
+
+      **Verify:** chạy toàn bộ `npm test` — 0 dòng `[ERROR]` xuất hiện trong output (xác nhận không
+      test nào assert lỗi 500 thật, không bị nhiễu log). `npm test` toàn repo: 347 pass / 17 fail,
+      không đổi (1 lần chạy ra 18 fail do 1 test khác flaky khi chạy song song — chạy lại 2 lần liền sau
+      đó đều về đúng 347/17, xác nhận không phải regression thật). `npm run build` + `npm run lint`
+      (4266, không đổi) đều sạch.
+
+- [x] 1.5.6 — Dọn dead code phát hiện qua câu hỏi người dùng: `RequestNotFoundError`
+      (`domain/request.errors.js`, định nghĩa từ task 1.2) chưa từng được dùng — 4 chỗ "đơn không tồn
+      tại" (`review-request.service.js` x2, `cancel-request.service.js`, `get-request-by-id.service.js`)
+      đều dùng `NotFoundException` chung với message viết tay lặp lại, thay vì class riêng đã có sẵn.
+      Lý do khả dĩ: 3 exception khác cùng file (`CannotSelfReviewError`, `AlreadyReviewedError`,
+      `InvalidStatusTransitionError`) đều là invariant entity tự ném về CHÍNH NÓ nên tự nhiên được dùng
+      trong `request.entity.js`; riêng "không tồn tại" là việc của tầng application (sau khi repository
+      lookup thất bại, trước khi entity kịp tồn tại) nên không ai nhớ quay lại dùng class riêng.
+
+      Thay cả 4 chỗ bằng `new RequestNotFoundError()` (message mặc định giống hệt), giữ nguyên
+      `NotFoundException` ở 2 chỗ khác dùng cho "Không tìm thấy thông tin nhân viên" (không phải request
+      not-found, không đổi).
+
+      **Verify nghi vấn của người dùng ("không chạy vào errorHandlerMiddleware") bằng HTTP thật, không
+      suy luận:** viết script tạm dựng đúng Express app thật (`request.routes.js` +
+      `errorHandlerMiddleware` thật, không mock 2 cái này) qua `supertest`, gọi `PATCH /requests/
+      review/:id` và `PATCH /requests/cancel/:id` với id không tồn tại — cả 2 trả đúng
+      `404 {message: "Đơn không tồn tại"}`, xác nhận `RequestNotFoundError` (kế thừa `ExceptionBase`
+      giống `NotFoundException`) chạy đúng qua `errorHandlerMiddleware` thật, không có vấn đề routing
+      nào. `get-request-by-id.http.test.js` (test có sẵn, cũng dựng Express thật) tiếp tục pass, cùng
+      xác nhận endpoint thứ 3. Xoá script tạm sau khi xác nhận xong.
+
+      `npm test` toàn repo: 347 pass / 17 fail, không đổi.
+
+- [x] 1.5.7 — 2 fix nhỏ về logger, phát hiện qua người dùng tự chạy `npm run dev` và test tay:
+
+      **Format log xấu hơn `loggingMiddleware.js` có sẵn:** `logger.ts` cũ nối `JSON.stringify(meta)`
+      vào chung 1 dòng chuỗi trước khi `console.log`, ra 1 dòng JSON dày đặc — khác với
+      `loggingMiddleware.js` (file có sẵn, không phải của migration này) truyền object thô làm tham số
+      riêng cho `console.log(prefix, object)`, để Node tự pretty-print nhiều dòng/thụt lề. Sửa `print()`
+      trong `logger.ts` theo đúng cách đó — bonus: bỏ được `serializeMeta`/try-catch JSON.stringify,
+      không còn rủi ro crash khi `meta` có circular reference. Verify bằng script gọi trực tiếp qua
+      `ts-node` — output giờ nhiều dòng, đẹp, giống `loggingMiddleware.js`.
+
+      **BUG THẬT phát hiện qua người dùng tự test — nodemon không theo dõi file `.ts`:** từ task 1.5.3,
+      script `dev` đổi thành `nodemon -r ts-node/register/transpile-only index.js` nhưng **quên báo
+      nodemon theo dõi thêm đuôi `.ts`** — verify bằng cách chạy thật `npm run dev`, nodemon tự in ra
+      `watching extensions: js,mjs,cjs,json` (không có `ts`), xác nhận sửa file `.ts` KHÔNG kích hoạt
+      restart — dev server chạy code cũ, đúng như người dùng quan sát ("sửa `error-handler.middleware.ts`
+      không thấy log mới"). Fix: thêm `--ext js,mjs,cjs,json,ts` vào script `dev`. Verify lại: nodemon in
+      đúng `watching extensions: js,mjs,cjs,json,ts`, chạm file `.ts` → `[nodemon] restarting due to
+      changes...` xuất hiện đúng.
+
+      **Lưu ý quan trọng cho các task 1.5.x sau này:** đây là gap đã tồn tại từ 1.5.3 tới giờ (nhiều
+      task convert file `.ts` trong `core/` đã đi qua) mà không ai phát hiện vì luôn verify qua
+      `npm test`/`npm run build`/boot thủ công (`node dist/index.js` hoặc `node -r ts-node/register`),
+      không ai thực sự chạy `npm run dev` (nodemon) trong lúc convert. Không cần sửa gì thêm ở các task
+      cũ (không ảnh hưởng build/test/production, chỉ ảnh hưởng trải nghiệm dev local).
+
+      `npm test` toàn repo: 347 pass / 17 fail, không đổi. `npm run build` sạch.
+
+- [x] 1.5.8 — Sửa phân cấp kế thừa của 4 exception ở `domain/request.errors.js` + truyền `metadata`
+      vào các nơi ném lỗi, theo góp ý người dùng (câu hỏi: "sao không kế thừa NotFoundException mà lại
+      ExceptionBase"):
+
+      **Đổi parent class** (trước đó cả 4 đều `extends ExceptionBase` trực tiếp — thiếu sót từ task
+      1.2, không phải quyết định có chủ đích, xác nhận bằng grep không có chỗ nào check
+      `instanceof NotFoundException`/`ForbiddenException`/`ConflictException` cụ thể nên đổi parent an
+      toàn):
+      - `CannotSelfReviewError` (403) → `extends ForbiddenException`
+      - `AlreadyReviewedError` (409) → `extends ConflictException`
+      - `InvalidStatusTransitionError` (409) → `extends ConflictException`
+      - `RequestNotFoundError` (404) → `extends NotFoundException`
+
+      Mỗi class giờ chỉ cần khai `code` riêng (`REQUEST.*`), không cần lặp `statusCode` — tự kế thừa từ
+      parent. Verify thật thứ tự khởi tạo class field qua kế thừa 2 tầng (không suy đoán): script gọi
+      `new E()` cho cả 4 class, in `code`/`statusCode` — đúng cả 2: `code` là giá trị riêng
+      (`REQUEST.CANNOT_SELF_REVIEW`...), `statusCode` đúng giá trị kế thừa (403/409/409/404).
+
+      **Thêm `metadata` vào các nơi ném lỗi** để log có ngữ cảnh hữu ích hơn (không thêm `cause` — cả 4
+      lỗi đều ném trực tiếp từ kiểm tra nghiệp vụ, `if (...) throw ...`, không có lỗi cấp thấp hơn nào
+      "gây ra" nó để gán vào `cause`, gán bừa sẽ sai ý nghĩa của field):
+      - `CannotSelfReviewError`: `{ requestId, userId, reviewerId }` (`request.entity.js`,
+        `_assertNotSelfReview`)
+      - `AlreadyReviewedError`: `{ requestId, reviewerId }` (`request.entity.js`, `approve()`)
+      - `InvalidStatusTransitionError`: `{ requestId, currentStatus }` (`request.entity.js`,
+        `_assertPending`)
+      - `RequestNotFoundError`: `{ requestId: id }` ở cả 4 chỗ ném (`review-request.service.js` x2,
+        `cancel-request.service.js`, `get-request-by-id.service.js`)
+
+      Verify: `npm test` toàn repo 347/17 không đổi (42 test riêng của module `request` liên quan các
+      file đã sửa đều pass). Verify log thật bằng script gọi trực tiếp: `metadata` hiện đúng trong
+      output pretty-print (nhờ fix 1.5.7), `cause: undefined` đúng như dự kiến (không có gì để gán).
+
+**Definition of done (sơ bộ, sẽ chi tiết hoá khi bắt đầu):** build qua Nixpacks thành công trên 1 lần
+deploy thử (không sửa cấu hình Dokploy), `npm test` xanh với `ts-jest` hoặc tương đương, không giảm số
+test pass.
+
+- [x] 1.6 — Convert toàn bộ `src/modules/request/` (24 file) sang `.ts`: `domain/` (11: 5 domain event,
+      `request.entity.ts`, `request.errors.ts`, `approval-chain.ts`, `request-type-handlers.ts`,
+      `request-type-labels.ts`, `resolve-reviewer-profile.ts`, + `types.ts` mới), `infrastructure/` (2:
+      `request.mapper.ts`, `request.repository.ts`), `application/` (9), `interface/` (2:
+      `request.http.controller.ts`, `request.routes.ts`). `src/modules/request/` giờ 100% `.ts`.
+
+      **Thiết kế kiểu chính:**
+      - `RequestProps` (trong `types.ts`) gộp field của cả 7 loại đơn thành **1 interface**, chỉ
+        `COMMON_FIELDS` bắt buộc, còn lại optional — KHÔNG dùng discriminated union theo `request_type`
+        dù "đúng chuẩn" hơn, vì `RequestEntity` vốn là **1 class duy nhất xử lý động cả 7 loại** (không
+        phải 7 subclass), ép kiểu theo union sẽ đấu tranh ngược lại thiết kế thật, còn `validate()` của
+        entity đã tự kiểm tra field-theo-loại lúc runtime rồi (xem `REQUEST_TYPE_FIELDS`).
+      - `RequestTypeHandler` (chữ ký lỏng `(...args: any[]) => any`) vì `helpers/*Handler.js` (7 file)
+        nằm ngoài phạm vi module `request`, chưa convert — không giả vờ chính xác cho thứ chưa gõ kiểu.
+      - `account`/`body`/tham số từ Mongoose document populate (`request.user_id._id`...) dùng `any`
+        có chủ đích ở nhiều chỗ — cùng lý do: `middlewares/authMiddleware.js`, `models/*.js` chưa
+        convert, ép kiểu chính xác cho input từ code chưa gõ kiểu chỉ tạo ảo giác an toàn.
+      - `src/core/http/express.d.ts` (mới) — augment `Express.Request.account` (property tuỳ biến do
+        `authMiddleware.js` gắn, Express gốc không có) — làm 1 lần dùng chung cho MỌI controller sau
+        này, không riêng module `request`.
+
+      **Gộp type trùng lặp phát hiện thêm** (theo quy ước 1.5.3): `ReviewerProfile`
+      (`resolve-reviewer-profile.ts`) và shape trả về của `buildCandidate` (`approval-chain.ts`) giống
+      hệt nhau trừ field `accountId` — gộp thành `ReviewerProfile` (dùng chung, trong `types.ts`) +
+      `ApprovalCandidate extends ReviewerProfile { accountId }` (riêng `approval-chain.ts`).
+      `RequestFilter` (`request-query-filters.ts`) cũng được export để `get-my-requests.service.ts`/
+      `get-all-requests.service.ts` dùng chung thay vì tự khai lại.
+
+      **Sự cố thật bắt được TRƯỚC KHI gây regression (nhờ verify từng bước, không phải may mắn):**
+      convert `request.routes.ts` lúc đầu viết `export default router;` — nhưng file gốc là
+      `module.exports = router;` (bare value, không object) trong khi TẤT CẢ 23 file khác đều
+      `module.exports = { Tên };` (named, object-wrapped). Với `esModuleInterop`, `export default`
+      biên dịch thành `exports.default = router` — phá vỡ 5 nơi `.js`/test đang `require()` thẳng lấy
+      router (không phải `.default`). Rà lại **toàn bộ 24 file** qua `git show HEAD:<path>` để xác nhận
+      chỉ đúng 1 file này có pattern khác biệt — sửa thành `export = router;` (cú pháp CommonJS-export
+      riêng của TS, biên dịch đúng thành `module.exports = router` 1:1). Verify bằng cách build thật rồi
+      đọc trực tiếp file `.js` biên dịch ra, xác nhận đúng `module.exports = router;`, không có
+      `.default`.
+
+      **Việc phụ xử lý trong lúc convert (theo yêu cầu người dùng):** xoá dòng debug
+      `logger.info("An unexpected error occurred", ...)` không điều kiện còn sót lại trong
+      `error-handler.middleware.ts` (người dùng tự thêm lúc test tay ở 1.5.8, quên dọn) — đúng ý thiết
+      kế "chỉ log lỗi ≥500" đã thống nhất.
+
+      **eslint config sửa thêm 2 chỗ** (áp dụng chung, tránh lặp lại cho các module sau):
+      `@typescript-eslint/naming-convention: off` — `airbnb-typescript/base` mặc định đòi camelCase,
+      xung đột với snake_case field DB (`request_type`, `user_id`...) dùng xuyên suốt codebase (đã tắt
+      cho `.js` qua `camelcase: off` từ trước, giờ tắt tương đương cho `.ts`).
+
+      **Verify tổng:** 93 test module `request` pass nguyên vẹn không sửa dòng nào. `npm test` toàn
+      repo: 347 pass / 17 fail — xác nhận ổn định qua nhiều lần chạy (1 lần ra 29 fail do nhiều test
+      flaky khác chạy song song, không liên quan — chạy lại 2 lần liền sau đó đều đúng 347/17).
+      `npm run build` + boot `dist/index.js` thành công (tới đúng bước `listen()`, chỉ dừng vì port đã
+      bị server thật của người dùng giữ). `npm run lint` toàn repo vẫn 4266 vấn đề, không đổi.
+      `find src/modules/request -name "*.js"` trả về rỗng.
+
+## 9. Phase 2+ — Các module còn lại
 
 Giữ nguyên thứ tự rủi ro × đòn bẩy đã khảo sát. Mỗi module áp khuôn 12-13 task như Phase 1, **chi tiết
 hoá khi bắt đầu module đó** (không lập chi tiết trước cho cả 7 module — tránh lập kế hoạch cho thứ có
@@ -1060,17 +1643,19 @@ thể đổi sau khi rút kinh nghiệm từ Phase 1).
 | 7 | `post`, `labor-contract` | Rủi ro thấp, cùng khuôn Phase 1 |
 | 8 | `attendance` | Logic phần lớn đã an toàn (helper có test) — chủ yếu di dời cấu trúc; ghi chú idempotency nếu sau này có webhook máy chấm công. **Ràng buộc sâu với `request` (lateEarly/forgotCheckin handler) đã bàn kỹ ở mục 7, phần backlog task 1.11 — xem trước khi bắt đầu module này.** |
 
-## 9. Verification (lặp lại sau mỗi task)
+## 10. Verification (lặp lại sau mỗi task)
 
 1. `node --check <file vừa tạo/sửa>`
 2. `npm test` — số test pass tăng hoặc giữ nguyên, không giảm, không sửa test cũ để "cho pass"
 3. `npm run lint` sạch trên file vừa đụng
 4. `git diff` — review trước khi sang task tiếp theo, không tự commit/push
 
-## 10. Tiến độ
+## 11. Tiến độ
 
-- [ ] Phase 0 — Core building blocks
-- [ ] Phase 1 — Pilot module `request`
+- [x] Phase 0 — Core building blocks
+- [x] Phase 1 — Pilot module `request`
+- [x] Phase 1.5 — Migrate sang TypeScript (`core/` + `modules/request/` — phạm vi pilot đã định; module
+      sau này viết `.ts` ngay từ đầu khi tới lượt, không còn "phase TS riêng")
 - [ ] Phase 2 — `internal-file`
 - [ ] Phase 3 — `user`
 - [ ] Phase 4 — `department`

@@ -1,28 +1,27 @@
-const mongoose = require("mongoose");
-const { AggregateRoot } = require("../../../core/ddd/aggregate-root.base");
-const { ArgumentInvalidException } = require("../../../core/exceptions/exceptions");
-const {
+import mongoose from "mongoose";
+import { AggregateRoot } from "../../../core/ddd/aggregate-root.base";
+import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
+import {
   CannotSelfReviewError,
   AlreadyReviewedError,
   InvalidStatusTransitionError
-} = require("./request.errors");
-const { RequestCreatedDomainEvent } = require("./events/request-created.domain-event");
-const {
-  RequestPartiallyApprovedDomainEvent
-} = require("./events/request-partially-approved.domain-event");
-const { RequestApprovedDomainEvent } = require("./events/request-approved.domain-event");
-const { RequestRejectedDomainEvent } = require("./events/request-rejected.domain-event");
-const { RequestCancelledDomainEvent } = require("./events/request-cancelled.domain-event");
+} from "./request.errors";
+import { RequestCreatedDomainEvent } from "./events/request-created.domain-event";
+import { RequestPartiallyApprovedDomainEvent } from "./events/request-partially-approved.domain-event";
+import { RequestApprovedDomainEvent } from "./events/request-approved.domain-event";
+import { RequestRejectedDomainEvent } from "./events/request-rejected.domain-event";
+import { RequestCancelledDomainEvent } from "./events/request-cancelled.domain-event";
+import { RequestType, RequestProps, RequestStatus } from "./types";
 
-const VALID_STATUSES = ["pending", "approved", "rejected", "cancelled"];
+const VALID_STATUSES: RequestStatus[] = ["pending", "approved", "rejected", "cancelled"];
 
-const MULTI_APPROVAL_RULES = {
-  leave: (props) => props.total_days > 3,
+const MULTI_APPROVAL_RULES: Partial<Record<RequestType, (props: RequestProps) => boolean>> = {
+  leave: (props) => (props.total_days ?? 0) > 3,
   forgot_checkin: (props) => (props.occurrence ?? 0) >= 6,
   late_early: (props) => (props.occurrence ?? 0) >= 4
 };
 
-const REQUEST_TYPE_FIELDS = {
+export const REQUEST_TYPE_FIELDS: Record<RequestType, string[]> = {
   leave: [
     "from_date",
     "from_period",
@@ -52,8 +51,15 @@ const COMMON_FIELDS = [
   "approvals"
 ];
 
-class RequestEntity extends AggregateRoot {
-  static create({ userId, requestType, reason, ...typeSpecificProps }) {
+export interface CreateRequestInput {
+  userId: string;
+  requestType: RequestType;
+  reason?: string;
+  [key: string]: unknown;
+}
+
+export class RequestEntity extends AggregateRoot<RequestProps> {
+  static create({ userId, requestType, reason, ...typeSpecificProps }: CreateRequestInput) {
     const id = new mongoose.Types.ObjectId().toString();
     const props = {
       user_id: userId,
@@ -65,22 +71,22 @@ class RequestEntity extends AggregateRoot {
       reviewer_note: "",
       approvals: [],
       ...typeSpecificProps
-    };
+    } as RequestProps;
 
     const request = new RequestEntity({ id, props });
     request.addEvent(new RequestCreatedDomainEvent({ aggregateId: id, userId, requestType }));
     return request;
   }
 
-  get status() {
+  get status(): RequestStatus {
     return this.props.status;
   }
 
-  get userId() {
+  get userId(): string {
     return this.props.user_id;
   }
 
-  get requestType() {
+  get requestType(): RequestType {
     return this.props.request_type;
   }
 
@@ -88,12 +94,12 @@ class RequestEntity extends AggregateRoot {
     return [...this.props.approvals];
   }
 
-  needsMultiApproval() {
+  needsMultiApproval(): boolean {
     const rule = MULTI_APPROVAL_RULES[this.props.request_type];
     return rule ? rule(this.props) : false;
   }
 
-  approve(reviewerId, reviewerNote = "") {
+  approve(reviewerId: string, reviewerNote = ""): void {
     this._assertNotSelfReview(reviewerId);
     this._assertPending();
 
@@ -129,7 +135,7 @@ class RequestEntity extends AggregateRoot {
     }
   }
 
-  reject(reviewerId, reviewerNote = "") {
+  reject(reviewerId: string, reviewerNote = ""): void {
     this._assertNotSelfReview(reviewerId);
     this._assertPending();
     const overriddenApprovals = [...this.props.approvals];
@@ -151,7 +157,7 @@ class RequestEntity extends AggregateRoot {
     );
   }
 
-  cancel() {
+  cancel(): void {
     this._assertPending();
     this._setProps({ status: "cancelled" });
     this.addEvent(
@@ -163,7 +169,7 @@ class RequestEntity extends AggregateRoot {
     );
   }
 
-  _finalizeApproval(reviewerId, reviewerNote) {
+  private _finalizeApproval(reviewerId: string, reviewerNote: string): void {
     this._setProps({
       status: "approved",
       reviewed_by: reviewerId,
@@ -180,7 +186,7 @@ class RequestEntity extends AggregateRoot {
     );
   }
 
-  _assertNotSelfReview(reviewerId) {
+  private _assertNotSelfReview(reviewerId: string): void {
     if (String(this.props.user_id) === String(reviewerId)) {
       throw new CannotSelfReviewError(undefined, {
         metadata: { requestId: this.id, userId: this.props.user_id, reviewerId }
@@ -188,7 +194,7 @@ class RequestEntity extends AggregateRoot {
     }
   }
 
-  _assertPending() {
+  private _assertPending(): void {
     if (this.props.status !== "pending") {
       throw new InvalidStatusTransitionError(
         `Đơn đang ở trạng thái "${this.props.status}", không thể thực hiện hành động này`,
@@ -197,7 +203,7 @@ class RequestEntity extends AggregateRoot {
     }
   }
 
-  validate() {
+  validate(): void {
     if (!VALID_STATUSES.includes(this.props.status)) {
       throw new ArgumentInvalidException(`Trạng thái đơn không hợp lệ: ${this.props.status}`);
     }
@@ -214,5 +220,3 @@ class RequestEntity extends AggregateRoot {
     }
   }
 }
-
-module.exports = { RequestEntity, REQUEST_TYPE_FIELDS };

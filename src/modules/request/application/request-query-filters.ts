@@ -1,12 +1,19 @@
-const moment = require("moment-timezone");
-const escapeRegExp = require("lodash/escapeRegExp");
-const { REQUEST_TYPE_FIELDS } = require("../domain/request.entity");
-const { ArgumentInvalidException } = require("../../../core/exceptions/exceptions");
+import moment from "moment-timezone";
+import escapeRegExp from "lodash/escapeRegExp";
+import { REQUEST_TYPE_FIELDS } from "../domain/request.entity";
+import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
 
-const VALID_TYPES = Object.keys(REQUEST_TYPE_FIELDS);
+export const VALID_TYPES = Object.keys(REQUEST_TYPE_FIELDS);
 const TZ = "Asia/Ho_Chi_Minh";
 
-function applyRequestTypeFilter(filter, requestType) {
+export interface RequestFilter {
+  request_type?: string;
+  createdAt?: { $gte?: Date; $lte?: Date };
+  user_id?: unknown;
+  [key: string]: unknown;
+}
+
+export function applyRequestTypeFilter(filter: RequestFilter, requestType?: string): void {
   if (!requestType) return;
   if (!VALID_TYPES.includes(requestType)) {
     throw new ArgumentInvalidException(`Loại đơn không hợp lệ: ${requestType}`);
@@ -14,7 +21,7 @@ function applyRequestTypeFilter(filter, requestType) {
   filter.request_type = requestType;
 }
 
-function applyDateRangeFilter(filter, from, to) {
+export function applyDateRangeFilter(filter: RequestFilter, from?: string, to?: string): void {
   if (!from && !to) return;
   filter.createdAt = {};
   if (from) {
@@ -33,7 +40,7 @@ function applyDateRangeFilter(filter, from, to) {
   }
 }
 
-function buildUserNameSearchFilter(search) {
+export function buildUserNameSearchFilter(search: string) {
   const pattern = escapeRegExp(search);
   return {
     isDeleted: false,
@@ -43,10 +50,3 @@ function buildUserNameSearchFilter(search) {
     ]
   };
 }
-
-module.exports = {
-  applyRequestTypeFilter,
-  applyDateRangeFilter,
-  buildUserNameSearchFilter,
-  VALID_TYPES
-};

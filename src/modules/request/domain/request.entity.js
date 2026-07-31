@@ -105,7 +105,11 @@ class RequestEntity extends AggregateRoot {
     const alreadyApproved = this.props.approvals.some(
       (approval) => String(approval.account) === String(reviewerId)
     );
-    if (alreadyApproved) throw new AlreadyReviewedError();
+    if (alreadyApproved) {
+      throw new AlreadyReviewedError(undefined, {
+        metadata: { requestId: this.id, reviewerId }
+      });
+    }
 
     const approvals = [...this.props.approvals, { account: reviewerId, reviewed_at: new Date() }];
 
@@ -178,14 +182,17 @@ class RequestEntity extends AggregateRoot {
 
   _assertNotSelfReview(reviewerId) {
     if (String(this.props.user_id) === String(reviewerId)) {
-      throw new CannotSelfReviewError();
+      throw new CannotSelfReviewError(undefined, {
+        metadata: { requestId: this.id, userId: this.props.user_id, reviewerId }
+      });
     }
   }
 
   _assertPending() {
     if (this.props.status !== "pending") {
       throw new InvalidStatusTransitionError(
-        `Đơn đang ở trạng thái "${this.props.status}", không thể thực hiện hành động này`
+        `Đơn đang ở trạng thái "${this.props.status}", không thể thực hiện hành động này`,
+        { metadata: { requestId: this.id, currentStatus: this.props.status } }
       );
     }
   }

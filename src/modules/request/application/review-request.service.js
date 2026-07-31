@@ -43,7 +43,7 @@ async function reviewRequest(account, id, { action, reviewer_note = "" }) {
   }
 
   const preCheckEntity = await requestRepository.findOneById(id);
-  if (!preCheckEntity) throw new RequestNotFoundError();
+  if (!preCheckEntity) throw new RequestNotFoundError(undefined, { metadata: { requestId: id } });
 
   const release = await acquireLockIfNeeded(id, action, preCheckEntity);
 
@@ -56,7 +56,7 @@ async function reviewRequest(account, id, { action, reviewer_note = "" }) {
       if (!reviewerInfo) throw new NotFoundException("Không tìm thấy thông tin nhân viên");
 
       const entity = await requestRepository.findOneById(id);
-      if (!entity) throw new RequestNotFoundError();
+      if (!entity) throw new RequestNotFoundError(undefined, { metadata: { requestId: id } });
 
       const canReviewAll = await can(account, PERMISSION.HRM_REQUEST_REVIEW_ALL);
       const chain = canReviewAll ? [] : await getApprovalChain(entity.userId);

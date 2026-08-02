@@ -1627,7 +1627,113 @@ test pass.
       bị server thật của người dùng giữ). `npm run lint` toàn repo vẫn 4266 vấn đề, không đổi.
       `find src/modules/request -name "*.js"` trả về rỗng.
 
-## 9. Phase 2+ — Các module còn lại
+## 9. Phase 1.7 — Dọn nợ kỹ thuật WorkDayStatus (ranh giới Request ↔ Attendance)
+
+**Bối cảnh:** sau khi Phase 1 + 1.5 xong, bàn tiếp về ranh giới Request↔Attendance (do người dùng chủ
+động nêu lại). Trace code thật (không suy đoán) cho thấy `WorkSheetModel`/`WorkDayStatusModel` được cả
+2 module ghi trực tiếp. Qua nhiều vòng verify — **kể cả tự đính chính 2 nhận định sai** — bức tranh
+chính xác cuối cùng:
+
+- `WorkDayStatus` có **2 chế độ hợp lệ, cùng tồn tại**: *attendance-driven* (`pending`/`present`/
+  `missed_clock`/`absent` — chấm công thật quyết định, an toàn tính lại toàn bộ qua
+  `resolveAttendanceDay`) và *decision-driven* (`leave_paid`/`leave_unpaid`/`remote`/`business_trip`/
+  `client_visit` — đơn được duyệt quyết định, ghi 1 lần, miễn nhiễm với tính lại trừ khi
+  `resolveLeaveConflictOnAttendance` chủ động override). **Thiết kế 2 chế độ này hợp lý, không phải
+  lỗi.**
+- `AttendanceController.checkOut`'s cập nhật đơn giản (`updateMany({status:"pending"}→{status:"present"})`)
+  **không phải bug/bản sao cạnh tranh** như nhận định ban đầu — nó là cập nhật tạm thời tức thời, cron
+  `finalizeWorkDay.js` (chạy 23h mỗi tối, dùng đúng `resolveAttendanceDay`/`saveAttendanceDay`) mới là
+  bản chốt authoritative. Đây là thiết kế 2 pha có chủ đích.
+- `LeaveBalance` (`helpers/leaveBalance.js`) **không có vấn đề tương tự** — `adjustLeaveBalance` đã là
+  điểm vào duy nhất thật (Redis lock + invariant không-âm), dùng bởi ≥4 nơi (Request, User, 2 cron job)
+  qua đúng 1 implementation — đúng chuẩn Domain Service cross-cutting theo quy tắc mục 3/5, giữ nguyên,
+  không đụng.
+
+**Vấn đề thật, còn lại sau khi loại bỏ 2 nhận định sai ở trên:**
+
+1. Việc phân loại "status nào thuộc chế độ nào" định nghĩa **3 lần độc lập**, phạm vi hơi khác nhau,
+   dễ lệch khi thêm loại đơn mới:
+   - `AWAY_STATUSES` (`leaveHandler.js`) = `["business_trip","client_visit","remote"]` — thực ra là
+     tập con hẹp hơn: "status nào có ghi `check_in`/`check_out` giả cần xoá khi ghi đè" (không gồm
+     `leave_paid`/`leave_unpaid` vì 2 loại đó không set giờ chấm công giả).
+   - `NON_DERIVABLE_STATUSES` (`attendanceHelper.js`, hàm `correctDayStatuses`) = 5 status decision-driven
+     đầy đủ.
+   - `OVERRIDABLE` (`attendanceHelper.js`, hàm `persistAttendanceDay`) = 4 status attendance-driven —
+     xác nhận đúng là phần bù chính xác của `NON_DERIVABLE_STATUSES` (verify qua enum đầy đủ 9 status ở
+     `models/WorkDayStatusModel.js`, không thiếu/thừa).
+2. `resolveLeaveConflictOnAttendance` (luật nối 2 chế độ) sống trong `leaveHandler.js` (file Request)
+   dù được gọi từ `attendanceHelper.js` VÀ `AttendanceController.js` (2 nơi phía Attendance) —
+   `attendanceHelper.js` hiện phải `require("./leaveHandler")` ngược để lấy hàm này — sai hướng phụ
+   thuộc.
+3. `attendanceHelper.js` (418 dòng) trộn lẫn parse-Excel (`parseExcelToBlocks`/`parseDayRows`, I/O
+   thuần) với logic tính toán ngày công (`resolveAttendanceDay`/`persistAttendanceDay`) — không liên
+   quan nhau, khó đọc chung 1 file.
+
+**Quyết định — chọn phạm vi thu hẹp (không tạo module `modules/workday/` mới):** đã cân nhắc phương án
+xây hẳn 1 module DDD mới (`domain/infrastructure/application` như `request`) nhưng **từ chối cho bây
+giờ** — rủi ro cao hơn lợi ích vì (a) chưa hiểu hết toàn bộ `AttendanceController.js` (chưa migrate),
+dễ thiết kế sai ranh giới; (b) sau khi đính chính, phạm vi lỗi thật nhỏ hơn nhiều so với tưởng ban đầu,
+không cần đến mức xây module riêng. Việc DDD hoá đầy đủ dời tới Phase 8 thật (khi đã có đủ thông tin).
+Bây giờ chỉ dọn đúng 3 vấn đề đã xác nhận, **giữ nguyên vị trí file trong `helpers/`**, không đổi
+logic nghiệp vụ (ngưỡng giờ, điều kiện override, cách tính hoàn phép) — chỉ đổi cách tổ chức code.
+
+**Cấu trúc thư mục liên quan (không thêm thư mục mới, chỉ thêm 2 file nhỏ trong `helpers/` và tách 1
+file):**
+
+```
+src/helpers/
+  workDayStatusRules.js        # MỚI — nguồn duy nhất: bảng phân loại 9 status (attendance-driven vs
+                                # decision-driven vs có-set-giờ-chấm-công-giả), suy ra 3 hằng số
+                                # ATTENDANCE_DRIVEN_STATUSES/DECISION_DRIVEN_STATUSES/
+                                # STATUSES_WITH_SYNTHETIC_ATTENDANCE từ 1 bảng — thêm status mới chỉ
+                                # sửa đúng 1 chỗ
+  attendanceExcelImport.js      # MỚI — tách parseExcelToBlocks/parseDayRows ra khỏi attendanceHelper.js
+                                # (I/O đọc file Excel, không liên quan tính toán ngày công)
+  attendanceHelper.js           # SAU KHI TÁCH — chỉ còn logic tính toán thuần (resolveAttendanceDay,
+                                # normalizeDayPunches, persistAttendanceDay, saveAttendanceDay,
+                                # correctDayStatuses) + resolveLeaveConflictOnAttendance (di dời vào,
+                                # xem dưới) — import ATTENDANCE_DRIVEN_STATUSES/NON_DERIVABLE từ
+                                # workDayStatusRules.js thay vì tự khai
+  leaveHandler.js               # resolveLeaveConflictOnAttendance CHUYỂN ĐI (import lại từ
+                                # attendanceHelper.js) — đảo chiều phụ thuộc đúng: leaveHandler.js
+                                # (Request) phụ thuộc attendanceHelper.js (Attendance-side), không phải
+                                # ngược lại như hiện tại. AWAY_STATUSES import từ
+                                # STATUSES_WITH_SYNTHETIC_ATTENDANCE (workDayStatusRules.js)
+  awayDayHandler.js             # cập nhật import resolveLeaveConflictOnAttendance từ attendanceHelper.js
+                                # thay vì leaveHandler.js
+```
+
+`controllers/AttendanceController.js` cập nhật 2 import (`resolveLeaveConflictOnAttendance` từ
+`attendanceHelper.js` thay vì `leaveHandler.js`; `parseExcelToBlocks`/`parseDayRows` từ
+`attendanceExcelImport.js`) — không đổi logic gì khác trong file này (vẫn nguyên, chưa tới lượt Phase 8).
+
+**Backlog, chưa làm ngay (rủi ro cao hơn, cần bàn riêng khi có thời gian):** `leaveHandler.onApprove`
+(~95 dòng) và `awayDayHandler.createOnApprove` cùng có phần khung việc giống nhau (tìm/tạo `WorkSheet`
+theo range ngày, rồi upsert `WorkDayStatus`) — đáng rút thành 1 hàm dùng chung, nhưng 2 nơi có logic
+gán ca (shift) khác nhau thật (leaveHandler xử lý cả part-time qua `resolveShiftsForDates`, awayDayHandler
+chỉ dùng ca hành chính/ca sáng cố định) — cần phân tích kỹ hơn trước khi rút, không làm vội trong đợt
+dọn nợ này.
+
+- [x] 1.7.1 — `helpers/workDayStatusRules.ts` (file mới, viết thẳng `.ts` theo yêu cầu người dùng — từ
+      nay file mới/sửa đều `.ts`): bảng phân loại 9 status + 3 hằng số suy ra
+      (`ATTENDANCE_DRIVEN_STATUSES`/`DECISION_DRIVEN_STATUSES`/`STATUSES_WITH_SYNTHETIC_ATTENDANCE`).
+      Verify thật: cả 3 hằng số suy ra khớp CHÍNH XÁC 3 danh sách cũ (`OVERRIDABLE`,
+      `NON_DERIVABLE_STATUSES`, `AWAY_STATUSES`) qua script so sánh set — không suy đoán. Convert luôn
+      `attendanceHelper.js` → `.ts` (đang sửa nên chuyển theo yêu cầu mới), cập nhật import 2 hằng số từ
+      file mới thay vì tự khai. Verify: `attendanceMerge.test.js` cho đúng 4 fail y hệt trước/sau (so
+      sánh qua `git stash`), `npm test` toàn repo 347/17 không đổi, build sạch.
+- [x] 1.7.2 / 1.7.3 — **SUPERSEDED, không làm riêng nữa** — theo quyết định người dùng, gộp hẳn vào
+      Phase 1.8 (mục 14): thay vì chỉ di dời `resolveLeaveConflictOnAttendance` sang `attendanceHelper.ts`
+      (bản vá tạm trong cấu trúc cũ), làm đúng 1 lần trong `modules/timesheet/domain/policies/
+      leave-attendance-conflict.ts` theo kiến trúc dài hạn đã chốt ở mục 13. Việc tách Excel-parsing
+      (1.7.3) cũng tự nhiên rơi vào `modules/attendance/infrastructure/` khi build module đó (mục 14,
+      sub-phase 1.8.4) — không cần task riêng trong cấu trúc cũ nữa.
+
+**Definition of done (đã đạt được với riêng 1.7.1):** phân loại status có 1 nguồn duy nhất, dùng làm
+nền cho `modules/timesheet/domain/work-day-status.ts` sau này (mục 14). Phần còn lại của Phase 1.7 dừng
+ở đây — xem mục 14 cho phần tiếp theo.
+
+## 10. Phase 2+ — Các module còn lại
 
 Giữ nguyên thứ tự rủi ro × đòn bẩy đã khảo sát. Mỗi module áp khuôn 12-13 task như Phase 1, **chi tiết
 hoá khi bắt đầu module đó** (không lập chi tiết trước cho cả 7 module — tránh lập kế hoạch cho thứ có
@@ -1641,21 +1747,25 @@ thể đổi sau khi rút kinh nghiệm từ Phase 1).
 | 5 | `weekly-report` | Value Object cho status-flow (giống `resolveAttendanceDay`) |
 | 6 | `chat` | Quyết định phạm vi module (hrm/workplace/platform-wide) TRƯỚC khi domain modeling |
 | 7 | `post`, `labor-contract` | Rủi ro thấp, cùng khuôn Phase 1 |
-| 8 | `attendance` | Logic phần lớn đã an toàn (helper có test) — chủ yếu di dời cấu trúc; ghi chú idempotency nếu sau này có webhook máy chấm công. **Ràng buộc sâu với `request` (lateEarly/forgotCheckin handler) đã bàn kỹ ở mục 7, phần backlog task 1.11 — xem trước khi bắt đầu module này.** |
+| 8 | `attendance` | Logic phần lớn đã an toàn (helper có test) — chủ yếu di dời cấu trúc; ghi chú idempotency nếu sau này có webhook máy chấm công. **Ràng buộc sâu với `request` (lateEarly/forgotCheckin handler) đã bàn kỹ ở mục 7, phần backlog task 1.11 — xem trước khi bắt đầu module này.** Phase 1.7 (mục 9) đã dọn trước 3 điểm nợ kỹ thuật cụ thể (phân loại status, vị trí `resolveLeaveConflictOnAttendance`, tách Excel-parsing) — khi tới Phase 8 chỉ còn việc DDD hoá cấu trúc (`domain/infrastructure/application`), không cần lo lại phần đã dọn. Quyết định có tạo `modules/workday/` (đã bàn, từ chối tạm thời ở Phase 1.7) để lại cho lúc này. |
 
-## 10. Verification (lặp lại sau mỗi task)
+## 11. Verification (lặp lại sau mỗi task)
 
 1. `node --check <file vừa tạo/sửa>`
 2. `npm test` — số test pass tăng hoặc giữ nguyên, không giảm, không sửa test cũ để "cho pass"
 3. `npm run lint` sạch trên file vừa đụng
 4. `git diff` — review trước khi sang task tiếp theo, không tự commit/push
 
-## 11. Tiến độ
+## 12. Tiến độ
 
 - [x] Phase 0 — Core building blocks
 - [x] Phase 1 — Pilot module `request`
 - [x] Phase 1.5 — Migrate sang TypeScript (`core/` + `modules/request/` — phạm vi pilot đã định; module
       sau này viết `.ts` ngay từ đầu khi tới lượt, không còn "phase TS riêng")
+- [x] Phase 1.7 — Dọn nợ kỹ thuật WorkDayStatus, phần 1.7.1 — xem mục 9 (1.7.2/1.7.3 superseded, gộp
+      vào Phase 1.8)
+- [ ] Phase 1.8 — Triển khai kiến trúc dài hạn Timesheet/Leave/Attendance — xem mục 13-14, đang làm
+      1.8.1/1.8.2
 - [ ] Phase 2 — `internal-file`
 - [ ] Phase 3 — `user`
 - [ ] Phase 4 — `department`
@@ -1663,3 +1773,286 @@ thể đổi sau khi rút kinh nghiệm từ Phase 1).
 - [ ] Phase 6 — `chat` (quyết định phạm vi + migrate)
 - [ ] Phase 7 — `post`, `labor-contract`
 - [ ] Phase 8 — `attendance`
+
+## 13. Định hướng kiến trúc dài hạn — bounded context Request/Attendance/Timesheet/Leave
+
+**Vị trí của mục này trong tài liệu:** đây **KHÔNG phải 1 phase** trong chuỗi migrate tuần tự (mục 6-10)
+— không có task nào ở đây làm ngay bây giờ. Đây là **target design** cho đợt refactor lớn sắp tới (theo
+yêu cầu người dùng: "đề xuất chuẩn nhất, không cần quan tâm kiến trúc codebase cũ, vì sắp refactor lại
+hết"). Phase 1.7 (mục 9) vẫn tiếp tục làm đúng phạm vi thu hẹp đã chốt trong codebase HIỆN TẠI — không
+bị ảnh hưởng bởi mục này. Mục này ghi lại **để tham chiếu khi đợt refactor lớn bắt đầu**, tránh phải bàn
+lại từ đầu.
+
+### Insight cốt lõi: quan hệ 2 chiều Request↔Attendance là triệu chứng của 1 context bị thiếu
+
+Toàn bộ khó khăn ở Phase 1.7 (mục 9) tới từ việc coi đây là bài toán "2 module phụ thuộc lẫn nhau".
+Thực ra cả Request lẫn Attendance đều **không sở hữu** cái chúng đang tranh nhau ghi: bản ghi ngày công
+đã đối soát (`WorkDayStatus`/work_unit). Đây là 1 **derived/reconciled record** dựng từ nhiều nguồn sự
+thật (chấm công thật, đơn đã duyệt, chính sách ca/lễ/phạt) — cần 1 context thứ 3 sở hữu việc đối soát
+này. Khi tách được, quan hệ 2 chiều biến mất — cả 2 chỉ còn là nguồn cấp sự thật 1 chiều cho context
+thứ 3.
+
+### Sai lầm đã mắc phải lúc đầu — và cách sửa: Bounded Context ≠ 1 model = 1 context
+
+Lần đầu đề xuất, đã mắc lỗi kinh điển: map cơ học mỗi Mongoose model thành 1 bounded context riêng
+(kể cả `Shift`/`Holiday`/`PenaltyPolicy` — dữ liệu cấu hình gần như CRUD thuần). Người dùng tự phát
+hiện ra ("giờ mỗi model có một context là một model riêng hả") — đúng, đây là sai lầm.
+
+**Tiêu chí đúng để xác định 1 bounded context** (áp dụng đúng quy tắc "ai thực sự tiêu thụ" đã dùng ở
+mục 3/5 khi quyết định vị trí `getApprovalChain`/`LeaveBalance` trong migration hiện tại):
+1. Có hành vi/invariant riêng không (hay chỉ CRUD thuần)?
+2. Có ngôn ngữ nghiệp vụ riêng không (từ trong context này nghĩa khác context kia)?
+3. Có bị tiêu thụ độc lập bởi ≥2 phía không liên quan không (verify bằng grep, không suy đoán)?
+4. Có thay đổi vì lý do khác, tốc độ khác với hàng xóm không?
+
+**Bằng chứng ngay trong hệ thống hiện tại rằng "1 model ≠ 1 context":** `RequestEntity` là 1 aggregate
+xử lý **7 discriminator model khác nhau** (leave/late_early/remote/...) — không ai coi đó là 7 context
+vì cùng chia sẻ vòng đời/ngôn ngữ. Ngược lại `WorkSheet` và `WorkDayStatus` là 2 collection khác nhau
+nhưng nên gộp **cùng 1 context** (Timesheet) — vì cùng 1 câu chuyện (fact thô → status đối soát).
+
+**Áp lại 4 tiêu chí, kết quả: 4 bounded context thật, không phải 7:**
+
+| Context | Hành vi/invariant riêng? | Ngôn ngữ riêng? | ≥2 consumer độc lập? | Kết luận |
+|---|---|---|---|---|
+| Request | ✅ workflow duyệt, chuỗi phê duyệt | ✅ | — | **Context thật** |
+| Attendance | ✅ ghi nhận sự thật vật lý, actor riêng (nhân viên bấm nút / máy chấm công) | ✅ | — | **Context thật** (nhỏ) |
+| Timesheet | ✅ engine đối soát, phức tạp nhất | ✅ | — | **Context thật** |
+| Leave | ✅ invariant không-âm | ✅ | ✅ (Request + User + 2 cron — đã verify grep) | **Context thật** (nhỏ) |
+| ~~Shift~~ | ❌ CRUD thuần | ❌ | — | **KHÔNG phải context** |
+| ~~Holiday~~ | ❌ CRUD thuần | ❌ | — | **KHÔNG phải context** |
+| ~~PenaltyPolicy~~ | ❌ bảng tra cứu ngưỡng | ❌ | — | **KHÔNG phải context** |
+
+`Shift`/`Holiday`/`PenaltyPolicy` là **Generic Subdomain** (thuật ngữ DDD — dữ liệu cấu hình/tham
+chiếu, không ngôn ngữ nghiệp vụ riêng) — chỉ nên là repository đơn giản, KHÔNG có domain/application
+riêng, đặt trong `modules/timesheet/infrastructure/reference-data/` (Timesheet là consumer chính) thay
+vì làm module ngang hàng.
+
+### Context map — đồ thị phụ thuộc phi chu trình (acyclic)
+
+```
+Request     ──(RequestApproved / RequestCancelled)──▶  Timesheet
+Attendance  ──(PunchRecorded / DayImported)─────────▶  Timesheet
+Timesheet   ──(RefundLeave / DeductLeave)───────────▶  Leave
+Timesheet   ◀──(đọc reference-data)── Shift, Holiday, PenaltyPolicy
+```
+
+Request và Attendance **không bao giờ tham chiếu lẫn nhau nữa** — khác hẳn hiện trạng
+(`attendanceHelper.js require leaveHandler.js` và ngược lại). Cả 2 chỉ nói chuyện với Timesheet
+(upstream → downstream). Quan hệ theo context-mapping: **Customer/Supplier + Published Language**.
+
+**Nguyên tắc "1 owner cho WorkDayStatus":** chỉ Timesheet được ghi `WorkDayStatus`/work_unit. Request
+và Attendance yêu cầu Timesheet tính lại, không tự ghi trực tiếp — diệt tận gốc loại bug "2 đường code
+độc lập, mỗi bên 1 bản sao luật, mâu thuẫn nhau" đã phát hiện ở Phase 1.7.
+
+### Quyết định consistency model: Hướng B (orchestration đồng bộ, 1 transaction)
+
+Đã cân nhắc 2 hướng chuẩn:
+- **Hướng A (event-driven, eventual consistency):** mỗi context commit riêng, publish domain event,
+  Timesheet đối soát bất đồng bộ. Ranh giới sạch nhất, scale độc lập, nhưng cần outbox pattern + chịu
+  cửa sổ eventual + saga cho hoàn phép khi refund fail.
+- **Hướng B (orchestration đồng bộ, 1 transaction):** 1 use-case service điều phối cả Request +
+  Timesheet + Leave trong 1 transaction MongoDB. Nhất quán mạnh, đơn giản, "duyệt xong bảng công đúng
+  ngay". Transaction bị buộc vào nhiều context — chỉ khả thi vì cùng 1 MongoDB.
+
+**Đã chọn Hướng B** (người dùng xác nhận) — lý do: 1 hệ, 1 MongoDB, 1 deployable; nghiệp vụ thật muốn
+nhất quán ngay; ACID transaction đơn-DB đã chứng minh chạy đúng (verify thật ở task 1.10/1.12). Giao
+tiếp giữa các context vẫn qua command/event object có schema rõ (Published Language) để sau này **có
+thể** chuyển sang Hướng A mà không phải viết lại domain, chỉ đổi orchestrator.
+
+**Lưu ý quan trọng — đừng dùng event cho điều phối đồng bộ:** trong Hướng B, workflow **gọi tường
+minh** từng bước (`timesheet.reconcileForDecision(...)`), KHÔNG để Timesheet "subscribe" event
+`RequestApproved` rồi chạy đồng bộ ngầm — event dùng để tách rời qua ranh giới thời gian (async), dùng
+event mà chạy đồng bộ thì mất cả 2 lợi ích (control flow bị giấu, không decouple thật). Event trong
+Hướng B chỉ giữ vai trò: (a) side-effect async thật (thông báo — đã làm đúng ở task 1.14), (b) đường
+thoát sang Hướng A sau này.
+
+### Invariant khó nhất: hoàn phép khi chấm công đè lên ngày nghỉ
+
+Ca xương nhất (`resolveLeaveConflictOnAttendance` hiện tại): người có phép đã duyệt nhưng vẫn đi làm
+đủ giờ → phải hoàn phép. Trong target: Attendance ghi punch → Timesheet đối soát → phát hiện
+`leave_paid` bị `present` đè → Timesheet phát command `RefundLeave` cho Leave. Policy "chấm công phủ
+đủ buổi thì hoàn" thuộc Timesheet (luật đối soát); thực thi mutate sổ cái thuộc Leave. Hướng B: cùng
+transaction → nguyên tử, không cần saga/compensation.
+
+### Cấu trúc thư mục target
+
+```
+src/
+  shared-kernel/                 # value object dùng chung — HẸP, không entity/model
+    employee-id.ts  date-key.ts  period.ts  money.ts
+
+  core/                          # building block hiện có — Entity/AggregateRoot/Repo base/context/http
+
+  modules/                       # mỗi bounded context 1 hexagon KHÉP KÍN — 4 context thật
+    request/        domain/ application/ infrastructure/ interface/ index.ts
+    attendance/      domain/ application/ infrastructure/ index.ts
+    timesheet/       domain/ (work-day.entity.ts, policies/resolve-work-day.ts,
+                     policies/leave-attendance-conflict.ts)
+                     application/ (reconcile-for-punch, reconcile-for-decision)
+                     infrastructure/ (timesheet.repository.ts + reference-data/ cho
+                     Shift/Holiday/PenaltyPolicy — repository đơn giản, không có domain riêng)
+                     index.ts
+    leave/           domain/ application/ infrastructure/ index.ts
+
+  workflows/                     # ★ TẦNG ORCHESTRATION — nơi DUY NHẤT được import ≥2 module
+    review-request.workflow.ts    # request.approve + timesheet.reconcileForDecision + leave.deduct
+    cancel-request.workflow.ts
+    record-checkout.workflow.ts   # attendance.checkOut + timesheet.reconcileForPunch
+    import-attendance.workflow.ts
+
+  composition-root/
+    routes.ts                     # /requests/:id/review → review-request.workflow
+                                   # /requests (list) → request.application (thuần, không cần workflow)
+```
+
+### 4 luật giữ cho kiến trúc không sụp (quan trọng hơn cây thư mục)
+
+| # | Luật | Vì sao |
+|---|---|---|
+| 1 | `modules/x` chỉ import `core/`, `shared-kernel/`, và chính nó — KHÔNG import `modules/y` | Diệt phụ thuộc chéo/vòng tận gốc (đúng lỗi `attendanceHelper ↔ leaveHandler` hiện tại) |
+| 2 | `workflows/` là nơi DUY NHẤT import nhiều module, và chỉ qua `index.ts` (public API) — không thò vào `domain/`/`infrastructure/` module khác | Module đổi nội bộ không vỡ workflow |
+| 3 | Mỗi Mongoose model có đúng 1 owner = repository của 1 module | Đây chính là "1 owner cho WorkDayStatus" |
+| 4 | Transaction xuyên context: workflow mở `runInTransaction`, session chảy qua `AsyncLocalStorage` → mọi repository tự nhặt → 1 transaction | Cơ chế **đã xây sẵn từ Phase 0** (`RequestContextService`) — Hướng B tận dụng nguyên vẹn, không cần gì mới |
+
+**Trạng thái:** định hướng kiến trúc đã thống nhất — **đã bắt đầu triển khai**, xem mục 14 (Phase 1.8).
+
+## 14. Phase 1.8 — Triển khai kiến trúc dài hạn (Timesheet/Leave/Attendance)
+
+**Quyết định phạm vi (người dùng xác nhận):** task 1.7.2 (di dời `resolveLeaveConflictOnAttendance`)
+KHÔNG làm riêng như 1 bản vá tạm trong cấu trúc `helpers/` cũ nữa — gộp hẳn vào việc xây
+`modules/timesheet/` đúng 1 lần theo kiến trúc mục 13. Task 1.7.3 (tách Excel-parsing) tương tự, rơi
+tự nhiên vào lúc xây `modules/attendance/infrastructure/`.
+
+**Thứ tự triển khai (theo dependency — xây nền trước, xây phía tiêu thụ sau):**
+
+```
+1.8.1 shared-kernel/     (không phụ thuộc gì)
+1.8.2 modules/leave/     (phụ thuộc shared-kernel — context nhỏ nhất, logic đã đúng sẵn ở
+                          helpers/leaveBalance.js, chỉ cần bọc DDD, rủi ro thấp)
+1.8.3 modules/timesheet/ (phụ thuộc shared-kernel + leave — phần khó nhất, giá trị lớn nhất,
+                          absorb nguyên task 1.7.2)
+1.8.4 modules/attendance/ (phụ thuộc timesheet — absorb task 1.7.3)
+1.8.5 workflows/         (phụ thuộc cả 4 module qua public API index.ts)
+1.8.6 Cutover modules/request/ + 7 handler trong helpers/ (đổi để gọi qua workflows/ thay vì tự ghi)
+1.8.7 Xoá code cũ đã port xong (attendanceHelper.ts, phần Attendance-side của leaveHandler.js/
+      awayDayHandler.js, phần liên quan trong AttendanceController.js)
+1.8.8 Cập nhật CLAUDE.md + tổng kết
+```
+
+Theo đúng nguyên tắc đã dùng cho Phase 2+ (mục 10) — **chỉ chi tiết hoá phần làm ngay** (1.8.1, 1.8.2),
+các phần sau chi tiết hoá khi tới lượt, tránh lập kế hoạch cho thứ có thể đổi sau khi rút kinh nghiệm.
+
+### 1.8.1 — `shared-kernel/` (chi tiết đầy đủ, làm ngay)
+
+Value object thuần, không phụ thuộc gì, rủi ro thấp nhất trong toàn Phase 1.8:
+
+- [x] 1.8.1.1 — `src/shared-kernel/employee-id.ts`: value object bọc `string`/`ObjectId` (`of()` tự
+      `String()` hoá), `equals()`, `toString()`. 6 test (`__tests__/shared-kernel/employee-id.test.ts`).
+
+      **Bug thật phát hiện qua review của người dùng:** bản đầu `of(value)` gọi `String(value)` TRƯỚC
+      khi kiểm tra null/undefined — `String(null) === "null"`, `String(undefined) === "undefined"`,
+      cả 2 đều là chuỗi khác rỗng nên lọt qua `validate()` (chỉ check `!value` — chuỗi "null" không
+      falsy). Verify thật: `EmployeeId.of(null)` tạo ra 1 `EmployeeId("null")` "hợp lệ" thay vì throw.
+      Hậu quả thực tế: chỗ nào gọi `EmployeeId.of(record.employeeId)` mà field bị thiếu (query sai,
+      join lệch, MongoDB trả `null`) sẽ không fail ngay tại nguồn — bug trôi xuống tận lúc query/so
+      sánh sai mới lộ, mất dấu vết chỗ tạo ra nó. **Fix:** check `value === null || value === undefined`
+      và throw `ArgumentInvalidException` TRƯỚC khi gọi `String()` — input hợp lệ (kể cả object có
+      `.toString()` như Mongoose ObjectId) không bị ảnh hưởng. Verify lại: `npm test` 379/17 (tăng đúng
+      1 test), không regression.
+- [x] 1.8.1.2 — `src/shared-kernel/date-key.ts`: value object `"YYYY-MM-DD"` + `from(date)` (thay
+      `moment.tz(x, TZ).format("YYYY-MM-DD")` lặp lại ở `attendanceHelper.ts`, `finalizeWorkDay.js`,
+      `leaveHandler.js`...) + `toDate()`. 6 test, verify timezone thật (không suy đoán):
+      `2026-01-05T20:00:00Z` (UTC) → đúng `"2026-01-06"` giờ VN (+7).
+
+      **Bug thiết kế phát hiện qua review của người dùng (bản đầu `from(date, timezone)`/
+      `toDate(timezone)` nhận tz làm tham số):** nếu người gọi lỡ truyền tz khác nhau giữa lúc `from()`
+      và lúc `toDate()`, cùng 1 `DateKey` sẽ âm thầm đại diện cho 2 instant khác nhau (`"2026-08-02
+      00:00 Tokyo"` ≠ `"2026-08-02 00:00 Ho Chi Minh"`) mà không có cảnh báo gì — lỗi tiềm ẩn, chưa bị
+      kích hoạt nhưng có thật trong API. Verify bằng grep toàn repo (không suy đoán): **22 file khác
+      nhau đều hardcode y hệt `const TZ = "Asia/Ho_Chi_Minh"`** — hệ thống chỉ có đúng 1 timezone thật.
+      **Fix:** bỏ hẳn tham số `timezone` khỏi `from()`/`toDate()`, `DateKey` tự sở hữu hằng số
+      `APP_TIMEZONE = "Asia/Ho_Chi_Minh"` nội bộ — loại bỏ hoàn toàn khả năng truyền lệch giữa 2 lời
+      gọi. Nếu tương lai thật sự cần đa timezone (import chấm công từ vùng khác), đó là quyết định lớn
+      hơn cần làm tường minh ở nơi gọi, không nên ẩn trong tham số mặc định của 1 value object dùng
+      chung. Cập nhật lại 6 test khớp API mới, verify lại toàn bộ `npm test` 378/17 không đổi.
+- [x] 1.8.1.3 — `src/shared-kernel/period.ts`: type `"morning"|"afternoon"|"full"` + `includesMorning()`/
+      `includesAfternoon()` + `isCoveredBy(coversMorning, coversAfternoon)` (đặt tên rõ cho luật
+      `shouldOverride` hiện viết tay ở `resolveLeaveConflictOnAttendance`, `leaveHandler.js`). 14 test —
+      bảng chân trị `it.each` verify khớp CHÍNH XÁC 9 tổ hợp của luật gốc.
+
+      **Code smell phát hiện qua review của người dùng:** bản đầu `of(value: string)` dùng
+      `value as PeriodValue` — type assertion mù, compiler tin theo mà không tự kiểm chứng. Không sai
+      hành vi runtime (`validate()` trong `ValueObject` base constructor vẫn chặn được giá trị lạ),
+      nhưng là lớp an toàn compile-time giả: nếu sau này ai refactor bỏ lời gọi `validate()` khỏi
+      constructor của `ValueObject` base, TypeScript sẽ không báo lỗi gì vì đã bị đánh lừa từ trước bởi
+      `as`. **Fix:** thay bằng type guard thật (`function isPeriodValue(value): value is PeriodValue`)
+      + assertion function (`function assertValidPeriod(value): asserts value is PeriodValue`) — `of()`
+      tự verify runtime trước, TypeScript tự narrow kiểu sau khi qua assertion, không còn `as` nào.
+      Không đổi hành vi (vẫn 14 test cũ pass nguyên vẹn), chỉ nâng mức an toàn compile-time — 2 điểm
+      enforcement độc lập (`of()` lẫn `validate()`) cùng dùng chung 1 type guard, không phụ thuộc vào
+      đúng 1 chỗ duy nhất. `npm test` toàn repo: 382/17 (verify lại bằng `--runInBand` vì 1 lần chạy
+      song song trước đó cho 21 fail do test khác flaky, không liên quan — chạy lại xác nhận đúng
+      382/17).
+- [x] 1.8.1.4 — `src/shared-kernel/money.ts`: value object cho số ngày phép/tiền phạt (hiện là `number`
+      trần trụi ở `LeaveBalanceModel.amount`, `WorkSheetModel.penalty_amount`) — `add()`/`subtract()`/
+      `isNegative()`/`zero()`. 9 test, verify riêng `zero()` không bị `isEmpty()` của `ValueObject` base
+      chặn nhầm (0 khác falsy trong check `value === null/undefined/""`).
+
+      **Bug thật phát hiện qua review của người dùng:** bản đầu `add()`/`subtract()` cộng/trừ `number`
+      JS thuần, dính lỗi floating point kinh điển (`0.1 + 0.2 !== 0.3`). Verify liên quan trong chính
+      codebase (không suy đoán): `kpiDecompose.js` đã có sẵn `round2()` (`Math.round(n*100)/100`),
+      `commissionCalculator.js` đã tự `Math.round()` mọi giá trị output — xác nhận đây là vấn đề **đã
+      biết và đã có quy ước xử lý** trong hệ thống, không phải lý thuyết suông. Nếu `Money` dùng cho
+      tính lương/hoa hồng/KPI sau này mà không xử lý, sai số nhỏ tích luỹ qua nhiều phép tính liên tiếp
+      sẽ lệch số liệu báo cáo thật, khó phát hiện qua test thường vì lệch rất nhỏ.
+
+      **Fix:** làm tròn về 2 chữ số thập phân (`Math.round(value*100)/100`) ngay khi `of()` VÀ sau MỖI
+      lần `add()`/`subtract()` (không chỉ ở kết quả cuối) — đúng quy ước có sẵn (`round2()` của
+      `kpiDecompose.js`), không thêm thư viện `decimal.js`/`big.js` (không cần độ chính xác tuỳ ý, VND
+      không có phần thập phân thực). Verify thật bằng script (không suy đoán): `0.1+0.2` qua `Money`
+      cho đúng `0.3`; chuỗi 20 lần `.add(Money.of(0.1))` liên tiếp cho đúng `2.1` (không có
+      `2.1000000000000005` như phép cộng JS thuần) — xác nhận round sau MỖI bước triệt tiêu hoàn toàn
+      tích luỹ sai số, vì nhiễu float của 1 phép tính đơn luôn nhỏ hơn nhiều so với lưới làm tròn 0.01.
+      Thêm 3 test case, `npm test` toàn repo 382/17 (tăng đúng 3), không regression.
+
+**Definition of done 1.8.1 — ĐÃ ĐẠT:** 4 value object thuần (31 test, không cần DB), chưa ai require
+(chưa cutover, task này chỉ tạo nền, không đổi hành vi gì). `npm test` toàn repo: 378 pass / 17 fail
+(tăng đúng 31 test mới, 4 suite pre-existing không đổi). `npm run build` + `npm run lint` (4266, không
+đổi) đều sạch.
+
+### 1.8.2 — `modules/leave/` (chi tiết đầy đủ, làm tiếp theo 1.8.1)
+
+Context nhỏ nhất, logic hiện tại (`helpers/leaveBalance.js`) đã đúng (Redis lock, invariant không-âm)
+— chỉ cần bọc lại đúng khuôn DDD, KHÔNG đổi logic nghiệp vụ:
+
+- [ ] 1.8.2.1 — Characterization test cho `helpers/leaveBalance.js` hiện tại (nếu chưa đủ test trực
+      tiếp — kiểm tra trước, không viết trùng nếu đã có) — lưới an toàn trước khi port.
+- [ ] 1.8.2.2 — `modules/leave/domain/leave-balance.entity.ts` + `leave-balance.errors.ts`: model hoá
+      invariant hiện có (không âm trừ khi `allowNegative`) thành Entity, dùng `Money`
+      (`shared-kernel/money.ts`) cho `amount`.
+- [ ] 1.8.2.3 — `modules/leave/infrastructure/leave.repository.ts`: bọc `LeaveBalanceModel` — nơi DUY
+      NHẤT được require model này sau khi cutover xong.
+- [ ] 1.8.2.4 — `modules/leave/application/adjust-leave-balance.service.ts`: port `adjustLeaveBalance`
+      (giữ nguyên Redis lock qua `acquireUserLeaveLock`, giữ nguyên tên lý do
+      `LEAVE_BALANCE_REASON_VALUES`).
+- [ ] 1.8.2.5 — `modules/leave/index.ts`: public API — chỉ export application service, không export
+      domain/infrastructure ra ngoài (đúng luật #2 ở mục 13).
+- [ ] 1.8.2.6 — Cutover 4 consumer hiện tại (`leaveHandler.js`, `jobs/accrueMonthlyLeave.js`,
+      `jobs/autoRejectLeaveRequests.js`, `controllers/UserController.js`) sang gọi
+      `modules/leave/index.ts` thay vì `helpers/leaveBalance.js` trực tiếp — verify bằng
+      characterization test 1.8.2.1 xanh không đổi.
+- [ ] 1.8.2.7 — Xoá `helpers/leaveBalance.js` sau khi xác nhận không còn ai require.
+
+**Definition of done 1.8.2:** `LeaveBalance` có module DDD đầy đủ, 4 consumer cũ cutover xong,
+`helpers/leaveBalance.js` xoá sạch, `npm test` không giảm số pass.
+
+### 1.8.3 — 1.8.8 (tóm tắt, chi tiết hoá khi tới lượt)
+
+| Sub-phase | Việc chính | Lưu ý đặc biệt |
+|---|---|---|
+| 1.8.3 `modules/timesheet/` | Port `resolveAttendanceDay`/`persistAttendanceDay`/`resolveLeaveConflictOnAttendance` (absorb 1.7.2) + reference-data cho Shift/Holiday/PenaltyPolicy | Phần khó nhất — characterization test bắt buộc trước khi port, vì logic tính work_unit/penalty ảnh hưởng lương thật |
+| 1.8.4 `modules/attendance/` | Port check-in/check-out + Excel import (absorb 1.7.3) | **Cần quyết định khi tới lượt:** `WorkSheetModel` vừa chứa punch thô (Attendance sở hữu) vừa chứa field dẫn xuất (`work_unit`/`penalty_amount`, Timesheet tính) — ranh giới ai sở hữu `WorkSheetModel` cần làm rõ hơn lúc này, mục 13 chưa giải quyết dứt điểm điểm này |
+| 1.8.5 `workflows/` | `review-request.workflow.ts`, `cancel-request.workflow.ts`, `record-checkout.workflow.ts`, `import-attendance.workflow.ts` | Tái dùng nguyên `runInTransaction`/`RequestContextService` đã có từ Phase 0 |
+| 1.8.6 Cutover `modules/request/` | Đổi `review-request.service.ts`/`create-request.service.ts`/`cancel-request.service.ts` gọi qua `workflows/` cho action ghi; 7 handler `helpers/*Handler.js` chỉ còn `validate`/`validateAsync` (thuần Request), bỏ `onCreate`/`onApprove`/`onReject` (chuyển thành bước trong workflow) | Behavior-preserving nhưng đụng nhiều nhất — cần characterization test đầy đủ cho cả 7 loại đơn trước khi cutover |
+| 1.8.7 Xoá code cũ | `attendanceHelper.ts`, phần Attendance-side của `leaveHandler.js`/`awayDayHandler.js`, phần liên quan `AttendanceController.js` | Chỉ xoá sau khi 1.8.6 xanh, characterization test xác nhận hành vi không đổi |
+| 1.8.8 Hoàn thiện | `CLAUDE.md`, tổng kết Phase 1.8 | — |

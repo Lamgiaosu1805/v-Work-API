@@ -12,6 +12,7 @@ export type {
   ApplyLeaveConflictOverrideInput,
   ApplyLeaveConflictOverrideResult
 } from "./application/apply-leave-conflict-override";
+export { markAttendancePresent } from "./application/mark-attendance-present.service";
 export {
   buildLatePenaltyResolver,
   buildEarlyPenaltyResolver,

@@ -1764,8 +1764,10 @@ thể đổi sau khi rút kinh nghiệm từ Phase 1).
       sau này viết `.ts` ngay từ đầu khi tới lượt, không còn "phase TS riêng")
 - [x] Phase 1.7 — Dọn nợ kỹ thuật WorkDayStatus, phần 1.7.1 — xem mục 9 (1.7.2/1.7.3 superseded, gộp
       vào Phase 1.8)
-- [ ] Phase 1.8 — Triển khai kiến trúc dài hạn Timesheet/Leave/Attendance — xem mục 13-14, đang làm
-      1.8.1/1.8.2
+- [ ] Phase 1.8 — Triển khai kiến trúc dài hạn Timesheet/Leave/Attendance — xem mục 13-14. Đã xong
+      1.8.1 (shared-kernel) / 1.8.2 (modules/leave) / 1.8.3 (modules/timesheet) / 1.8.4
+      (modules/attendance) / 1.8.5 (workflows/ record-check-in/out + import-attendance) — đang tới 1.8.6
+      (review-request/cancel-request workflow + cutover modules/request/)
 - [ ] Phase 2 — `internal-file`
 - [ ] Phase 3 — `user`
 - [ ] Phase 4 — `department`
@@ -2949,40 +2951,413 @@ caller... check-in/check-out route ở modules/attendance sau này"). Sẽ mở 
       Verify: `tsc`/`eslint` sạch. 4 test (`findAll` không lọc isDeleted, `findByName` tìm đúng/không
       thấy, `create` mặc định 0/dùng giá trị truyền vào). Full suite: `485 passed/8 failed` (tăng đúng
       10 so với baseline `475/8`), đúng 2 suite lỗi cũ, không regression.
-- [ ] 1.8.4.5 — `modules/attendance/infrastructure/excel-attendance-parser.ts`: chuyển nguyên
+- [x] 1.8.4.5 — `modules/attendance/infrastructure/excel-attendance-parser.ts`: chuyển nguyên
       `parseExcelToBlocks`/`parseDayRows` từ `attendanceHelper.ts` sang đây — port giữ nguyên hành vi
       (characterization test trước, so khớp output).
-- [ ] 1.8.4.6 — Mở rộng `modules/timesheet`: `RawPunchUpdate`/`recordRawPunch` nhận thêm
+
+      **Bug nghiệp vụ có sẵn phát hiện qua review của người dùng, KHÔNG sửa trong task này (port nguyên
+      trạng theo yêu cầu):** `parseDayRows` phân loại in/out theo VỊ TRÍ CỘT cố định (`row[2]/row[4]/
+      row[6]` = ứng viên in, `row[7]/row[5]/row[3]` = ứng viên out) — khi máy chấm công chỉ có ĐÚNG 1
+      lần quét trong ngày, giá trị đó có thể rơi vào đúng 1 nhóm cột dù bản chất là in hay out, không
+      liên quan gì tới giờ chấm thật.
+
+      Verify thật bằng script (`normalizeDayPunches` sau bước parse):
+      - Ngày CHỈ có dữ liệu máy (không app): bug tự "chữa" nhờ nhánh reclassify-theo-giữa-ca của
+        `normalizeDayPunches` (`!!checkIn !== !!checkOut` → chọn lại theo midpoint ca) — kết quả cuối
+        vẫn đúng, không lộ ra ngoài.
+      - Ngày VỪA có máy VỪA có app ở phía đối diện (vd máy quét sáng 08:01 bị gán nhầm vào nhóm "out",
+        app lại có check-out chiều 17:31 riêng): 2 phía sau khi combine đều có giá trị → KHÔNG kích hoạt
+        reclassify → giờ chấm công sáng thật bị mất hẳn (`checkIn: undefined`), chỉ còn `checkOut:
+        17:31` — ngày đó sẽ bị tính `missed_clock` buổi sáng dù nhân viên đã chấm công thật.
+
+      Xác nhận **có sẵn từ trước, không phải do port gây ra** (`git log -S` xác nhận logic cột này có từ
+      commit `a18f3ae`, 2026-06-09, rất lâu trước migration). Đã hỏi người dùng — **quyết định: port
+      nguyên trạng ngay bây giờ, sửa riêng sau bằng 1 task khác** (không trộn vào task "move thuần túy"
+      này). Cần bàn cách phân loại đúng khi tới lúc sửa (vd ưu tiên theo giờ chấm thay vì theo cột).
+
+      **Cutover:** `AttendanceController.js` đổi import `parseExcelToBlocks`/`parseDayRows` từ
+      `helpers/attendanceHelper` sang `modules/attendance/infrastructure/excel-attendance-parser`;
+      `attendanceHelper.ts` xóa 2 hàm này + import `xlsx` không còn dùng (giữ nguyên
+      `normalizeDayPunches`/`correctDayStatuses`).
+
+      **Test:** `__tests__/modules/attendance/excel-attendance-parser.test.ts` (8 test mới, chưa từng có
+      unit test riêng cho 2 hàm này trước đây — chỉ được cover gián tiếp qua E2E
+      `attendanceImportExcel.test.ts`): tách đúng nhiều block theo header, block cuối lấy hết phần còn
+      lại, không có header → rỗng, bỏ qua dòng sai định dạng ngày, lấy đúng rawIn/rawOut theo cột, cắt
+      giờ về `HH:mm`, không có ô nào khớp → null cả 2, và 1 test khoá lại đúng hành vi hiện tại của bug
+      nêu trên (không phải xác nhận đúng). `attendanceImportExcel.test.ts` (E2E, consumer thật) 4/4 pass
+      sau cutover. `tsc --noEmit` + `eslint` sạch trên cả 4 file đụng tới. `npm test` toàn repo: `493
+      passed/8 failed` (tăng đúng 8 so với baseline `485/8`), đúng 2 suite lỗi cũ
+      (`requestApprovalFlow`, `approvalChain`), không regression.
+- [x] 1.8.4.6 — Mở rộng `modules/timesheet`: `RawPunchUpdate`/`recordRawPunch` nhận thêm
       `minutes_late?`/`minute_early?` optional (xem quyết định thiết kế ở trên).
-- [ ] 1.8.4.7 — `modules/attendance/application/record-check-in.service.ts`: orchestrate wifi/geofence
+
+      `work-sheet.repository.ts`: `RawPunchUpdate` thêm 2 field, `upsertRawPunch` ghi qua check
+      `!== undefined` (không dùng truthy — `0` là giá trị hợp lệ, khác `check_in`/`check_out` dùng
+      truthy vì luôn là `Date` khi có). `record-raw-punch.service.ts`: `RecordRawPunchInput` thêm
+      `minutesLate?`/`minuteEarly?` (camelCase, khớp convention `checkIn`/`checkOut` sẵn có), map sang
+      `minutes_late`/`minute_early` khi gọi repository. `RecordRawPunchInput` đã export sẵn qua
+      `modules/timesheet/index.ts` — không cần sửa thêm. Consumer duy nhất hiện tại
+      (`forgotCheckinHandler.js`) không đổi hành vi vì chưa truyền 2 field mới (optional, no-op nếu
+      không dùng).
+
+      **Test:** `work-sheet.repository.test.ts` thêm 3 case cho `upsertRawPunch` (ghi đúng cả 2 field
+      khi truyền, `0` vẫn được ghi chứ không bị coi falsy/bỏ qua, không truyền thì giữ nguyên giá trị cũ
+      không bị reset). 11/11 pass (8 cũ + 3 mới). `tsc --noEmit` + `eslint` sạch trên 3 file đụng tới.
+      `npm test` toàn repo: `496 passed/8 failed` (tăng đúng 3 so với baseline `493/8`, 1 lần chạy ra
+      `lateEarlyApprove.test.ts` fail ở `afterAll` — chạy lại riêng file đó pass 3/3, xác nhận flaky
+      resource contention khi chạy nhiều `MongoMemoryReplSet` liên tiếp, không liên quan thay đổi này),
+      đúng 2 suite lỗi cũ (`requestApprovalFlow`, `approvalChain`), không regression.
+- [x] 1.8.4.7 — `modules/attendance/application/record-check-in.service.ts`: orchestrate wifi/geofence
       check → `getWorksheetForDay` (Timesheet) → validate ca/giờ → domain `naive-punch-timing` →
       `recordRawPunch` (Timesheet, đã mở rộng).
-- [ ] 1.8.4.8 — `modules/attendance/application/record-check-out.service.ts`: tương tự, cộng thêm gọi
+
+      Port nguyên `AttendanceController.checkIn` (chưa cutover route — đó là việc của 1.8.4.11): dùng
+      `AllowedWifiLocationRepository.findBySsid` (1.8.4.3) + domain `isWithinRadius` (1.8.4.1) thay vì
+      tự viết lại haversine/query Model trực tiếp; `getWorksheetForDay`/`recordRawPunch` (Timesheet)
+      thay `WorkSheetModel.findOne(...).populate("shifts")` + `worksheet.save()` trực tiếp — đúng mục
+      tiêu chính của task này: **checkIn không còn ghi thẳng `WorkSheetModel`**, khớp luật "Timesheet sở
+      hữu toàn bộ WorkSheetModel" đã chốt ở 1.8.3. `UserInfoModel.findOne({id_account})` gọi trực tiếp
+      trong service (module `user` chưa migrate) — đúng tiền lệ đã dùng ở
+      `modules/request/application/create-request.service.ts`.
+
+      Thêm `hasShiftEnded(now, dateKey, shiftEndTime)` vào `domain/naive-punch-timing.ts` (dùng chung
+      `toMomentOnDate` nội bộ đã có) — port guard "quá giờ làm việc, không thể check-in" của bản gốc,
+      tách riêng khỏi `calculateMinutesLate`/`calculateMinutesEarly` vì đây là kiểm tra boolean (đã qua
+      giờ hay chưa), không phải phép đo phút.
+
+      **Đơn giản hóa có chủ đích (không phải bug, không đổi hành vi quan sát được):** bỏ nhánh gốc "nếu
+      `firstShift`/`lastShift` là ObjectId/string thì tự `ShiftModel.findById` lại" — nhánh này tồn tại
+      để phòng `.populate("shifts")` không resolve được, nhưng `WorkSheetRepository.findByUserAndDate`
+      (đã verify từ 1.8.3.3) luôn trả `shifts` đã là `ShiftInfo{start_time,end_time}` thuần qua populate
+      + mapper, không bao giờ còn ObjectId/string lọt ra ngoài — nhánh phòng thủ trở thành dead code khi
+      đi qua abstraction mới, an toàn để bỏ.
+
+      **Mọi lỗi validate đều `ArgumentInvalidException` (400)** — khớp nguyên vẹn hành vi gốc (tất cả
+      nhánh lỗi của `checkIn`, kể cả "đã check-in rồi"/"quá giờ làm việc", đều là 400, không có
+      403/404/409 nào) — không tự nâng cấp sang exception ngữ nghĩa hơn vì đây là task orchestrate
+      thuần, không phải đổi hành vi API.
+
+      **Test:** `naive-punch-timing.test.ts` thêm 3 case cho `hasShiftEnded` (trước/đúng/sau giờ tan ca
+      — đúng giờ tan ca vẫn là `false` vì dùng `isAfter`, không tính bằng). `record-check-in.service.test.ts`
+      (mới, `MongoMemoryServer` — không cần replset vì không có transaction): 10 case — 7 nhánh lỗi
+      (thiếu input, SSID sai, ngoài bán kính, thiếu userInfo, thiếu worksheet, đã check-in rồi, thiếu
+      shift, quá giờ làm việc) + 3 happy-path (đúng giờ `minutesLate=0`, muộn 20 phút ghi đúng, verify
+      cả giá trị trả về lẫn dữ liệu ghi thật trong `WorkSheetModel`). Dùng `jest.useFakeTimers()` +
+      `jest.setSystemTime()` để kiểm soát "giờ hiện tại" xác định (đúng pattern đã dùng ở
+      `attendanceCheckOut.test.ts`). Tổng 13 test mới, tất cả pass. `tsc --noEmit` + `eslint` sạch trên
+      cả 4 file đụng tới. `npm test` toàn repo: `509 passed/8 failed` (tăng đúng 13 so với baseline
+      `496/8`), đúng 2 suite lỗi cũ (`requestApprovalFlow`, `approvalChain`), không regression.
+
+      **Chưa cutover:** `AttendanceController.checkIn` vẫn dùng logic inline cũ — service này CHƯA được
+      gọi ở đâu, chờ 1.8.4.11.
+- [x] 1.8.4.8 — `modules/attendance/application/record-check-out.service.ts`: tương tự, cộng thêm gọi
       `applyLeaveConflictOverride` (Timesheet) + `adjustLeaveBalance` (Leave) — GIỮ NGUYÊN kiểu gọi
       trực tiếp cross-module tạm thời như hiện tại (đã chấp nhận ở 1.8.3, chờ `workflows/` ở 1.8.5 dọn
       lại đúng chuẩn, không phải fork mới cần hỏi).
-- [ ] 1.8.4.9 — `modules/attendance/application/manage-wifi-location.service.ts` +
+
+      **Phát hiện thêm ngoài danh sách liệt kê ban đầu của task (chỉ ghi "applyLeaveConflictOverride +
+      adjustLeaveBalance"):** đọc kỹ `AttendanceController.checkOut` thấy còn bước thứ 4 —
+      `WorkDayStatusModel.updateMany({status:"pending"} -> "present")` sau check-out, KHÔNG liên quan gì
+      leave conflict (attendance-driven status, khác hẳn nhánh leave-conflict decision-driven). Theo
+      luật "1 owner cho WorkDayStatus" (mục 13), bước này phải sống ở Timesheet — đã thêm
+      `WorkDayStatusRepository.markPendingAsPresent(worksheetId, session)` (repository, port nguyên
+      `updateMany` gốc) + `application/mark-attendance-present.service.ts` (`markAttendancePresent`,
+      thin wrapper) + export qua `modules/timesheet/index.ts`. Không phải fork cần hỏi — hệ quả trực
+      tiếp của luật đã chốt, giống cách `record-raw-punch`/`applyLeaveConflictOverride` đã làm.
+
+      **`record-check-out.service.ts`:** port nguyên `AttendanceController.checkOut` — wifi/geofence →
+      userInfo → worksheet (đọc NGOÀI transaction, khớp bản gốc) → validate → tính `minuteEarly` qua
+      `calculateMinutesEarly` (1.8.4.2) → `runInTransaction` (core/db, Phase 0) bọc đúng thứ tự gốc:
+      `recordRawPunch` (ghi check_out/minute_early qua Timesheet, thay `worksheet.save({session})` trực
+      tiếp — mục tiêu chính của 1.8.4.7/1.8.4.8: check-out không còn ghi thẳng `WorkSheetModel`) →
+      `applyLeaveConflictOverride` → `adjustLeaveBalance` nếu `leaveRefundAmount > 0` →
+      `markAttendancePresent`. Dùng `runInTransaction` thay vì tự quản
+      `mongoose.startSession()/startTransaction()` thủ công như bản gốc — cùng cơ chế `modules/request`
+      đã dùng từ task 1.10, tự map `TransientTransactionError` → `ConflictException` (409) thay vì để lộ
+      `MongoServerError`/500 thô như bản gốc (bản gốc catch-all mọi lỗi thành 500).
+
+      Mọi lỗi validate đều `ArgumentInvalidException` (400) — cùng lý do đã ghi ở
+      `record-check-in.service.ts` (1.8.4.7): khớp nguyên vẹn hành vi gốc, không tự nâng cấp ngữ nghĩa.
+
+      **Test:** `work-day-status.repository.test.ts` thêm 4 case cho `markPendingAsPresent` (flip đúng
+      status pending + gắn source, không đụng status khác của cùng worksheet, không đụng doc worksheet
+      khác, không có gì thì không lỗi). `record-check-out.service.test.ts` (mới, `MongoMemoryReplSet` —
+      cần thật vì có transaction): 11 case — 7 nhánh lỗi (thiếu input, SSID sai, ngoài bán kính, thiếu
+      userInfo, thiếu worksheet, đã check-out rồi, thiếu shift) + 4 happy-path (đúng giờ `minuteEarly=0`
+      không tạo ledger, sớm 20 phút ghi đúng, che phủ `leave_paid` buổi chiều → flip present + hoàn 0.5
+      phép — port nguyên 2 case đã có ở `attendanceCheckOut.test.ts`, và case mới cho
+      `markAttendancePresent` — flip status `pending` không liên quan leave thành `present`). Tổng 15
+      test mới, tất cả pass. `tsc --noEmit` + `eslint` sạch trên cả 5 file đụng tới. `npm test` toàn
+      repo: `524 passed/8 failed` (tăng đúng 15 so với baseline `509/8`), đúng 2 suite lỗi cũ
+      (`requestApprovalFlow`, `approvalChain`), không regression.
+
+      **Chưa cutover:** `AttendanceController.checkOut` vẫn dùng logic inline cũ (kể cả
+      `applyLeaveConflictOverride`/`adjustLeaveBalance` gọi trực tiếp, không qua service mới) — chờ
+      1.8.4.11.
+- [x] 1.8.4.9 — `modules/attendance/application/manage-wifi-location.service.ts` +
       `manage-shift.service.ts`: CRUD mỏng bọc 2 repository ở 1.8.4.3/1.8.4.4.
-- [ ] 1.8.4.10 — `modules/attendance/index.ts`: public API (`recordCheckIn`, `recordCheckOut`, CRUD
+
+      Port nguyên 5 hàm controller: `listAllowedWifiLocations`/`createAllowedWifiLocation`/
+      `deleteAllowedWifiLocation` (wifi), `listShifts`/`createShift` (shift). Lỗi validate/trùng đều
+      `ArgumentInvalidException` (400) — khớp nguyên vẹn hành vi gốc (không nâng cấp 409 dù về ngữ nghĩa
+      "đã tồn tại" hợp lý hơn là Conflict — cùng lý do đã áp dụng ở 1.8.4.7/1.8.4.8: task orchestrate
+      thuần, không đổi hành vi API). Riêng lỗi "không tìm thấy" khi xoá dùng `NotFoundException` (404) —
+      TRÙNG khớp status code gốc sẵn có (không phải nâng cấp, tình cờ đã đúng từ trước).
+
+      **Test:** `manage-wifi-location.service.test.ts` (mới, `MongoMemoryServer`): 7 case (list chỉ lấy
+      active, thiếu input, SSID trùng, tạo thành công dùng default radius=100/radius truyền vào, xoá
+      không tồn tại throw 404, xoá thành công soft-delete + biến mất khỏi list).
+      `manage-shift.service.test.ts` (mới): 5 case (list trả tất cả, thiếu input, tên trùng, tạo thành
+      công default `late_allowance_minutes=0`/giá trị truyền vào). Tổng 12 test mới, tất cả pass. `tsc
+      --noEmit` + `eslint` sạch trên cả 4 file đụng tới. `npm test` toàn repo: `536 passed/8 failed`
+      (tăng đúng 12 so với baseline `524/8`), đúng 2 suite lỗi cũ, không regression.
+
+      **Chưa cutover:** `AttendanceController`'s 5 hàm CRUD vẫn dùng logic inline cũ — chờ 1.8.4.11.
+- [x] 1.8.4.10 — `modules/attendance/index.ts`: public API (`recordCheckIn`, `recordCheckOut`, CRUD
       wifi/shift, `parseExcelToBlocks`/`parseDayRows`... liệt kê cụ thể khi tới lượt).
-- [ ] 1.8.4.11 — Cutover `AttendanceController.js`: `checkIn`/`checkOut`/3 hàm wifi/2 hàm shift gọi qua
+
+      Export: `recordCheckIn`/`recordCheckOut` + type input/result; `listAllowedWifiLocations`/
+      `createAllowedWifiLocation`/`deleteAllowedWifiLocation` + `AllowedWifiLocationRecord`/
+      `CreateAllowedWifiLocationInput`/`CreateAllowedWifiLocationServiceInput`; `listShifts`/
+      `createShift` + `ShiftRecord`/`CreateShiftServiceInput`; `parseExcelToBlocks`/`parseDayRows`
+      (đúng liệt kê ban đầu của task — infra-level parsing function, khác domain logic, không cần
+      encapsulate). KHÔNG export `AllowedWifiLocationRepository`/`ShiftRepository`/domain function
+      (`isWithinRadius`/`calculateMinutesLate`/`calculateMinutesEarly`/`hasShiftEnded`) — đúng luật #2
+      (mục 13), chưa có consumer ngoài module cần tới.
+
+      **Test:** `index.test.ts` (mới) — 4 case qua public API (không import path nội bộ): kiểm tra
+      `recordCheckIn`/`recordCheckOut` là hàm (2 hàm này đã có test riêng đầy đủ ở 1.8.4.7/1.8.4.8, không
+      lặp lại behavior test ở đây), CRUD wifi tạo→list→xoá→biến mất, CRUD shift tạo→xuất hiện trong
+      list, `parseExcelToBlocks`+`parseDayRows` parse đúng qua public API. Verify encapsulation bằng
+      `@ts-expect-error` cố tình import `AllowedWifiLocationRepository` — biên dịch báo lỗi đúng như kỳ
+      vọng (đúng pattern đã dùng ở `modules/timesheet/index.ts`, 1.8.3.5).
+
+      **Sự cố nhỏ tự phát hiện + sửa khi viết chính test này:** comment giải thích tiếng Việt phía trên
+      dòng `@ts-expect-error` vô tình chứa CHÍNH literal chuỗi `@ts-expect-error` — TypeScript quét toàn
+      bộ comment trong file tìm literal string này để nhận diện directive, hiểu nhầm dòng comment giải
+      thích cũng là 1 directive nhắm vào dòng kế tiếp (không có lỗi) → báo "unused '@ts-expect-error'
+      directive" sai chỗ, che mất việc directive thật (dòng ngay trên import) có hoạt động đúng hay
+      không. Sửa bằng cách đổi chữ trong comment giải thích (bỏ ký tự `@` khỏi cụm từ nhắc tới) để không
+      còn trùng literal. Bài học: không nhắc tên chính xác 1 comment-directive trong prose-comment cùng
+      file, dùng cách diễn đạt khác đi.
+
+      `tsc --noEmit` + `eslint` sạch trên cả 2 file. `npm test` toàn repo: `540 passed/8 failed` (tăng
+      đúng 4 so với baseline `536/8`), đúng 2 suite lỗi cũ, không regression.
+- [x] 1.8.4.11 — Cutover `AttendanceController.js`: `checkIn`/`checkOut`/3 hàm wifi/2 hàm shift gọi qua
       `modules/attendance` thay vì logic inline; `importExcel` đổi sang parser mới ở 1.8.4.5 (giữ
       nguyên phần orchestration). Route `src/routes/attendance.js` KHÔNG đổi (giữ nguyên path/middleware
       RBAC, chỉ đổi bên trong handler).
-- [ ] 1.8.4.12 — Xoá code cũ: `checkIn`/`checkOut` logic inline cũ, `parseExcelToBlocks`/`parseDayRows`
+
+      **7 handler cutover:** `checkIn`/`checkOut` giờ chỉ gọi `recordCheckIn`/`recordCheckOut` rồi map
+      kết quả sang response JSON (giữ nguyên field `check_in`/`minutes_late`/`check_out`/`minute_early`)
+      — `checkOut` không còn tự quản `mongoose.startSession()/startTransaction()/commitTransaction()`
+      thủ công (đã chuyển vào `recordCheckOut` qua `runInTransaction` từ 1.8.4.8), controller chỉ còn
+      `try/catch` đơn giản. `getAllowedWifiLocations`/`createAllowedWifiLocation`/
+      `deleteAllowedWifiLocation`/`createShift`/`getAllShifts` gọi thẳng service tương ứng ở
+      `modules/attendance` (1.8.4.9). `importExcel`'s import `parseExcelToBlocks`/`parseDayRows` đổi từ
+      path nội bộ (`modules/attendance/infrastructure/excel-attendance-parser`, tạm dùng từ 1.8.4.5 vì
+      lúc đó chưa có `index.ts`) sang qua public API `modules/attendance` (index.ts vừa có từ 1.8.4.10)
+      — đúng ranh giới Hexagonal, không đổi hành vi.
+
+      **Dùng chung `sendExceptionResponse`** (`core/http/handle-exception.ts`, có sẵn từ task 1.6) cho
+      cả 7 handler thay vì mỗi handler tự `console.error` + viết tay `res.status(...).json(...)` — mọi
+      lỗi 400/404 (từ `ArgumentInvalidException`/`NotFoundException` các service mới ném ra) tự map
+      đúng `{statusCode, message}`; lỗi lạ vẫn rơi vào nhánh `500 {message: "Lỗi server", error}`.
+      **1 khác biệt cosmetic rất nhỏ, chấp nhận được:** 3 handler wifi bản gốc dùng message lỗi 500
+      `"Lỗi server."` (có dấu chấm) trong khi `sendExceptionResponse` dùng `"Lỗi server"` (không dấu
+      chấm, khớp 4 handler còn lại) — không phải business rule, chỉ là text lỗi chung chung không ai
+      assert; dùng chung 1 helper thay vì giữ 2 biến thể message cho cùng 1 ý nghĩa.
+
+      **Dọn import không còn dùng:** xoá hẳn `AllowedWifiLocationModel`/`ShiftModel` (2 model) +
+      `applyLeaveConflictOverride`/`adjustLeaveBalance`/`LEAVE_BALANCE_REASON` (chỉ `checkOut` dùng, giờ
+      nằm trong `recordCheckOut`) khỏi import — giữ nguyên `getLeaveBalance`/`PERMISSION`/`mongoose`
+      (vẫn dùng ở các handler khác chưa migrate, đã grep xác nhận).
+
+      **Test:** `__tests__/attendanceCheckIn.test.ts` (mới — `checkIn` chưa từng có test qua controller
+      thật trước đây): 2 case (thành công ghi đúng `WorkSheetModel` + response, lỗi SSID sai trả đúng
+      400 qua `sendExceptionResponse`). `__tests__/attendanceWifiShiftCrud.test.ts` (mới — 5 hàm CRUD
+      chưa từng có test qua controller thật): 8 case (list/tạo/tạo trùng lỗi 400/xoá không tồn tại lỗi
+      404/xoá thành công cho wifi; tạo trùng lỗi 400/tạo thành công 201/list cho shift). Cả 2 file chỉ
+      verify phần WIRING (Express req/res thật + `sendExceptionResponse` map đúng status/message) — logic
+      nghiệp vụ đã test đầy đủ ở service test riêng (1.8.4.7/1.8.4.8/1.8.4.9), không lặp lại. Chạy lại
+      `attendanceCheckOut.test.ts`/`attendanceImportExcel.test.ts` (test cũ, dùng
+      `AttendanceController.checkOut`/`.importExcel` trực tiếp) — 6/6 pass, xác nhận cutover không phá
+      vỡ 2 file test đã có từ trước.
+
+      Tổng 10 test mới. `node --check` + `eslint` sạch trên `AttendanceController.js`. `npm run build`
+      thành công (xác nhận `tsc` biên dịch đúng khi `.js` (`allowJs`) require named export từ
+      `modules/attendance` — module TS mới). `npm test` toàn repo: `550 passed/8 failed` (tăng đúng 10 so
+      với baseline `540/8`), đúng 2 suite lỗi cũ (`requestApprovalFlow`, `approvalChain`), không
+      regression.
+- [x] 1.8.4.12 — Xoá code cũ: `checkIn`/`checkOut` logic inline cũ, `parseExcelToBlocks`/`parseDayRows`
       khỏi `attendanceHelper.ts`, CRUD wifi/shift cũ — sau khi cutover xanh (đúng khuôn đã dùng ở
       1.8.3.7: grep xác nhận hết call site trước khi xoá).
 
-**Definition of done 1.8.4:** `modules/attendance` sở hữu `AllowedWifiLocationModel`+`ShiftModel`,
-checkIn/checkOut không còn ghi thẳng `WorkSheetModel` (đi qua `modules/timesheet` public API), Excel-
-parsing tách khỏi `attendanceHelper.ts`, `npm test` không giảm số pass (đúng 2 suite lỗi cũ, không lẫn
-regression mới).
+      **Khác 1.8.3.7 — không có gì để xoá thêm, đã xong từ trước:** task này giả định khuôn "cutover
+      trước (giữ code cũ song song), xoá riêng ở task sau" như 1.8.3.7. Thực tế 1.8.4.5 (xoá
+      `parseExcelToBlocks`/`parseDayRows` khỏi `attendanceHelper.ts`) và 1.8.4.11 (cutover 7 handler)
+      đều làm theo kiểu **thay thế trực tiếp** (Edit ghi đè nguyên khối code cũ bằng code mới trong cùng
+      1 lần sửa), không viết code mới cạnh code cũ rồi tính xoá sau — nên không còn code chết nào sót
+      lại để dọn ở bước riêng này.
 
-### 1.8.5 — 1.8.8 (tóm tắt, chi tiết hoá khi tới lượt)
+      **Verify kỹ trước khi kết luận "không có gì làm" (không suy đoán):** grep toàn repo xác nhận —
+      không còn `AllowedWifiLocationModel`/`ShiftModel` nào trong `AttendanceController.js`; không còn
+      `parseExcelToBlocks`/`parseDayRows` trong `attendanceHelper.ts`; không còn công thức haversine
+      (`6371000`) nào ngoài `modules/attendance/domain/geofence.ts`; không còn logic tính
+      `minutes_late`/`minute_early` kiểu cũ (`Math.max(0, Math.floor(...))`) lặp lại ở đâu khác;
+      `src/routes/attendance.js` chỉ tham chiếu `AttendanceController.<handler>` qua property access,
+      không đổi gì (đúng yêu cầu). 2 chỗ còn dùng `ShiftModel` trực tiếp
+      (`helpers/leaveHandler.js`/`helpers/awayDayHandler.js`, dòng tìm `"Ca hành chính"`/`"Ca sáng"` mặc
+      định khi duyệt đơn nghỉ/remote) — xác nhận đây là nghiệp vụ RIÊNG của module `request` (gán ca mặc
+      định lúc duyệt đơn), không liên quan/không trùng lặp check-in/check-out, không thuộc phạm vi dọn
+      dẹp task này.
+
+      `npm test` toàn repo chạy lại xác nhận ổn định `550 passed/8 failed`, không đổi so với sau
+      1.8.4.11 (đúng dự kiến vì không có code nào bị đụng thêm).
+
+**Definition of done 1.8.4 — ĐÃ ĐẠT:** `modules/attendance` sở hữu `AllowedWifiLocationModel`+
+`ShiftModel`, checkIn/checkOut không còn ghi thẳng `WorkSheetModel` (đi qua `modules/timesheet` public
+API), Excel-parsing tách khỏi `attendanceHelper.ts`, `AttendanceController.js` (7 handler) cutover xong
+qua `modules/attendance`, `npm test` ổn định `550 passed/8 failed` — đúng 2 suite lỗi cũ
+(`requestApprovalFlow`, `approvalChain`), không lẫn regression mới. Sẵn sàng sang 1.8.5.
+
+### 1.8.5 — `workflows/` (chi tiết đầy đủ, làm ngay)
+
+**Phát hiện quan trọng khi bắt đầu chi tiết hoá (đọc lại rule #1 mục 13 đối chiếu code thật đã viết ở
+1.8.4):** `modules/attendance/application/record-check-in.service.ts`/`record-check-out.service.ts`
+(1.8.4.7/1.8.4.8) hiện đang `import` thẳng `modules/timesheet` (`getWorksheetForDay`/`recordRawPunch`/
+`applyLeaveConflictOverride`/`markAttendancePresent`) và `modules/leave` (`adjustLeaveBalance`) — **vi
+phạm đúng rule #1** ("`modules/x` chỉ import `core/`, `shared-kernel/`, và chính nó — KHÔNG import
+`modules/y`"), dù đã ghi rõ ở 1.8.4.7/1.8.4.8 là "chấp nhận tạm thời, chờ `workflows/` dọn lại". Đây
+chính là việc "dọn lại" đó — **không phải fork mới cần hỏi**, đã có quyết định sẵn từ trước, chỉ là lúc
+này mới thực thi.
+
+**Quyết định phạm vi (thu hẹp so với bảng tóm tắt gốc ở mục 14 — refine sau khi có code thật, đúng tinh
+thần "chi tiết hoá khi bắt đầu, không lập kế hoạch cho thứ chưa rõ"):**
+- **Làm ngay trong 1.8.5:** `record-check-in.workflow.ts`, `record-check-out.workflow.ts` (tách 2 file
+  riêng thay vì gộp 1 "record-checkout" như bảng gốc — khớp đúng cách `modules/attendance/application/`
+  đã tách 2 use-case riêng từ 1.8.4.7/1.8.4.8, không có lý do gộp lại).
+- **`import-attendance.workflow.ts` — dời xuống cuối 1.8.5 (1.8.5.5), thiết kế khi tới lượt:** hiện
+  `AttendanceController.importExcel`/`jobs/finalizeWorkDay.js` (2 file NGOÀI `src/modules/`, thuộc tầng
+  composition-root — KHÔNG vi phạm rule #1 vì rule đó chỉ áp cho code SỐNG BÊN TRONG `src/modules/`)
+  đã tự do phối hợp `modules/timesheet` + `RequestModel` trực tiếp, phức tạp hơn nhiều record-check-in/
+  out (context 7-query, chưa rõ ranh giới tách). Xây nền bằng 2 workflow đơn giản trước để có mẫu, rồi
+  quay lại thiết kế cái khó nhất.
+- **`review-request.workflow.ts`/`cancel-request.workflow.ts` — DỜI HẲN sang 1.8.6** (không làm ở
+  1.8.5, kể cả file rỗng/stub): 2 workflow này cần tách 7 handler `helpers/*Handler.js` (`onCreate`/
+  `onApprove`/`onReject`) làm trước — đúng theo bảng gốc mục 14 đã ghi rõ đây là việc của 1.8.6. Viết
+  trước khi tách handler chỉ tạo ra bản nháp chắc chắn phải viết lại, không có giá trị.
+
+**Rule #1 áp dụng lại cho `modules/attendance` sau khi tách:** giữ đúng
+`AllowedWifiLocationRepository`/`ShiftRepository`/CRUD service (wifi/shift) + `parseExcelToBlocks`/
+`parseDayRows` + domain (`geofence.ts`/`naive-punch-timing.ts`) — đây là phần THUẦN thuộc Attendance,
+không cần Timesheet/Leave. `record-check-in.service.ts`/`record-check-out.service.ts` (2 file vi phạm
+rule #1) sẽ bị xoá hẳn khỏi `modules/attendance/`, logic chuyển nguyên sang `workflows/`.
+
+- [x] 1.8.5.1 — `modules/attendance`: tách phần validate wifi/geofence dùng chung giữa check-in/
+      check-out thành 1 hàm riêng `application/check-wifi-location.service.ts`
+      (`checkWifiLocation({ssid, latitude, longitude})`, throw `ArgumentInvalidException` nếu sai SSID/
+      ngoài bán kính) — hiện đang lặp y hệt ở cả 2 service sắp bị xoá, tách ra để `workflows/` dùng
+      chung thay vì copy-paste 2 lần. Export thêm domain function
+      (`calculateMinutesLate`/`calculateMinutesEarly`/`hasShiftEnded`) qua `index.ts` — trước đây
+      KHÔNG export (chỉ dùng nội bộ 2 service sắp xoá), giờ `workflows/` cần gọi trực tiếp.
+
+      **Test:** `check-wifi-location.service.test.ts` (mới, 4 case: thiếu input, SSID sai, ngoài bán
+      kính, hợp lệ không throw). `tsc --noEmit` + `eslint` sạch. `npm test` toàn repo: `554 passed/8
+      failed` (tăng đúng 4 so với baseline `550/8`), đúng 2 suite lỗi cũ, không regression.
+- [x] 1.8.5.2 — `src/workflows/record-check-in.workflow.ts`: chuyển nguyên orchestration từ
+      `record-check-in.service.ts` (userInfo lookup → `checkWifiLocation` (attendance) →
+      `getWorksheetForDay` (timesheet) → validate business rule (đã check-in/không có shift/quá giờ,
+      dùng `hasShiftEnded` từ attendance) → `calculateMinutesLate` (attendance) → `recordRawPunch`
+      (timesheet)) — port nguyên logic, chỉ đổi từ 1 file trong `modules/attendance/application/` sang
+      `src/workflows/`, không đổi hành vi. `tsc --noEmit` + `eslint` sạch.
+- [x] 1.8.5.3 — `src/workflows/record-check-out.workflow.ts`: tương tự, cộng `applyLeaveConflictOverride`
+      + `adjustLeaveBalance` (nếu refund > 0) + `markAttendancePresent` — chuyển nguyên từ
+      `record-check-out.service.ts`, dùng lại `runInTransaction` y hệt. `tsc --noEmit` + `eslint` sạch.
+- [x] 1.8.5.4 — Cutover: `AttendanceController.js`'s `checkIn`/`checkOut` đổi import từ
+      `../modules/attendance` sang `../workflows/record-check-in.workflow`/`record-check-out.workflow`.
+      Xoá `record-check-in.service.ts`/`record-check-out.service.ts` khỏi `modules/attendance/` (đã
+      grep xác nhận trước khi xoá — chỉ 2 file test + `index.ts`/controller từng dùng, không consumer
+      nào khác) + bỏ export tương ứng khỏi `modules/attendance/index.ts`. Chuyển 2 file test tương ứng
+      sang `__tests__/workflows/record-check-in.workflow.test.ts`/`record-check-out.workflow.test.ts`
+      (đổi import path, port nguyên assertion không sửa 1 dòng). Cập nhật
+      `__tests__/modules/attendance/index.test.ts` (bỏ `recordCheckIn`/`recordCheckOut` khỏi phần verify
+      public API, thêm verify `checkWifiLocation` + 3 domain function mới export ở 1.8.5.1).
+
+      **Verify rule #1 bằng grep (không suy đoán):** `modules/attendance/` không còn import
+      `modules/timesheet`/`modules/leave` ở bất kỳ file nào (1 match giả ở comment giải thích trong
+      `naive-punch-timing.ts`, không phải import thật — đã kiểm tra riêng). `npm run build` thành công
+      (xác nhận `AttendanceController.js` — `.js`, `allowJs` — require đúng named export từ
+      `src/workflows/*.workflow.ts` mới). Chạy lại `attendanceCheckIn.test.ts`/
+      `attendanceCheckOut.test.ts`/`attendanceWifiShiftCrud.test.ts`/`attendanceImportExcel.test.ts`
+      (test E2E qua `AttendanceController` thật, viết từ 1.8.4.11) — 89/89 pass, xác nhận cutover qua
+      `workflows/` không đổi hành vi quan sát được qua HTTP-shaped controller.
+
+      `npm test` toàn repo: `554 passed/8 failed` (không đổi so với sau 1.8.5.1 — 2 file test bị xoá và
+      2 file mới có ĐÚNG số test y hệt, chỉ đổi vị trí/import, không mất/thêm coverage), đúng 2 suite lỗi
+      cũ (`requestApprovalFlow`, `approvalChain`), không regression.
+- [x] 1.8.5.5 — `src/workflows/import-attendance.workflow.ts` — khảo sát kỹ trước khi code (đọc từng
+      field của cả 2 bản, không suy đoán): `jobs/finalizeWorkDay.js`'s `buildUserDayContext` (phạm vi
+      đúng 1 ngày — `todayStart/todayEnd`) và `AttendanceController.importExcel`'s context xây inline
+      (phạm vi nhiều ngày trong 1 block Excel — `rangeStart/rangeEnd`) **giống nhau ở 5/6 query, chỉ
+      khác đúng 1 chỗ:** `importExcel` merge thêm dữ liệu máy chấm công thô (`excelRawMap`) vào bước xây
+      `daySnapshots` (dùng cho `forgotOccurrenceMap`), `buildUserDayContext` không có nguồn này. Tách
+      generic hoá được — tham số `excelRawByDate?` (mặc định rỗng) khi rỗng thì `daySnapshots` chỉ còn
+      duyệt worksheet (giống hệt bản gốc của cron).
+
+      **Phát hiện thêm khi grep tìm consumer:** ngoài 2 chỗ đã biết, `helpers/forgotCheckinHandler.js`
+      và `helpers/lateEarlyHandler.js` (`onApprove`) cũng gọi `buildUserDayContext` (qua
+      `require("../jobs/finalizeWorkDay")`) — tổng cộng **4 chỗ dùng logic này** (3 gọi hàm chung + 1
+      bản trùng lặp inline), không phải 2 như khảo sát sơ bộ ban đầu.
+
+      **Thiết kế:** `buildAttendanceContext({userId, rangeStart, rangeEnd, periodStart, periodEnd,
+      excelRawByDate?, session?})` — hàm DUY NHẤT chứa 6 query (`WorkSheetModel`/`RequestModel`/
+      `WorkDayStatusModel`) + toàn bộ logic build map/set, sống ở `workflows/`. Cutover cả 4 chỗ:
+      - `jobs/finalizeWorkDay.js`: `buildUserDayContext` (tên/signature cũ giữ nguyên, vẫn export) giờ
+        chỉ là wrapper mỏng gọi `buildAttendanceContext` — nhờ giữ nguyên tên/tham số, **2 consumer khác
+        (`forgotCheckinHandler.js`/`lateEarlyHandler.js`) không cần sửa gì** (vẫn `require("../jobs/
+        finalizeWorkDay")` như cũ).
+      - `AttendanceController.importExcel`: xoá ~90 dòng context-builder trùng lặp, thay bằng gọi
+        `buildAttendanceContext` (kèm `excelRawByDate`) song song với query `worksheets` riêng (query
+        này KHÔNG chung với cron — có `.populate("shifts")`, dùng cho vòng lặp per-day của importExcel,
+        không thuộc phạm vi hàm dùng chung).
+
+      **Cố tình CHƯA đi qua repository của Timesheet/Request cho các query trong `buildAttendanceContext`**
+      (rule #3 mục 13 lý tưởng đòi mỗi model có đúng 1 owner-repository) — quyết định phạm vi có chủ
+      đích: đây là hàm BÁO CÁO/BATCH-CONTEXT (đọc thuần), đã sống trực tiếp ở tầng composition-root
+      (`jobs/`, `controllers/`) từ trước khi có `workflows/` — chuyển vào đây KHÔNG phải regression (cùng
+      mức "truy cập trực tiếp" như hiện trạng, chỉ gộp 4 bản trùng lặp thành 1). Thêm repository
+      read-method riêng cho các query báo cáo này (vd `WorkSheetRepository.findManyInRange`,
+      `RequestRepository` tương ứng) là cải thiện tách biệt, ngoài phạm vi "gộp trùng lặp" của task này —
+      ghi backlog cho lần sau.
+
+      **Test:** `import-attendance.workflow.test.ts` (mới) — 3 case: **differential test** so trực tiếp
+      `buildAttendanceContext` (excelRawByDate rỗng) với `buildUserDayContext` gốc trên CÙNG 1 input
+      (cùng seed DB, cùng tham số) — xác nhận identical, không suy đoán; 1 case cả 2 rỗng dữ liệu; 1 case
+      xác nhận `excelRawByDate` hoạt động đúng (ngày chỉ có dữ liệu máy, không worksheet, vẫn lọt vào
+      `forgotOccurrenceMap` — đúng hành vi importExcel cũ). Chạy lại `finalizeWorkDay.test.ts` (4/4),
+      `forgotCheckinApprove.test.ts` + `lateEarlyApprove.test.ts` (8/8), `attendanceImportExcel.test.ts`
+      (4/4) — toàn bộ pass không sửa 1 dòng test nào, xác nhận cutover cả 4 chỗ không đổi hành vi.
+
+      `tsc --noEmit` + `eslint` sạch trên toàn bộ file đụng tới (`import-attendance.workflow.ts`,
+      `jobs/finalizeWorkDay.js`, `AttendanceController.js`). `npm run build` thành công. `npm test` toàn
+      repo: `557 passed/8 failed` (tăng đúng 3 so với baseline `554/8`), đúng 2 suite lỗi cũ
+      (`requestApprovalFlow`, `approvalChain`), không regression.
+
+**Definition of done 1.8.5 — ĐÃ ĐẠT:** `modules/attendance` không còn import `modules/timesheet`/
+`modules/leave` ở bất kỳ đâu (đúng rule #1, verify bằng grep); `workflows/record-check-in.workflow.ts` +
+`record-check-out.workflow.ts` là nơi DUY NHẤT điều phối check-in/check-out xuyên 3 module (Attendance/
+Timesheet/Leave); `workflows/import-attendance.workflow.ts` gộp đúng 4 chỗ trùng lặp context-builder
+(`jobs/finalizeWorkDay.js`, `helpers/forgotCheckinHandler.js`, `helpers/lateEarlyHandler.js`,
+`AttendanceController.importExcel`) về 1 nguồn duy nhất. `npm test` ổn định `557 passed/8 failed` — đúng
+2 suite lỗi cũ, không giảm số pass. `review-request.workflow.ts`/`cancel-request.workflow.ts` dời sang
+1.8.6 (cần tách 7 handler trước). Sẵn sàng sang 1.8.6.
+
+### 1.8.6 — 1.8.8 (tóm tắt, chi tiết hoá khi tới lượt)
 
 | Sub-phase | Việc chính | Lưu ý đặc biệt |
 |---|---|---|
-| 1.8.5 `workflows/` | `review-request.workflow.ts`, `cancel-request.workflow.ts`, `record-checkout.workflow.ts`, `import-attendance.workflow.ts` | Tái dùng nguyên `runInTransaction`/`RequestContextService` đã có từ Phase 0; `record-checkout.workflow.ts` chính thức hoá điều phối tạm thời đã làm ở 1.8.3 (Timesheet resolve conflict → Leave refund) |
-| 1.8.6 Cutover `modules/request/` | Đổi `review-request.service.ts`/`create-request.service.ts`/`cancel-request.service.ts` gọi qua `workflows/` cho action ghi; 7 handler `helpers/*Handler.js` chỉ còn `validate`/`validateAsync` (thuần Request), bỏ `onCreate`/`onApprove`/`onReject` (chuyển thành bước trong workflow) | Behavior-preserving nhưng đụng nhiều nhất — cần characterization test đầy đủ cho cả 7 loại đơn trước khi cutover |
+| 1.8.6 Cutover `modules/request/` | `review-request.workflow.ts`/`cancel-request.workflow.ts` (dời từ 1.8.5) + đổi `review-request.service.ts`/`create-request.service.ts`/`cancel-request.service.ts` gọi qua `workflows/` cho action ghi; 7 handler `helpers/*Handler.js` chỉ còn `validate`/`validateAsync` (thuần Request), bỏ `onCreate`/`onApprove`/`onReject` (chuyển thành bước trong workflow) | Behavior-preserving nhưng đụng nhiều nhất — cần characterization test đầy đủ cho cả 7 loại đơn trước khi cutover |
 | 1.8.7 Xoá code cũ | Phần còn lại của `AttendanceController.js` liên quan check-in/out cũ | Chỉ xoá sau khi 1.8.6 xanh, characterization test xác nhận hành vi không đổi |
 | 1.8.8 Hoàn thiện | `CLAUDE.md`, tổng kết Phase 1.8 | — |

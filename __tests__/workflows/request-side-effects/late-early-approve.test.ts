@@ -1,11 +1,11 @@
 import mongoose from "mongoose";
 import moment from "moment-timezone";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
-import { onApprove } from "../src/helpers/lateEarlyHandler";
-import { LateEarlyRequest } from "../src/models/RequestModel";
-import WorkSheetModel from "../src/models/WorkSheetModel";
-import ShiftModel from "../src/models/ShiftModel";
-import AttendancePenaltyModel from "../src/models/AttendancePenaltyModel";
+import { onApprove } from "../../../src/workflows/request-side-effects/late-early";
+import { LateEarlyRequest } from "../../../src/models/RequestModel";
+import WorkSheetModel from "../../../src/models/WorkSheetModel";
+import ShiftModel from "../../../src/models/ShiftModel";
+import AttendancePenaltyModel from "../../../src/models/AttendancePenaltyModel";
 
 const TZ = "Asia/Ho_Chi_Minh";
 const DATE_KEY = "2026-07-01"; // thứ 4
@@ -44,9 +44,7 @@ beforeEach(async () => {
   });
 });
 
-// Chưa từng có test nào cho lateEarlyHandler.js's onApprove trước khi cutover (task 1.8.3.6) —
-// characterization test mới, viết trước khi tin tưởng cutover.
-describe("lateEarlyHandler.onApprove", () => {
+describe("workflows/request-side-effects/late-early's onApprove", () => {
   test("duyệt đơn đi muộn có lý do: miễn phạt (lateForgivenSet), work_unit=1, penalty=0", async () => {
     const userId = new mongoose.Types.ObjectId();
     const shift = await ShiftModel.create({
@@ -70,7 +68,7 @@ describe("lateEarlyHandler.onApprove", () => {
       status: "approved"
     });
 
-    await onApprove(request, null);
+    await onApprove(request, null as any);
 
     const ws = await WorkSheetModel.findOne({ user_id: userId }).lean();
     expect(ws?.penalty_amount).toBe(0); // được miễn phạt vì có đơn đã duyệt
@@ -93,7 +91,7 @@ describe("lateEarlyHandler.onApprove", () => {
       status: "approved"
     });
 
-    await expect(onApprove(request, null)).resolves.not.toThrow();
+    await expect(onApprove(request, null as any)).resolves.not.toThrow();
     expect(await WorkSheetModel.countDocuments({ user_id: userId })).toBe(0);
   });
 
@@ -120,7 +118,7 @@ describe("lateEarlyHandler.onApprove", () => {
       status: "approved"
     });
 
-    await onApprove(request, null);
+    await onApprove(request, null as any);
 
     const ws = await WorkSheetModel.findOne({ user_id: userId }).lean();
     expect(ws?.work_unit).toBeNull();

@@ -211,4 +211,73 @@ describe("AttendanceController.importExcel", () => {
       expect.objectContaining({ data: expect.objectContaining({ imported: 0, unchanged: 1 }) })
     );
   });
+
+  // Regression (tối ưu round-trip DB): các ngày trong 1 block giờ được xử lý song song có giới hạn
+  // (mapWithConcurrency) thay vì tuần tự từng ngày — test xác nhận nhiều ngày liên tiếp của CÙNG 1
+  // nhân viên vẫn được ghi đúng, độc lập, không lẫn dữ liệu ngày này sang ngày khác dù chạy đồng thời.
+  test("import nhiều ngày liên tiếp cùng 1 nhân viên (xử lý song song): mỗi ngày ghi đúng work_unit/minutes_late riêng, không lẫn nhau", async () => {
+    const userId = new mongoose.Types.ObjectId();
+    await UserInfoModel.create({
+      full_name: "NV Test 4",
+      cccd: "000000000004",
+      phone_number: "0900000004",
+      sex: 1,
+      date_of_birth: new Date("1995-01-01"),
+      address: "HN",
+      tinh_trang_hon_nhan: 0,
+      id_account: new mongoose.Types.ObjectId(),
+      ma_nv: "NV004",
+      employment_type: "fulltime"
+    });
+    await AttendanceMachineMappingModel.create({ machine_code: "M004", user_id: userId });
+    const shift = await ShiftModel.create({
+      name: "Ca hành chính",
+      start_time: "08:00",
+      end_time: "17:30"
+    });
+
+    // 3 ngày liên tiếp (thứ 4, 5, 6 - đều ngày thường, work_unit không bị giảm trọng số như T7/CN),
+    // mỗi ngày trễ số phút khác nhau -> minutes_late kỳ vọng khác nhau theo từng ngày, dễ phát hiện
+    // nếu concurrency làm lẫn dữ liệu giữa các ngày.
+    const days = [
+      { dateStr: "01/07/2026", inTime: "08:01", outTime: "17:31", expectedLate: 1 },
+      { dateStr: "02/07/2026", inTime: "08:05", outTime: "17:31", expectedLate: 5 },
+      { dateStr: "03/07/2026", inTime: "08:10", outTime: "17:31", expectedLate: 10 }
+    ];
+
+    await WorkSheetModel.create(
+      days.map((d) => ({
+        user_id: userId,
+        date: moment.tz(d.dateStr, "DD/MM/YYYY", TZ).startOf("day").toDate(),
+        shifts: [shift._id],
+        check_in: null,
+        check_out: null
+      }))
+    );
+
+    const buffer = buildExcelBuffer([
+      {
+        machineCode: "M004",
+        days: days.map(({ dateStr, inTime, outTime }) => ({ dateStr, inTime, outTime }))
+      }
+    ]);
+
+    const req = { file: { buffer } };
+    const res = makeRes();
+    await AttendanceController.importExcel(req, res);
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ imported: 3, skipped: 0 }) })
+    );
+
+    for (const d of days) {
+      // eslint-disable-next-line no-await-in-loop
+      const ws: any = await WorkSheetModel.findOne({
+        user_id: userId,
+        date: moment.tz(d.dateStr, "DD/MM/YYYY", TZ).startOf("day").toDate()
+      }).lean();
+      expect(ws.minutes_late).toBe(d.expectedLate);
+      expect(ws.work_unit).toBe(1);
+    }
+  });
 });

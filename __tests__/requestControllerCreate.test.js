@@ -213,6 +213,8 @@ test("tạo đơn business_trip: 201, request_type lưu đúng", async () => {
     body: {
       request_type: "business_trip",
       reason: "công tác Đà Nẵng",
+      origin_location: "Hà Nội",
+      destination_location: "Đà Nẵng",
       from_date: fromDate,
       to_date: toDate
     }
@@ -228,6 +230,97 @@ test("tạo đơn business_trip: 201, request_type lưu đúng", async () => {
     request_type: "business_trip"
   });
   expect(created).not.toBeNull();
+});
+
+// "Đi gặp khách hàng" phải nhập chính xác ngày + giờ (start_time/end_time), không còn
+// chọn theo ca/khoảng ngày như trước — xác nhận tạo thành công và lưu đúng giờ.
+test("tạo đơn client_visit: 201, lưu đúng ngày + giờ chính xác", async () => {
+  const branchId = new mongoose.Types.ObjectId();
+
+  const employeeAccount = await AccountModel.create({
+    username: "employee_visit_test",
+    password: "hashed",
+    role: "user"
+  });
+  await UserInfoModel.create({
+    full_name: "Nhân viên gặp khách hàng",
+    cccd: "666666666666",
+    phone_number: "0966666666",
+    sex: 1,
+    date_of_birth: new Date("1995-01-01"),
+    address: "Hà Nội",
+    tinh_trang_hon_nhan: 0,
+    id_account: employeeAccount._id,
+    ma_nv: "NVREQ11",
+    employment_type: "fulltime",
+    branch_id: branchId
+  });
+
+  const visitDate = nextWeekday(1);
+
+  const req = {
+    account: { _id: employeeAccount._id },
+    body: {
+      request_type: "client_visit",
+      reason: "gặp khách hàng ABC",
+      visit_date: visitDate,
+      start_time: "09:00",
+      end_time: "10:30"
+    }
+  };
+  const res = makeRes();
+
+  await callController(requestHttpController.create, req, res);
+
+  expect(res.status).toHaveBeenCalledWith(201);
+
+  const created = await RequestModel.findOne({
+    user_id: (await UserInfoModel.findOne({ ma_nv: "NVREQ11" }))._id,
+    request_type: "client_visit"
+  });
+  expect(created).not.toBeNull();
+  expect(created.start_time).toBe("09:00");
+  expect(created.end_time).toBe("10:30");
+  expect(created.total_days).toBe(1);
+});
+
+test("tạo đơn client_visit: 400 khi giờ kết thúc không sau giờ bắt đầu", async () => {
+  const branchId = new mongoose.Types.ObjectId();
+
+  const employeeAccount = await AccountModel.create({
+    username: "employee_visit_bad_test",
+    password: "hashed",
+    role: "user"
+  });
+  await UserInfoModel.create({
+    full_name: "Nhân viên gặp khách hàng lỗi giờ",
+    cccd: "777766666666",
+    phone_number: "0977666666",
+    sex: 1,
+    date_of_birth: new Date("1995-01-01"),
+    address: "Hà Nội",
+    tinh_trang_hon_nhan: 0,
+    id_account: employeeAccount._id,
+    ma_nv: "NVREQ12",
+    employment_type: "fulltime",
+    branch_id: branchId
+  });
+
+  const req = {
+    account: { _id: employeeAccount._id },
+    body: {
+      request_type: "client_visit",
+      reason: "gặp khách hàng ABC",
+      visit_date: nextWeekday(1),
+      start_time: "10:30",
+      end_time: "09:00"
+    }
+  };
+  const res = makeRes();
+
+  await callController(requestHttpController.create, req, res);
+
+  expect(res.status).toHaveBeenCalledWith(400);
 });
 
 // Regression: onApprove của business_trip/client_visit phải set check_in/check_out/
@@ -285,6 +378,8 @@ test("duyệt đơn business_trip: WorkSheet có check_in/check_out/work_unit đ
       body: {
         request_type: "business_trip",
         reason: "công tác",
+        origin_location: "Hà Nội",
+        destination_location: "Đà Nẵng",
         from_date: fromDate,
         to_date: toDate
       }
@@ -565,6 +660,8 @@ test("duyệt đơn business_trip đè lên ngày đã nghỉ phép có lương:
       body: {
         request_type: "business_trip",
         reason: "công tác đột xuất",
+        origin_location: "Hà Nội",
+        destination_location: "Đà Nẵng",
         from_date: targetDate,
         to_date: targetDate
       }
@@ -647,6 +744,8 @@ test("duyệt đơn nghỉ phép (nửa ngày) đè lên ngày đã có công t�
       body: {
         request_type: "business_trip",
         reason: "công tác",
+        origin_location: "Hà Nội",
+        destination_location: "Đà Nẵng",
         from_date: targetDate,
         to_date: targetDate
       }

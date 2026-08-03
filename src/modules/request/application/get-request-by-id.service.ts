@@ -52,16 +52,25 @@ export async function getRequestById(account: any, id: string) {
   ]);
 
   let pending_reviewer = null;
+  // Hiển thị đủ cả 2 cấp phê duyệt (trực tiếp + gián tiếp) cùng lúc, kèm trạng thái đã duyệt hay
+  // chưa của từng cấp — trước đây chỉ trả `pending_reviewer` (1 người kế tiếp), FE không có cách
+  // hiển thị song song cả 2 cấp trong luồng phê duyệt.
+  let approval_chain: Array<ApprovalCandidate & { approved: boolean }> = [];
   if (request.status === "pending") {
     const chain = await getChain();
     const approvedAccountIds = new Set(request.approvals.map((a: any) => String(a.account)));
     pending_reviewer = chain.find((c) => !approvedAccountIds.has(String(c.accountId))) ?? null;
+    approval_chain = chain.map((c) => ({
+      ...c,
+      approved: approvedAccountIds.has(String(c.accountId))
+    }));
   }
 
   return {
     ...request.toObject(),
     approvals,
     reviewed_by_profile,
-    pending_reviewer
+    pending_reviewer,
+    approval_chain
   };
 }

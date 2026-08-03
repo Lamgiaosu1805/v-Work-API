@@ -3,9 +3,9 @@ import { getEligibleReviewers } from "../application/get-eligible-reviewers.serv
 import { getMyRequests } from "../application/get-my-requests.service";
 import { getAllRequests } from "../application/get-all-requests.service";
 import { getRequestById } from "../application/get-request-by-id.service";
-import { cancelRequest } from "../application/cancel-request.service";
-import { createRequest } from "../application/create-request.service";
-import { reviewRequest } from "../application/review-request.service";
+import { cancelRequest } from "../../../workflows/cancel-request.workflow";
+import { createRequest } from "../../../workflows/create-request.workflow";
+import { reviewRequest } from "../../../workflows/review-request.workflow";
 
 export const requestHttpController = {
   async getEligibleReviewers(req: Request, res: Response) {

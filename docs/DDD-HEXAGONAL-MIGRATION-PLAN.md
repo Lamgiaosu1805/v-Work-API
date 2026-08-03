@@ -1764,10 +1764,11 @@ thể đổi sau khi rút kinh nghiệm từ Phase 1).
       sau này viết `.ts` ngay từ đầu khi tới lượt, không còn "phase TS riêng")
 - [x] Phase 1.7 — Dọn nợ kỹ thuật WorkDayStatus, phần 1.7.1 — xem mục 9 (1.7.2/1.7.3 superseded, gộp
       vào Phase 1.8)
-- [ ] Phase 1.8 — Triển khai kiến trúc dài hạn Timesheet/Leave/Attendance — xem mục 13-14. Đã xong
-      1.8.1 (shared-kernel) / 1.8.2 (modules/leave) / 1.8.3 (modules/timesheet) / 1.8.4
-      (modules/attendance) / 1.8.5 (workflows/ record-check-in/out + import-attendance) — đang tới 1.8.6
-      (review-request/cancel-request workflow + cutover modules/request/)
+- [x] Phase 1.8 — Triển khai kiến trúc dài hạn Timesheet/Leave/Attendance — xem mục 13-14. Toàn bộ
+      1.8.1-1.8.8 đã xong: shared-kernel / modules/leave / modules/timesheet / modules/attendance /
+      workflows/ (record-check-in/out, import-attendance, create/review/cancel-request + tách 7 handler
+      request) / dọn code cũ / cập nhật CLAUDE.md. `npm test` ổn định `557/8` (2 suite lỗi cũ có sẵn từ
+      trước migration).
 - [ ] Phase 2 — `internal-file`
 - [ ] Phase 3 — `user`
 - [ ] Phase 4 — `department`
@@ -3354,10 +3355,140 @@ Timesheet/Leave); `workflows/import-attendance.workflow.ts` gộp đúng 4 chỗ
 2 suite lỗi cũ, không giảm số pass. `review-request.workflow.ts`/`cancel-request.workflow.ts` dời sang
 1.8.6 (cần tách 7 handler trước). Sẵn sàng sang 1.8.6.
 
-### 1.8.6 — 1.8.8 (tóm tắt, chi tiết hoá khi tới lượt)
+### 1.8.6 — Cutover `modules/request/` + tách 7 handler (chi tiết đầy đủ — ĐÃ XONG)
 
-| Sub-phase | Việc chính | Lưu ý đặc biệt |
-|---|---|---|
-| 1.8.6 Cutover `modules/request/` | `review-request.workflow.ts`/`cancel-request.workflow.ts` (dời từ 1.8.5) + đổi `review-request.service.ts`/`create-request.service.ts`/`cancel-request.service.ts` gọi qua `workflows/` cho action ghi; 7 handler `helpers/*Handler.js` chỉ còn `validate`/`validateAsync` (thuần Request), bỏ `onCreate`/`onApprove`/`onReject` (chuyển thành bước trong workflow) | Behavior-preserving nhưng đụng nhiều nhất — cần characterization test đầy đủ cho cả 7 loại đơn trước khi cutover |
-| 1.8.7 Xoá code cũ | Phần còn lại của `AttendanceController.js` liên quan check-in/out cũ | Chỉ xoá sau khi 1.8.6 xanh, characterization test xác nhận hành vi không đổi |
-| 1.8.8 Hoàn thiện | `CLAUDE.md`, tổng kết Phase 1.8 | — |
+**Phát hiện kiến trúc quan trọng trước khi code (đọc lại 4 luật mục 13 đối chiếu code thật):**
+`create/review/cancel-request.service.ts` hiện tự mở `runInTransaction()` RỒI tự dispatch
+`handler.onCreate/onApprove/onReject` (ghi Timesheet/Leave) **trong cùng transaction đó** — đảm bảo
+atomicity (đã có test xác nhận: lỗi ở `onCreate` → rollback, không lưu đơn — "rollback: handler.onCreate
+trả lỗi -> KHÔNG lưu Request document"). Nếu chuyển dispatch ra `workflows/` theo cách đơn giản (mở 2
+transaction riêng: 1 cho tạo đơn, 1 cho side-effect) sẽ **mất atomicity** — vi phạm CLAUDE.md ("ghi >1
+collection phải dùng transaction"). Giải pháp (không cần đụng `runInTransaction` core): tách mỗi service
+thành 1 hàm "chỉ ghi entity" nhận `session` từ ngoài (không tự mở transaction) — `workflows/` tự mở
+transaction, gọi hàm đó + dispatch side-effect trong CÙNG session.
+
+**Grep xác nhận trước khi refactor:** `create/review/cancel-request.service.ts` (bản cũ) chỉ có 2
+consumer — `request.http.controller.ts` + test file riêng của chính nó — an toàn để đổi hẳn
+signature/hành vi mà không cần giữ bản "tương thích ngược" nào khác.
+
+**Cấu trúc mới:**
+```
+src/workflows/
+  request-side-effects/
+    away-day.ts          # createOnApprove(status) — port helpers/awayDayHandler.js (đã xoá),
+                          # dùng chung cho remote/business_trip/client_visit
+    late-early.ts         # onApprove — port helpers/lateEarlyHandler.js's onApprove
+    forgot-checkin.ts      # onCreate/onApprove/onReject — port helpers/forgotCheckinHandler.js
+    leave.ts               # onCreate/onApprove/onReject — port helpers/leaveHandler.js (file lớn nhất)
+    index.ts                # REQUEST_SIDE_EFFECTS registry (Record<RequestType, {...}>)
+  create-request.workflow.ts   # runInTransaction + createRequestEntity + dispatch onCreate
+  review-request.workflow.ts   # lock + runInTransaction + reviewRequestEntity + dispatch onApprove/onReject
+  cancel-request.workflow.ts   # runInTransaction + cancelRequestEntity + dispatch onReject(isCancel=true)
+```
+
+**Bug thiết kế tự phát hiện + sửa trước khi verify (không đợi test fail):** bản đầu của
+`request-side-effects/index.ts` COPY từng hàm ra object literal mới
+(`{ onCreate: leave.onCreate, onApprove: leave.onApprove }`) thay vì giữ nguyên object module. Nhiều
+test hiện có (`create/review/cancel-request.test.js`, `requestApprovalFlow.test.js`) dùng
+`jest.spyOn(leaveHandler, "onApprove")` để mock side-effect — `jest.spyOn` mutate property NGAY TRÊN
+object được truyền vào; nếu registry copy giá trị hàm ra object riêng, spy sau đó không có tác dụng gì
+(registry vẫn giữ tham chiếu hàm gốc chưa bị mock) → toàn bộ test dựa vào spy sẽ pass giả (side-effect
+thật vẫn chạy, không phải bản mock) mà không báo lỗi rõ ràng. Phát hiện TRƯỚC khi chạy test (đọc lại
+thiết kế, nhớ lại cách `jest.spyOn` hoạt động), sửa bằng cách giữ nguyên object module làm value trong
+registry (`leave`, `lateEarly`, `forgotCheckin`) — property lookup lúc gọi (`sideEffects.onCreate(...)`)
+luôn đọc đúng giá trị mới nhất kể cả sau khi bị spy.
+
+**7 handler `helpers/*Handler.js` sau khi tách — chỉ còn `validate`/`validateAsync`:**
+`leaveHandler.js`, `lateEarlyHandler.js`, `forgotCheckinHandler.js`, `remoteHandler.js`,
+`businessTripHandler.js`, `clientVisitHandler.js` — `explanationHandler.js` không đổi gì (chưa từng có
+`onCreate/onApprove/onReject`). `helpers/awayDayHandler.js` xoá hẳn (logic chuyển nguyên sang
+`workflows/request-side-effects/away-day.ts`, không còn consumer nào khác ngoài 3 handler away-day).
+
+**3 service `modules/request/application/` sau khi tách:**
+- `create-request.service.ts`: `createRequestEntity(account, body, session)` — chỉ còn validate +
+  validateAsync + tạo entity + persist, không tự mở transaction, không dispatch `onCreate`.
+- `review-request.service.ts`: tách `acquireReviewLockIfNeeded(id, action)` (đọc trước để quyết định có
+  cần Redis lock hay không — giữ đúng cấu trúc gốc "đọc 2 lần tách biệt") +
+  `reviewRequestEntity(account, id, options, session)` (check quyền/chuỗi duyệt + approve/reject +
+  persist).
+- `cancel-request.service.ts`: `cancelRequestEntity(account, id, session)` — check chủ sở hữu +
+  cancel + persist.
+
+**Cutover `request.http.controller.ts`:** `create`/`review`/`cancel` đổi import từ
+`modules/request/application/*.service` sang `workflows/*.workflow` (giữ nguyên action đọc — `getAll`/
+`getById`/`getMyRequests`/`getEligibleReviewers` — vẫn gọi thẳng application service như cũ, đúng CQRS-lite
+đã chốt từ Phase 1).
+
+**Test — port 6 file, xoá 4 file cũ, phát hiện thêm 1 file bị bỏ sót ban đầu:**
+- `__tests__/workflows/create-request.workflow.test.js` (9 test, port từ `create-request.test.js`)
+- `__tests__/workflows/review-request.workflow.test.js` (20 test, port từ `review-request.test.js`)
+- `__tests__/workflows/cancel-request.workflow.test.js` (8 test, port từ `cancel-request.test.js`)
+- `__tests__/workflows/request-side-effects/forgot-checkin-approve.test.ts` (5 test, port từ
+  `forgotCheckinApprove.test.ts`)
+- `__tests__/workflows/request-side-effects/late-early-approve.test.ts` (3 test, port từ
+  `lateEarlyApprove.test.ts`)
+- `__tests__/workflows/request-side-effects/leave-approve-retroactive.test.js` (3 test — **phát hiện
+  sau khi chạy `npm test` toàn repo lần đầu**, bị bỏ sót lúc grep ban đầu vì import trực tiếp
+  `{ onApprove } = require(".../leaveHandler")` không khớp pattern grep đã dùng; port từ
+  `leaveRetroactive.test.js`)
+- `requestApprovalFlow.test.js` (không port, chỉ sửa 1 dòng import `leaveHandler` trỏ sang
+  `workflows/request-side-effects/leave` — file này gọi qua `requestHttpController` thật, tự động đi
+  qua toàn bộ luồng mới)
+- `requestControllerCreate.test.js` — **không cần sửa gì** (gọi qua `requestHttpController.create`/
+  `.review` thật, cutover controller đã đủ để test này chạy qua đúng luồng mới)
+
+Tất cả assertion giữ nguyên 100%, không sửa 1 dòng logic test nào (chỉ đổi import path + comment giải
+thích).
+
+**Bug flaky thật phát hiện SAU KHI báo xong task (không phải regression từ refactor) — đã sửa ngay:**
+chạy lại `npm test` toàn repo ở 1 thời điểm khác (sáng sớm giờ VN, +07) ra thêm 1 fail mới ở
+`create-request.workflow.test.js` (không liên quan 2 suite lỗi cũ) — điều tra bằng script thật (không
+suy đoán): helper `weekdayFromNow()` (port nguyên từ `create-request.test.js` gốc, có từ task 1.11) dùng
+`new Date()` + `.getDay()` (local system timezone) để check cuối tuần, nhưng lại `.toISOString()` (UTC)
+để lấy chuỗi ngày trả về. Khi máy chạy test vào giờ local buổi sáng sớm tại +07, UTC vẫn còn ở NGÀY HÔM
+TRƯỚC — lệch 1 ngày giữa ngày đã check-cuối-tuần (local) và chuỗi ngày thực trả về (UTC), có thể vô tình
+rơi đúng Chủ nhật theo cách `calcTotalDays` diễn giải (`moment.tz(dateStr, TZ)`, không phải UTC) →
+`total_days=0` → `validate()` throw 400 thay vì tạo đơn thành công như test kỳ vọng. Xác nhận đây là bug
+tiềm ẩn CÓ SẴN từ bản gốc (không phải do port sai — cùng loại lỗi timezone đã gặp nhiều lần trong dự án
+này, vd `shared-kernel/date-key.ts` task 1.8.1.2, `WorkSheetRepository` task 1.8.3.6), chỉ chưa từng lộ
+ra vì chưa ai chạy đúng lúc giờ local sớm. Sửa bằng `moment-timezone` nhất quán `Asia/Ho_Chi_Minh` cho
+CẢ 2 bước (check cuối tuần + tạo chuỗi ngày), không trộn local `Date` với UTC nữa. Verify lại: chạy 3
+lần liên tiếp đều pass, `npm test` toàn repo về đúng `557/8`.
+
+**Verify cuối:** `tsc --noEmit` sạch, `eslint` sạch trên toàn bộ ~20 file đụng tới, `npm run build`
+thành công. `npm test` toàn repo: **`557 passed/8 failed`** — **y hệt baseline trước khi bắt đầu 1.8.6**
+(đúng 2 suite lỗi cũ đã biết từ trước: `requestApprovalFlow.test.js` 3 fail +
+`approvalChain.test.js` 5 fail, tổng 8 — không tăng, không giảm). Vì đây là port thuần (không thêm/bớt
+test nào, chỉ dời chỗ), tổng số test PASS không đổi — con số giữ nguyên xác nhận không có regression
+nào từ lần refactor lớn nhất trong toàn bộ Phase 1.8.
+
+**Definition of done 1.8.6 — ĐÃ ĐẠT:** `modules/request/application/*.service.ts` không còn dispatch
+`handler.onCreate/onApprove/onReject` (đúng rule #1 mục 13 — không import module khác); toàn bộ
+orchestration xuyên Request+Timesheet+Leave sống ở `workflows/create/review/cancel-request.workflow.ts`;
+7 handler `helpers/*Handler.js` chỉ còn `validate`/`validateAsync`; `npm test` ổn định `557/8`, không
+regression.
+
+### 1.8.7 — Dọn code cũ còn sót (ĐÃ XONG)
+
+Grep toàn diện xác nhận: phần lớn đã dọn sạch ngay trong lúc làm 1.8.4/1.8.5/1.8.6 (Edit thay thế trực
+tiếp, không để code cũ nằm song song chờ dọn riêng — cùng khuôn đã áp dụng ở 1.8.4.12). Chỉ còn đúng 1
+việc thật: `RequestTypeHandler` (`modules/request/domain/types.ts`) vẫn khai `onCreate?/onApprove?/
+onReject?` dù không còn handler nào populate 3 field này nữa (đã chuyển hết sang
+`workflows/request-side-effects/`, task 1.8.6) — chỉ 1 consumer (`request-type-handlers.ts`), an toàn
+đơn giản hoá xuống còn `{validate, validateAsync}`. Verify: `tsc --noEmit` sạch, `npm test` không đổi.
+
+### 1.8.8 — Hoàn thiện (ĐÃ XONG)
+
+Cập nhật `CLAUDE.md`:
+- "Cấu trúc thư mục" — thêm `shared-kernel/`, `workflows/` (+ `request-side-effects/`), liệt kê đủ 4
+  module đã xong (`request`/`leave`/`timesheet`/`attendance`), đánh dấu `core/` 100% `.ts`.
+- "DDD + Hexagonal Architecture" — thêm mục mới `workflows/` (4 luật xuyên module + ví dụ
+  `review-request.workflow.ts`, phân biệt rõ với composition-root code cũ không bị luật này ràng buộc).
+  Cập nhật "Request-type handler" — chỉ còn `validate`/`validateAsync`, trỏ sang
+  `workflows/request-side-effects/`. Cập nhật "Trạng thái" — liệt kê đủ 4 module + workflows/ đã xong,
+  phần chưa migrate còn lại (`user`/`department`/`weekly-report`/`chat`/`post`/`labor-contract`).
+
+**Phase 1.8 — TOÀN BỘ ĐÃ HOÀN TẤT** (1.8.1 → 1.8.8). `npm test` toàn repo ổn định `557 passed/8 failed`
+— đúng 2 suite lỗi cũ có từ trước migration (`requestApprovalFlow.test.js`, `approvalChain.test.js`,
+gap nghiệp vụ ở `getApprovalChain` chưa đi lên phòng ban cha — ngoài phạm vi Phase 1.8, cần bàn riêng
+nếu muốn sửa). `npm run build` thành công. Sẵn sàng sang Phase 2 (`internal-file`).

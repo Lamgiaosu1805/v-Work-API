@@ -1,14 +1,14 @@
 import mongoose from "mongoose";
 import moment from "moment-timezone";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
-import { onApprove } from "../src/helpers/forgotCheckinHandler";
-import { ForgotCheckinRequest } from "../src/models/RequestModel";
-import UserInfoModel from "../src/models/UserInfoModel";
-import WorkSheetModel from "../src/models/WorkSheetModel";
-import WorkDayStatusModel from "../src/models/WorkDayStatusModel";
-import LeaveBalanceModel from "../src/models/LeaveBalanceModel";
-import AttendancePenaltyModel from "../src/models/AttendancePenaltyModel";
-import redisMock from "./mocks/redis";
+import { onApprove } from "../../../src/workflows/request-side-effects/forgot-checkin";
+import { ForgotCheckinRequest } from "../../../src/models/RequestModel";
+import UserInfoModel from "../../../src/models/UserInfoModel";
+import WorkSheetModel from "../../../src/models/WorkSheetModel";
+import WorkDayStatusModel from "../../../src/models/WorkDayStatusModel";
+import LeaveBalanceModel from "../../../src/models/LeaveBalanceModel";
+import AttendancePenaltyModel from "../../../src/models/AttendancePenaltyModel";
+import redisMock from "../../mocks/redis";
 
 const TZ = "Asia/Ho_Chi_Minh";
 const MONTH_ANCHOR = "2026-06-01"; // cố định, không phụ thuộc ngày chạy test
@@ -40,10 +40,8 @@ let replset: MongoMemoryReplSet;
 let userInfo: any;
 
 beforeAll(async () => {
-  // Đổi từ MongoMemoryServer -> MongoMemoryReplSet (task 1.8.3.6): onApprove dùng session/transaction
-  // (qua modules/timesheet's repository), MongoMemoryServer không hỗ trợ transaction — đây chính là
-  // lý do suite này nằm trong danh sách "lỗi cũ đã biết" trước đây (lỗi môi trường test, không phải
-  // bug nghiệp vụ, đã verify: code cũ cũng pass hết nếu chỉ đổi ReplSet, không cần sửa logic).
+  // onApprove dùng session/transaction (qua modules/timesheet's repository), cần MongoMemoryReplSet
+  // (không hỗ trợ transaction trên MongoMemoryServer thường) — xem giải thích đầy đủ ở task 1.8.3.6.
   replset = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replset.getUri());
 
@@ -104,7 +102,7 @@ async function approveRequest({
     expected_check_out: expected_check_out ?? null,
     status: "approved"
   });
-  await onApprove(request, null);
+  await onApprove(request, null as any);
   return request;
 }
 

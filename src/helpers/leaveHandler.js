@@ -10,6 +10,7 @@ const ShiftModel = require("../models/ShiftModel");
 const { calcTotalDays, buildWorkDatesWithStatus } = require("./requestUtils");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 const { getLeaveBalance, adjustLeaveBalance, LeaveLockTimeoutError } = require("../modules/leave");
+const { applyLeaveConflictOverride } = require("../modules/timesheet");
 const { ArgumentInvalidException } = require("../core/exceptions/exceptions");
 const { LEAVE_BALANCE_REASON } = require("../constants");
 
@@ -295,15 +296,28 @@ async function onApprove(request, session) {
   for (const w of refreshed) {
     if (!w.check_in || !w.check_out) continue;
     const lastShift = w.shifts?.length ? w.shifts[w.shifts.length - 1] : null;
-    await resolveLeaveConflictOnAttendance({
-      userId: request.user_id,
-      worksheetId: w._id,
-      date: moment.tz(w.date, TZ).format("YYYY-MM-DD"),
+    // eslint-disable-next-line no-await-in-loop
+    const { leaveRefundAmount } = await applyLeaveConflictOverride({
+      userId: request.user_id.toString(),
+      worksheetId: w._id.toString(),
+      dateKey: moment.tz(w.date, TZ).format("YYYY-MM-DD"),
       checkInTime: w.check_in,
       checkOutTime: w.check_out,
       lastShiftEnd: lastShift?.end_time ?? null,
       session
     });
+    if (leaveRefundAmount > 0) {
+      // eslint-disable-next-line no-await-in-loop
+      await adjustLeaveBalance({
+        userId: request.user_id,
+        amount: leaveRefundAmount,
+        reason: LEAVE_BALANCE_REASON.ATTENDANCE_OVERRIDE_REFUND,
+        refId: w._id,
+        refType: "system",
+        allowNegative: true,
+        session
+      });
+    }
   }
 }
 
@@ -321,87 +335,10 @@ async function onReject(request, session, isCancel = false) {
   }
 }
 
-async function resolveLeaveConflictOnAttendance({
-  userId,
-  worksheetId,
-  date,
-  checkInTime,
-  checkOutTime,
-  lastShiftEnd,
-  session
-}) {
-  if (!checkInTime || !checkOutTime) return;
-
-  const dateStart = moment.tz(date, TZ).startOf("day").toDate();
-  const dateEnd = moment.tz(date, TZ).endOf("day").toDate();
-
-  const leaveStatuses = await WorkDayStatusModel.find({
-    user_id: userId,
-    date: { $gte: dateStart, $lte: dateEnd },
-    status: { $in: ["leave_paid", "leave_unpaid"] },
-    isDeleted: false
-  }).session(session);
-
-  if (!leaveStatuses.length) return;
-
-  const noon = moment.tz(date, TZ).hour(12).minute(0).second(0);
-  const checkIn = checkInTime ? moment.tz(checkInTime, TZ) : null;
-  const checkOut = checkOutTime ? moment.tz(checkOutTime, TZ) : null;
-
-  const coversMorning = !!checkIn && checkIn.isBefore(noon);
-
-  let coversAfternoon = false;
-  if (checkOut && lastShiftEnd) {
-    const [endH, endM] = lastShiftEnd.split(":").map(Number);
-    const shiftEndMoment = moment.tz(date, TZ).hour(endH).minute(endM).second(0);
-    const threshold = shiftEndMoment.clone().subtract(60, "minutes");
-    coversAfternoon = checkOut.isSameOrAfter(threshold);
-  }
-
-  let totalRefund = 0;
-
-  for (const ls of leaveStatuses) {
-    const shouldOverride =
-      (ls.period === "morning" && coversMorning) ||
-      (ls.period === "afternoon" && coversAfternoon) ||
-      (ls.period === "full" && coversMorning && coversAfternoon);
-
-    if (!shouldOverride) continue;
-
-    await WorkDayStatusModel.findByIdAndUpdate(
-      ls._id,
-      {
-        status: "present",
-        worksheet_id: worksheetId,
-        $addToSet: { sources: { ref_id: worksheetId, ref_type: "attendance" } }
-      },
-      { session }
-    );
-
-    if (ls.status === "leave_paid") {
-      const isSaturday = moment.tz(ls.date, TZ).day() === 6;
-      totalRefund += ls.period === "full" && !isSaturday ? 1 : 0.5;
-    }
-  }
-
-  if (totalRefund > 0) {
-    await adjustLeaveBalance({
-      userId,
-      amount: totalRefund,
-      reason: LEAVE_BALANCE_REASON.ATTENDANCE_OVERRIDE_REFUND,
-      refId: worksheetId,
-      refType: "system",
-      allowNegative: true,
-      session
-    });
-  }
-}
-
 module.exports = {
   validate,
   validateAsync,
   onCreate,
   onApprove,
-  onReject,
-  resolveLeaveConflictOnAttendance
+  onReject
 };

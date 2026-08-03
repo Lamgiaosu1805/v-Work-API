@@ -1,22 +1,21 @@
-const mongoose = require("mongoose");
-const moment = require("moment-timezone");
-const { MongoMemoryServer } = require("mongodb-memory-server");
-
-const { onApprove } = require("../src/helpers/forgotCheckinHandler");
-const { ForgotCheckinRequest } = require("../src/models/RequestModel");
-const UserInfoModel = require("../src/models/UserInfoModel");
-const WorkSheetModel = require("../src/models/WorkSheetModel");
-const WorkDayStatusModel = require("../src/models/WorkDayStatusModel");
-const LeaveBalanceModel = require("../src/models/LeaveBalanceModel");
-const AttendancePenaltyModel = require("../src/models/AttendancePenaltyModel");
-const redisMock = require("./mocks/redis");
+import mongoose from "mongoose";
+import moment from "moment-timezone";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
+import { onApprove } from "../src/helpers/forgotCheckinHandler";
+import { ForgotCheckinRequest } from "../src/models/RequestModel";
+import UserInfoModel from "../src/models/UserInfoModel";
+import WorkSheetModel from "../src/models/WorkSheetModel";
+import WorkDayStatusModel from "../src/models/WorkDayStatusModel";
+import LeaveBalanceModel from "../src/models/LeaveBalanceModel";
+import AttendancePenaltyModel from "../src/models/AttendancePenaltyModel";
+import redisMock from "./mocks/redis";
 
 const TZ = "Asia/Ho_Chi_Minh";
 const MONTH_ANCHOR = "2026-06-01"; // cố định, không phụ thuộc ngày chạy test
 
-function weekdaysInMonth(count) {
-  const dates = [];
-  let m = moment.tz(MONTH_ANCHOR, TZ).startOf("month");
+function weekdaysInMonth(count: number): string[] {
+  const dates: string[] = [];
+  const m = moment.tz(MONTH_ANCHOR, TZ).startOf("month");
   while (dates.length < count) {
     if (m.day() !== 0 && m.day() !== 6) dates.push(m.format("YYYY-MM-DD"));
     m.add(1, "day");
@@ -24,9 +23,9 @@ function weekdaysInMonth(count) {
   return dates;
 }
 
-function saturdaysInMonth(count) {
-  const dates = [];
-  let m = moment.tz(MONTH_ANCHOR, TZ).startOf("month");
+function saturdaysInMonth(count: number): string[] {
+  const dates: string[] = [];
+  const m = moment.tz(MONTH_ANCHOR, TZ).startOf("month");
   while (dates.length < count) {
     if (m.day() === 6) dates.push(m.format("YYYY-MM-DD"));
     m.add(1, "day");
@@ -34,14 +33,19 @@ function saturdaysInMonth(count) {
   return dates;
 }
 
-const at = (dateKey, hhmm) => moment.tz(`${dateKey} ${hhmm}`, "YYYY-MM-DD HH:mm", TZ).toDate();
+const at = (dateKey: string, hhmm: string) =>
+  moment.tz(`${dateKey} ${hhmm}`, "YYYY-MM-DD HH:mm", TZ).toDate();
 
-let mongod;
-let userInfo;
+let replset: MongoMemoryReplSet;
+let userInfo: any;
 
 beforeAll(async () => {
-  mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri());
+  // Đổi từ MongoMemoryServer -> MongoMemoryReplSet (task 1.8.3.6): onApprove dùng session/transaction
+  // (qua modules/timesheet's repository), MongoMemoryServer không hỗ trợ transaction — đây chính là
+  // lý do suite này nằm trong danh sách "lỗi cũ đã biết" trước đây (lỗi môi trường test, không phải
+  // bug nghiệp vụ, đã verify: code cũ cũng pass hết nếu chỉ đổi ReplSet, không cần sửa logic).
+  replset = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+  await mongoose.connect(replset.getUri());
 
   await AttendancePenaltyModel.create({
     type: "forgot",
@@ -57,7 +61,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await mongoose.disconnect();
-  await mongod.stop();
+  await replset.stop();
 });
 
 beforeEach(async () => {
@@ -81,7 +85,17 @@ beforeEach(async () => {
   });
 });
 
-async function approveRequest({ date, type, expected_check_in, expected_check_out }) {
+async function approveRequest({
+  date,
+  type,
+  expected_check_in,
+  expected_check_out
+}: {
+  date: string;
+  type: string;
+  expected_check_in?: Date;
+  expected_check_out?: Date;
+}) {
   const request = await ForgotCheckinRequest.create({
     user_id: userInfo._id,
     date: moment.tz(date, TZ).startOf("day").toDate(),
@@ -114,7 +128,7 @@ test("duyệt đơn quên check-in: cứu giờ ra về thật + tính đúng wo
     expected_check_in: at(dateKey, "08:00")
   });
 
-  const ws = await WorkSheetModel.findOne({ user_id: userInfo._id });
+  const ws: any = await WorkSheetModel.findOne({ user_id: userInfo._id });
   expect(ws.check_in).toEqual(at(dateKey, "08:00"));
   expect(ws.check_out).toEqual(at(dateKey, "18:00")); // được cứu lại, không mất
   expect(ws.work_unit).toBe(1); // lần 1 trong tháng, chưa vượt giới hạn -> đủ công
@@ -122,14 +136,16 @@ test("duyệt đơn quên check-in: cứu giờ ra về thật + tính đúng wo
 
 test("quên chấm công lần thứ 4 trong tháng (ngày thường): work_unit = 0.5 (nửa công)", async () => {
   const dates = weekdaysInMonth(4);
-  let lastWorksheet;
+  let lastWorksheet: any;
   for (const dateKey of dates) {
+    // eslint-disable-next-line no-await-in-loop
     await approveRequest({
       date: dateKey,
       type: "both",
       expected_check_in: at(dateKey, "08:00"),
       expected_check_out: at(dateKey, "17:30")
     });
+    // eslint-disable-next-line no-await-in-loop
     lastWorksheet = await WorkSheetModel.findOne({
       user_id: userInfo._id,
       date: moment.tz(dateKey, TZ).startOf("day").toDate()
@@ -137,7 +153,7 @@ test("quên chấm công lần thứ 4 trong tháng (ngày thường): work_unit
   }
   expect(lastWorksheet.work_unit).toBe(0.5);
 
-  const firstWorksheet = await WorkSheetModel.findOne({
+  const firstWorksheet: any = await WorkSheetModel.findOne({
     user_id: userInfo._id,
     date: moment.tz(dates[0], TZ).startOf("day").toDate()
   });
@@ -152,7 +168,7 @@ test("quên chấm công Thứ 7 trong giới hạn cho phép: work_unit = 0.5",
     expected_check_in: at(saturday, "08:00"),
     expected_check_out: at(saturday, "12:00")
   });
-  const ws = await WorkSheetModel.findOne({ user_id: userInfo._id });
+  const ws: any = await WorkSheetModel.findOne({ user_id: userInfo._id });
   expect(ws.work_unit).toBe(0.5);
 });
 
@@ -161,6 +177,7 @@ test("quên chấm công Thứ 7 nhưng đã vượt giới hạn (lần 4 trong
   const [saturday] = saturdaysInMonth(1);
 
   for (const dateKey of weekdays) {
+    // eslint-disable-next-line no-await-in-loop
     await approveRequest({
       date: dateKey,
       type: "both",
@@ -176,7 +193,7 @@ test("quên chấm công Thứ 7 nhưng đã vượt giới hạn (lần 4 trong
     expected_check_out: at(saturday, "12:00")
   });
 
-  const ws = await WorkSheetModel.findOne({
+  const ws: any = await WorkSheetModel.findOne({
     user_id: userInfo._id,
     date: moment.tz(saturday, TZ).startOf("day").toDate()
   });
@@ -189,6 +206,7 @@ test("bộ đếm hợp nhất: 3 ngày thiếu 1 chiều không có đơn + 1 �
 
   // 3 ngày đầu: chỉ có check_in (thiếu check_out), không có đơn quên chấm công nào.
   for (const dateKey of [d1, d2, d3]) {
+    // eslint-disable-next-line no-await-in-loop
     await WorkSheetModel.create({
       user_id: userInfo._id,
       date: moment.tz(dateKey, TZ).startOf("day").toDate(),
@@ -206,7 +224,7 @@ test("bộ đếm hợp nhất: 3 ngày thiếu 1 chiều không có đơn + 1 �
     expected_check_out: at(d4, "17:30")
   });
 
-  const ws4 = await WorkSheetModel.findOne({
+  const ws4: any = await WorkSheetModel.findOne({
     user_id: userInfo._id,
     date: moment.tz(d4, TZ).startOf("day").toDate()
   });

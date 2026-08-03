@@ -2,17 +2,16 @@ const moment = require("moment-timezone");
 const { RequestModel } = require("../models/RequestModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
+const { normalizeDayPunches } = require("./attendanceHelper");
 const {
-  normalizeDayPunches,
-  resolveAttendanceDay,
-  saveAttendanceDay
-} = require("./attendanceHelper");
-const {
+  processAttendanceDay,
+  getWorksheetForDay,
+  recordRawPunch,
   buildLatePenaltyResolver,
   buildEarlyPenaltyResolver,
   buildForgotPenaltyResolver,
   buildUnifiedForgotOccurrenceMap
-} = require("./attendancePenalty");
+} = require("../modules/timesheet");
 const { getPayrollPeriodRange } = require("./payrollPeriod");
 const { buildUserDayContext } = require("../jobs/finalizeWorkDay");
 
@@ -182,11 +181,7 @@ async function onApprove(request, session) {
   const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
   const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
 
-  const existing = await WorkSheetModel.findOne({
-    user_id: request.user_id,
-    date: { $gte: dateStart, $lte: dateEnd },
-    isDeleted: false
-  }).session(session);
+  const existing = await getWorksheetForDay(request.user_id.toString(), dateStart, session);
 
   const clockUpdate = {};
   if (request.expected_check_in) {
@@ -212,30 +207,13 @@ async function onApprove(request, session) {
     clockUpdate.check_out = new Date(request.expected_check_out);
   }
 
-  const updated = await WorkSheetModel.findOneAndUpdate(
-    {
-      user_id: request.user_id,
-      date: { $gte: dateStart, $lte: dateEnd },
-      isDeleted: false
-    },
-    clockUpdate,
-    { session, new: true }
-  );
-
-  if (!updated) {
-    await WorkSheetModel.create(
-      [{ user_id: request.user_id, date: dateStart, shifts: [], ...clockUpdate }],
-      { session }
-    );
-  }
-
-  const worksheet = await WorkSheetModel.findOne({
-    user_id: request.user_id,
-    date: { $gte: dateStart, $lte: dateEnd },
-    isDeleted: false
-  })
-    .populate("shifts")
-    .session(session);
+  const worksheet = await recordRawPunch({
+    userId: request.user_id.toString(),
+    date: dateStart,
+    checkIn: clockUpdate.check_in,
+    checkOut: clockUpdate.check_out,
+    session
+  });
 
   const dateKey = moment.tz(request.date, TZ).format("YYYY-MM-DD");
   const { start: periodStart, end: periodEnd } = getPayrollPeriodRange(request.date);
@@ -255,7 +233,9 @@ async function onApprove(request, session) {
       buildForgotPenaltyResolver()
     ]);
 
-  const computed = resolveAttendanceDay({
+  await processAttendanceDay({
+    userId: request.user_id.toString(),
+    worksheetId: worksheet.id,
     dateKey,
     rawIn: worksheet.check_in ? moment.tz(worksheet.check_in, TZ).format("HH:mm") : null,
     rawOut: worksheet.check_out ? moment.tz(worksheet.check_out, TZ).format("HH:mm") : null,
@@ -263,11 +243,9 @@ async function onApprove(request, session) {
     ...context,
     resolveLatePenalty,
     resolveEarlyPenalty,
-    resolveForgotPenalty
+    resolveForgotPenalty,
+    session
   });
-  if (computed.skip) return;
-
-  await saveAttendanceDay({ userId: request.user_id, dateKey, worksheet, computed, session });
 }
 
 module.exports = { validate, validateAsync, onCreate, onReject, onApprove };

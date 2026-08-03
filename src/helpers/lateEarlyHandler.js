@@ -1,14 +1,14 @@
 const moment = require("moment-timezone");
 const mongoose = require("mongoose");
 const { RequestModel } = require("../models/RequestModel");
-const WorkSheetModel = require("../models/WorkSheetModel");
 const { getPayrollPeriodRange } = require("./payrollPeriod");
-const { resolveAttendanceDay, saveAttendanceDay } = require("./attendanceHelper");
 const {
+  processAttendanceDay,
+  getWorksheetForDay,
   buildLatePenaltyResolver,
   buildEarlyPenaltyResolver,
   buildForgotPenaltyResolver
-} = require("./attendancePenalty");
+} = require("../modules/timesheet");
 const { buildUserDayContext } = require("../jobs/finalizeWorkDay");
 
 const TZ = "Asia/Ho_Chi_Minh";
@@ -59,13 +59,7 @@ async function onApprove(request, session) {
   const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
   const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
 
-  const worksheet = await WorkSheetModel.findOne({
-    user_id: request.user_id,
-    date: { $gte: dateStart, $lte: dateEnd },
-    isDeleted: false
-  })
-    .populate("shifts")
-    .session(session);
+  const worksheet = await getWorksheetForDay(request.user_id.toString(), dateStart, session);
   if (!worksheet || (!worksheet.check_in && !worksheet.check_out)) return;
 
   const { start: periodStart, end: periodEnd } = getPayrollPeriodRange(request.date);
@@ -85,7 +79,9 @@ async function onApprove(request, session) {
       buildForgotPenaltyResolver()
     ]);
 
-  const computed = resolveAttendanceDay({
+  await processAttendanceDay({
+    userId: request.user_id.toString(),
+    worksheetId: worksheet.id,
     dateKey,
     rawIn: worksheet.check_in ? moment.tz(worksheet.check_in, TZ).format("HH:mm") : null,
     rawOut: worksheet.check_out ? moment.tz(worksheet.check_out, TZ).format("HH:mm") : null,
@@ -93,11 +89,9 @@ async function onApprove(request, session) {
     ...context,
     resolveLatePenalty,
     resolveEarlyPenalty,
-    resolveForgotPenalty
+    resolveForgotPenalty,
+    session
   });
-  if (computed.skip) return;
-
-  await saveAttendanceDay({ userId: request.user_id, dateKey, worksheet, computed, session });
 }
 
 module.exports = { validate, validateAsync, onApprove };

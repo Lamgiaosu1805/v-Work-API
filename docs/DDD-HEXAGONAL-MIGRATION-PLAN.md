@@ -2022,37 +2022,967 @@ Value object thuần, không phụ thuộc gì, rủi ro thấp nhất trong to�
 
 ### 1.8.2 — `modules/leave/` (chi tiết đầy đủ, làm tiếp theo 1.8.1)
 
+**Câu hỏi người dùng nêu lại (đáng ghi rõ, dễ nhầm lẫn):** "leave" không nằm trong Request à? — cần
+phân biệt 2 thứ khác nhau đang trùng tên "leave":
+
+1. **"leave" — 1 trong 7 loại đơn của `RequestEntity`** (cùng loại với late_early/remote/
+   business_trip...) — **vẫn thuộc `modules/request/`**, không đổi gì. Workflow duyệt/từ chối/huỷ của
+   đơn nghỉ phép vẫn là Request lo.
+2. **`LeaveBalance` — sổ cái số ngày phép còn lại** (`helpers/leaveBalance.js`, sắp thành
+   `modules/leave/`) — đây mới là cái tách ra ở đây.
+
+Lý do tách #2 khỏi Request: áp đúng quy tắc "vị trí quyết định bởi ai thực sự tiêu thụ" (mục 3/5).
+Grep thật xác nhận `adjustLeaveBalance`/`getLeaveBalance` có **4 consumer độc lập, không liên quan
+nhau** (đã sửa lại 2 lần: từ "4" ban đầu xuống "3" — loại `jobs/accrueMonthlyLeave.js` vì KHÔNG thực
+sự dùng module này, tự `insertMany` trực tiếp — rồi phát hiện thêm 1 consumer đọc-thuần bị bỏ sót khi
+chỉ grep theo `adjustLeaveBalance`, nâng lại lên đúng "4"):
+- `helpers/leaveHandler.js` — Request (khi tạo/duyệt/huỷ đơn nghỉ phép, trừ/hoàn ngày). Ghi (qua
+  `adjustLeaveBalance`) + đọc (`getLeaveBalance`, dùng để tính `total_days` khi tạo đơn).
+- `jobs/autoRejectLeaveRequests.js` — cron tự động, không qua workflow duyệt của ai. Chỉ ghi.
+- `controllers/UserController.js` — **HR chỉnh tay số ngày phép của nhân viên từ trang hồ sơ**, hoàn
+  toàn không liên quan gì tới việc có đơn nào được tạo/duyệt hay không. Ghi + đọc (hiển thị lại số dư
+  sau khi chỉnh).
+- `controllers/AttendanceController.js` — **phát hiện thêm ở task 1.8.2.5**, bị bỏ sót khi đếm "3" vì
+  chỉ grep `adjustLeaveBalance` (nhánh ghi) mà không grep riêng `getLeaveBalance`. Chỉ ĐỌC (2 chỗ:
+  hiển thị số dư hiện tại + số dư dự phóng theo tháng ở trang chấm công/hồ sơ nhân viên), không ghi,
+  không cần lock.
+
+Điểm thứ 3 là bằng chứng quyết định: sổ cái phép có thể bị chỉnh sửa **không thông qua bất kỳ Request
+nào** — nghĩa là không phải "1 phần phụ thuộc của Request" mà là 1 khái niệm độc lập (ledger) mà Request
+chỉ là 1 trong nhiều bên tác động vào, giống hệt User (qua `UserController`) và cron. Nếu nhét
+`LeaveBalance` vào `modules/request/domain/`, `UserController` (thuộc User context) sẽ phải "thò tay"
+vào domain của Request để chỉnh phép — vi phạm luật #1 đã chốt ở kiến trúc dài hạn (mục 13). So sánh
+ngược lại: `getApprovalChain`/`resolveReviewerProfileByAccountId` (task 1.9b) grep ra **chỉ Request
+dùng** nên đúng là chuyển vào `modules/request/domain/` — `LeaveBalance` grep ra ngược lại nên đúng là
+tách riêng.
+
 Context nhỏ nhất, logic hiện tại (`helpers/leaveBalance.js`) đã đúng (Redis lock, invariant không-âm)
 — chỉ cần bọc lại đúng khuôn DDD, KHÔNG đổi logic nghiệp vụ:
 
-- [ ] 1.8.2.1 — Characterization test cho `helpers/leaveBalance.js` hiện tại (nếu chưa đủ test trực
-      tiếp — kiểm tra trước, không viết trùng nếu đã có) — lưới an toàn trước khi port.
-- [ ] 1.8.2.2 — `modules/leave/domain/leave-balance.entity.ts` + `leave-balance.errors.ts`: model hoá
-      invariant hiện có (không âm trừ khi `allowNegative`) thành Entity, dùng `Money`
-      (`shared-kernel/money.ts`) cho `amount`.
-- [ ] 1.8.2.3 — `modules/leave/infrastructure/leave.repository.ts`: bọc `LeaveBalanceModel` — nơi DUY
-      NHẤT được require model này sau khi cutover xong.
-- [ ] 1.8.2.4 — `modules/leave/application/adjust-leave-balance.service.ts`: port `adjustLeaveBalance`
-      (giữ nguyên Redis lock qua `acquireUserLeaveLock`, giữ nguyên tên lý do
-      `LEAVE_BALANCE_REASON_VALUES`).
-- [ ] 1.8.2.5 — `modules/leave/index.ts`: public API — chỉ export application service, không export
-      domain/infrastructure ra ngoài (đúng luật #2 ở mục 13).
-- [ ] 1.8.2.6 — Cutover 4 consumer hiện tại (`leaveHandler.js`, `jobs/accrueMonthlyLeave.js`,
-      `jobs/autoRejectLeaveRequests.js`, `controllers/UserController.js`) sang gọi
-      `modules/leave/index.ts` thay vì `helpers/leaveBalance.js` trực tiếp — verify bằng
-      characterization test 1.8.2.1 xanh không đổi.
-- [ ] 1.8.2.7 — Xoá `helpers/leaveBalance.js` sau khi xác nhận không còn ai require.
+- [x] 1.8.2.1 — Characterization test — **đã có sẵn**, không cần viết mới:
+      `__tests__/leaveBalance.test.js` cover đầy đủ SUM đúng, `isDeleted` filter, cô lập theo user,
+      chặn âm, `allowNegative`, guard amount/reason, `balance_after` snapshot semantics, và cả **race
+      test thật** (2 lệnh đồng thời, xác nhận Redis lock hoạt động đúng). Dùng làm lưới an toàn cho các
+      task sau.
+- [x] 1.8.2.2a — `modules/leave/domain/leave-balance.errors.ts`: `InsufficientLeaveBalanceError`
+      (`extends ArgumentInvalidException`, 400 — invariant thật, khác input validation thuần) +
+      `LeaveLockTimeoutError` (`extends ConflictException`, 409). Verify thật: `code`/`statusCode` khớp
+      đúng `LeaveBalanceError` cũ (400/409).
+- [x] 1.8.2.2b — `modules/leave/domain/leave-balance.entity.ts`: model hoá invariant hiện có (không âm
+      trừ khi `allowNegative`) thành Entity (định danh bởi `EmployeeId` — không có 1 document duy nhất
+      cho mỗi nhân viên trong DB, `amount` là kết quả `$sum` từ nhiều dòng ledger, nên Entity ở đây là
+      "trạng thái đã reconstitute", không phải load-1-document-rồi-save"), dùng `Money`
+      (`shared-kernel/money.ts`) cho `amount`. `applyAdjustment(delta, allowNegative)` chỉ tính +
+      kiểm tra invariant, KHÔNG tự ghi DB (application service ở 1.8.2.4 chịu trách nhiệm ghi ledger).
+      Verify thật (script chạy qua `ts-node/register/transpile-only`): `reconstitute(EmployeeId.of(
+      'emp-1'), Money.of(2)).applyAdjustment(Money.of(-5), true)` → `-3` (khớp test gốc "allowNegative:
+      true — thành công, balance âm đúng như kỳ vọng"); `applyAdjustment(Money.of(-5), false)` → throw
+      `InsufficientLeaveBalanceError` statusCode 400 (khớp test gốc "chặn âm mặc định — throw");
+      `balance.id === "emp-1"` xác nhận `EmployeeId` được dùng đúng làm identity. `tsc --noEmit` +
+      `eslint` sạch. Full suite `npx jest --runInBand`: ổn định `382 passed / 17 failed` (đúng 4 suite
+      lỗi cũ đã biết: `requestApprovalFlow`, `forgotCheckinApprove`, `approvalChain`,
+      `attendanceMerge`) — không giảm, không có suite mới fail. (1 lần chạy đầu ra `23 failed/376
+      passed` bất thường, chạy lại ngay lập tức cho kết quả ổn định như trên → xác nhận flaky/transient
+      của môi trường chạy test, không phải regression do file mới.)
 
-**Definition of done 1.8.2:** `LeaveBalance` có module DDD đầy đủ, 4 consumer cũ cutover xong,
-`helpers/leaveBalance.js` xoá sạch, `npm test` không giảm số pass.
+      **Bug thật phát hiện qua review của người dùng (vòng 2):** bản đầu `applyAdjustment()` tính
+      `newBalance` và kiểm tra invariant nhưng chỉ `return newBalance` — KHÔNG mutate `this.props.amount`.
+      Trái với chính quy ước đã có sẵn trong module `request` (`RequestEntity` dùng `this._setProps(...)`
+      sau mỗi hành vi nghiệp vụ để repository/mapper đọc lại qua `getProps()`) — 1 method có tên mang ý
+      nghĩa mệnh lệnh ("apply") mà không mutate state là gây hiểu lầm ngược, caller có thể tưởng entity
+      đã đổi nhưng `leaveBalance.amount` vẫn là giá trị cũ.
 
-### 1.8.3 — 1.8.8 (tóm tắt, chi tiết hoá khi tới lượt)
+      **Fix:** thêm `this._setProps({ amount: newBalance.toNumber() })` ngay sau khi invariant check qua
+      (trước khi return) — throw vẫn xảy ra TRƯỚC `_setProps` nên state giữ nguyên nếu vi phạm invariant
+      (đã verify: gọi `applyAdjustment` với case throw xong, `amount` không đổi). Method vẫn trả về
+      `Money` mới để application service dùng ghi `balance_after` vào dòng ledger mà không cần tính lại
+      — entity không tự ghi DB, chỉ mutate in-memory state của chính nó. Verify thật bằng script: gọi
+      `applyAdjustment(Money.of(-5), true)` trên balance ban đầu 2 → cả giá trị trả về VÀ
+      `entity.amount.toNumber()` sau đó đều là `-3`; gọi case throw (`allowNegative: false`) xong,
+      `entity.amount.toNumber()` vẫn giữ nguyên `2` (không bị mutate một phần). `tsc`/`eslint` sạch,
+      full suite lại `382 passed / 17 failed`, không regression.
+- [x] 1.8.2.3 — `modules/leave/infrastructure/leave-balance.repository.ts`: bọc `LeaveBalanceModel` —
+      nơi DUY NHẤT được require model này sau khi cutover xong (1.8.2.6/1.8.2.7). `LeaveBalanceRepository`
+      có 2 method: `getBalance(employeeId, session?)` (port nguyên `getLeaveBalance` — aggregate `$sum`
+      filter `isDeleted: false`, trả về `LeaveBalance.reconstitute(...)`) và
+      `appendLedgerEntry(entry, session?)` (port phần insert ledger row của `adjustLeaveBalance`, nhận
+      `balanceAfter: Money` để ghi `balance_after`).
+
+      **Quyết định thiết kế đáng chú ý — session:** không chỉ đọc session qua
+      `RequestContextService.getTransactionSession()` (khác `MongooseRepositoryBase` của `request`).
+      Lý do: grep xác nhận 2/3 consumer GHI (`jobs/autoRejectLeaveRequests.js`,
+      `controllers/UserController.js` — chưa tính `controllers/AttendanceController.js`, consumer đọc-
+      thuần phát hiện sau ở 1.8.2.5, không cần session) tự tạo session bằng `mongoose.startSession()`
+      trực tiếp, KHÔNG chạy trong `RequestContextService.runChild` — chỉ `leaveHandler.js` mới nằm
+      trong context đó (được gọi từ trong `runInTransaction` của `review-request.service.ts`, đã verify
+      qua đọc `review-request.service.ts:108-110`). Nếu repository chỉ dựa AsyncLocalStorage, 2 consumer
+      ghi kia sẽ
+      mất transaction một cách âm thầm ngay khi cutover (1.8.2.6) — nên mỗi method nhận `session?` tường
+      minh (giữ đúng signature gốc của `helpers/leaveBalance.js`), chỉ fallback
+      `RequestContextService` khi caller không truyền vào.
+
+      Verify thật bằng script với `MongoMemoryServer` (không cần replset vì chưa test transaction thật
+      ở bước này, chỉ verify persistence logic): balance rỗng = 0; 2 ledger entry (+12, -3) của 1 nhân
+      viên → balance = 9; ledger của nhân viên khác không lẫn vào; soft-delete 1 dòng → bị loại khỏi
+      `$sum` đúng như `isDeleted: false` filter gốc; các field ghi vào document (`ref_id`/`ref_type`
+      default `null`, `note` default `""`, `created_by` default `null`, `balance_after` đúng giá trị)
+      khớp chính xác. `tsc --noEmit` + `eslint` sạch. Full suite ổn định `382/17` (1 lần chạy ra
+      `381/18` do `kpiDailyReport.test.js` — không liên quan gì đến leave module — chạy lại ngay cho
+      kết quả ổn định → xác nhận flaky, không phải regression).
+
+      **Race condition thật phát hiện qua review của người dùng:** `getBalance()` và
+      `appendLedgerEntry()` là 2 lời gọi rời nhau, không có gì khoá giữa chừng. Người dùng đặt đúng câu
+      hỏi: bọc cả 2 trong 1 Mongo transaction có tự đủ để chặn 2 giao dịch trừ phép đồng thời cho cùng 1
+      nhân viên hay không (kịch bản thật: 2 manager duyệt 2 đơn khác nhau cho cùng nhân viên gần như
+      cùng lúc)?
+
+      **Verify thật bằng `MongoMemoryReplSet`** (không suy đoán): chạy N=15 lần, mỗi lần 2 transaction
+      Mongo đồng thời cùng `getBalance → applyAdjustment(-4, allowNegative:false) → appendLedgerEntry`
+      cho 1 nhân viên có balance ban đầu = 5. Kết quả: **14/15 lần cả 2 transaction đều commit thành
+      công VÀ balance cuối cùng bị âm** (5-4-4=-3), dù mỗi transaction riêng lẻ đều check invariant
+      "không âm" đúng. Nguyên nhân: Mongo snapshot isolation không phát hiện conflict vì 2 transaction
+      insert 2 document ledger KHÁC NHAU (không cùng ghi 1 document) — đây là write skew kinh điển,
+      không phải lý thuyết suông.
+
+      (Lưu ý phụ: lần thử đầu có chèn `setTimeout` giả tạo giữa đọc/ghi để dàn thời gian ra quan sát —
+      vô tình khiến 2 transaction chậm lại đủ để đụng collection-level lock timeout 5ms của Mongo
+      [`maxTransactionLockRequestTimeoutMillis`, mặc định 5ms kể cả production] và 1 bên bị lỗi ngẫu
+      nhiên, tạo cảm giác sai là "Mongo tự chặn được". Chạy lại KHÔNG delay giả tạo — đúng luồng thật sẽ
+      chạy — mới lộ ra corruption thật ở tỷ lệ 14/15. Bài học: phải verify với timing tự nhiên, không
+      chèn delay nhân tạo làm sai lệch kết luận.)
+
+      **Kết luận — không sửa gì ở Repository (đúng, việc khoá không thuộc trách nhiệm tầng persistence):**
+      thêm comment cảnh báo ở đầu class `LeaveBalanceRepository` (2 method này không an toàn nếu gọi rời
+      nhau, phải nằm trong lock của application service) để tránh future contributor gọi trực tiếp.
+      Việc khoá giữ nguyên đúng thiết kế gốc — chuyển sang task 1.8.2.4.
+- [x] 1.8.2.4 — `modules/leave/infrastructure/leave-balance-lock.ts` (`acquireUserLeaveLock`, port
+      nguyên từ `helpers/leaveBalance.js` — TTL 5s, budget chờ 10s, retry 50-100ms, giữ nguyên toàn bộ
+      tham số, throw `LeaveLockTimeoutError` — đã tạo ở 1.8.2.2a) +
+      `modules/leave/application/adjust-leave-balance.service.ts` (port `adjustLeaveBalance`): validate
+      `amount`/`reason` TRƯỚC khi acquire lock (giữ đúng thứ tự gốc — không tốn lượt lock cho input
+      sai), rồi lock bọc TOÀN BỘ chuỗi `repository.getBalance → entity.applyAdjustment →
+      repository.appendLedgerEntry` — đây là cơ chế DUY NHẤT thật sự chặn race condition đã verify ở
+      1.8.2.3 (Mongo transaction không tự làm được).
+
+      **Phát hiện thêm khi verify (đáng chú ý cho cutover 1.8.2.6):** 2 nơi gọi `adjustLeaveBalance` cũ
+      check lỗi bằng `e instanceof LeaveBalanceError` + đọc `e.status` (`controllers/UserController.js:772`,
+      `helpers/leaveHandler.js:159`) — class `LeaveBalanceError` cũ dùng field `.status`, còn
+      `ExceptionBase` (nền tảng mới) dùng `.statusCode`. Khi cutover, 2 chỗ này phải đổi sang
+      `instanceof ArgumentInvalidException/InsufficientLeaveBalanceError/LeaveLockTimeoutError` (hoặc
+      kiểm tra qua `ExceptionBase`) và đọc `.statusCode` thay vì `.status` — nếu không đổi, các nhánh
+      catch đặc biệt này sẽ âm thầm rơi vào nhánh `500 Lỗi server` thay vì đúng mã lỗi gốc (400/409).
+      Đã note để không bị bỏ sót ở 1.8.2.6.
+
+      Verify thật bằng file test tạm (`MongoMemoryReplSet` + `moduleNameMapper` mock Redis có sẵn của
+      Jest, xoá sau khi verify xong, không giữ lại): `amount=0` và `amount=NaN` → throw
+      `ArgumentInvalidException` message "Số ngày điều chỉnh không hợp lệ"; `reason` sai → throw cùng
+      loại message "Lý do điều chỉnh không hợp lệ"; `allowNegative:false` số dư không đủ → throw
+      `InsufficientLeaveBalanceError` (400), xác nhận KHÔNG có dòng ledger nào bị ghi thêm khi throw;
+      `allowNegative:true` → thành công, `balance_after` đúng giá trị âm; field `refId`/`refType`/
+      `note`/`createdBy` ghi đúng vào ledger. **Race test quan trọng nhất** (lặp lại 5 lần, không lần
+      nào flaky): balance ban đầu = 5, 2 lệnh trừ 4 chạy đồng thời cho cùng nhân viên → đúng 1/2 thành
+      công (5-4=1), 1/2 bị chặn bởi invariant (1-4<0) — tổng cuối cùng luôn = 1, KHÔNG bao giờ âm. Xác
+      nhận lock đã chặn đúng race condition đã phát hiện ở 1.8.2.3. `tsc --noEmit` + `eslint` sạch. Full
+      suite ổn định `382/17`, không regression.
+
+      **Sửa theo review của người dùng (lệch convention, không phải bug):** bản đầu
+      `acquireUserLeaveLock(userId)` dùng thẳng `userId` thô để tạo lock key, trong khi
+      `repository.getBalance(employeeId, ...)` lại dùng `employeeId.toString()` — 2 nguồn khác nhau
+      cho cùng 1 giá trị định danh. `EmployeeId.of()` hiện tại chỉ wrap/validate (`String(value)`
+      không đổi giá trị) nên chưa gây sai lệch thật, nhưng nếu sau này `EmployeeId` thêm logic chuẩn
+      hoá (trim/case...), lock key và balance key có thể lệch nhau. **Fix:** đổi thành
+      `acquireUserLeaveLock(employeeId.toString())` — dùng đúng 1 nguồn duy nhất
+      (`EmployeeId.toString()`) cho mọi nơi cần định danh nhân viên trong luồng này. `tsc`/`eslint`
+      sạch, full suite lại `382/17`.
+- [x] 1.8.2.5 — `modules/leave/application/get-leave-balance.service.ts` (port nguyên `getLeaveBalance`
+      — đọc thuần, KHÔNG lock vì không có invariant nào cần bảo vệ khi chỉ đọc) +
+      `modules/leave/index.ts`: public API — chỉ export 2 application service
+      (`adjustLeaveBalance`/`getLeaveBalance`) + 2 error class (`InsufficientLeaveBalanceError`/
+      `LeaveLockTimeoutError`, cần thiết để caller `instanceof`-check khi cutover), KHÔNG export
+      domain Entity/Repository/Lock (đúng luật #2 ở mục 13).
+
+      **Phát hiện quan trọng khi làm task này:** grep riêng `getLeaveBalance` (không chỉ
+      `adjustLeaveBalance`) lộ ra `controllers/AttendanceController.js` cũng gọi trực tiếp
+      `helpers/leaveBalance.js` — 2 chỗ đọc thuần (số dư hiện tại + số dư dự phóng theo tháng ở trang
+      chấm công/hồ sơ), không qua `adjustLeaveBalance` nên bị bỏ sót ở lần đếm "3 consumer" trước đó.
+      Đã sửa lại thành **4 consumer** (xem đính chính đầy đủ ở đầu mục 1.8.2) — task 1.8.2.6 phải cutover
+      cả file này.
+
+      Verify thật: file test tạm (`MongoMemoryReplSet`) import qua `modules/leave/index.ts` (không
+      phải qua đường dẫn file trong module) — `adjustLeaveBalance` rồi `getLeaveBalance` phản ánh đúng
+      số dư mới (12-3=9); nhân viên chưa có ledger → `getLeaveBalance` trả về 0 (khớp hành vi gốc, `row
+      ? row.total : 0`). **Verify encapsulation** bằng `@ts-expect-error` cố tình import
+      `LeaveBalanceRepository` từ `modules/leave` — biên dịch báo lỗi đúng như kỳ vọng (nếu lỡ export
+      nhầm, `@ts-expect-error` sẽ tự báo "unused directive" — không xảy ra, xác nhận đúng bị chặn).
+      `tsc --noEmit` + `eslint` sạch. Full suite ổn định `382/17` (1 lần chạy ra `381/18` do
+      `kpiDailyReport.test.js` — flaky đã biết, không liên quan).
+- [x] 1.8.2.6 — Cutover 4 consumer thật sang gọi `modules/leave/index.ts` thay vì
+      `helpers/leaveBalance.js` trực tiếp.
+
+      **Quyết định phạm vi (hỏi người dùng trước khi làm, vì đụng chạm quy tắc "file nào sửa cũng
+      chuyển TS" đã chốt):** 2 trong 4 consumer là controller khổng lồ, đa mục đích
+      (`UserController.js` 1122 dòng, `AttendanceController.js` 1566 dòng) — convert toàn bộ sang TS
+      chỉ để đổi 1 dòng require sẽ làm phình phạm vi task này rất nhiều và rủi ro không cần thiết
+      (hàng chục route không liên quan gì đến leave). Người dùng chọn: **giữ nguyên `.js` cho cả 4
+      file, chỉ sửa tối thiểu dòng require + nhánh `instanceof` liên quan đến leave balance.** Việc
+      convert toàn bộ 2 controller lớn sang TS để dành cho phase phù hợp hơn (vd khi migrate module
+      `user`/`attendance`).
+
+      **Thay đổi cụ thể từng file:**
+      - `helpers/leaveHandler.js`: đổi require `./leaveBalance` → `../modules/leave` (lấy
+        `getLeaveBalance`, `adjustLeaveBalance`, `LeaveLockTimeoutError`) + `../core/exceptions/exceptions`
+        (`ArgumentInvalidException`). Nhánh catch ở `onCreate()`: đổi
+        `e instanceof LeaveBalanceError ? e.status : 500` →
+        `(e instanceof ArgumentInvalidException || e instanceof LeaveLockTimeoutError) ? e.statusCode : 500`
+        (`ArgumentInvalidException` cover cả `InsufficientLeaveBalanceError` vì là class con, không cần
+        import riêng).
+      - `jobs/autoRejectLeaveRequests.js`: chỉ đổi require, không có nhánh `instanceof` nào (catch
+        chung, chỉ log).
+      - `controllers/UserController.js`: đổi require tương tự + nhánh catch ở flow "HR chỉnh tay số
+        ngày phép" (dòng ~772): cùng pattern `ArgumentInvalidException`/`LeaveLockTimeoutError` +
+        `.statusCode`.
+      - `controllers/AttendanceController.js`: chỉ đổi require (2 chỗ dùng `getLeaveBalance`, đọc
+        thuần, không có nhánh `instanceof` nào).
+      - **Tiện thể cập nhật 2 test file** (`__tests__/leaveRetroactive.test.js`,
+        `__tests__/requestControllerCreate.test.js`) đang `require("../src/helpers/leaveBalance")` chỉ
+        để gọi `getLeaveBalance` verify kết quả (không phải test cho chính file cũ) — đổi sang
+        `require("../src/modules/leave")`, giảm bớt dependent của file cũ trước khi xoá ở 1.8.2.7.
+        Không đổi `__tests__/leaveBalance.test.js` (đây chính là characterization test của file cũ,
+        vẫn cần giữ cho tới khi xoá file ở 1.8.2.7).
+
+      Verify thật: `tsc --noEmit` sạch; `eslint --fix` xử lý 2 lỗi format nhỏ (prettier), sau đó sạch.
+      Chạy riêng `leaveBalance`/`leaveRetroactive`/`requestControllerCreate`/`requestApprovalFlow` — 3
+      test fail nhưng đều thuộc `requestApprovalFlow.test.js`, xác nhận đây là 1 trong 4 suite lỗi cũ
+      đã biết (không phải regression). Full suite ổn định `382/17`, đúng baseline, không giảm số pass.
+- [x] 1.8.2.7 — Xoá `helpers/leaveBalance.js` sau khi xác nhận không còn ai require (grep sạch, chỉ còn
+      1 dòng comment tham chiếu vô hại trong `get-leave-balance.service.ts`).
+
+      **Phát hiện quan trọng trước khi xoá:** `__tests__/leaveBalance.test.js` (characterization test
+      gốc của 1.8.2.1) require trực tiếp `helpers/leaveBalance.js` — nếu chỉ xoá file cũ mà không xử lý
+      test này, sẽ MẤT HẲN toàn bộ lưới an toàn cho `modules/leave` (không phải chỉ mất 1 vài test, mà
+      mất sạch — các test tạm mình viết để verify 1.8.2.2b→1.8.2.6 đều đã xoá sau khi dùng xong, không
+      giữ lại permanent). Không được để xảy ra tình huống này.
+
+      **Fix:** chuyển `__tests__/leaveBalance.test.js` → `__tests__/leaveBalance.test.ts` (file mới
+      theo quy tắc TS, giữ tên cũ vì là hậu duệ trực tiếp), đổi import sang `modules/leave` (public API,
+      không import thẳng path nội bộ), đổi `LeaveBalanceError` → `InsufficientLeaveBalanceError`/
+      `ArgumentInvalidException` cho đúng exception mới. 1 test ("balance_after chỉ là snapshot") dùng
+      `result.ledgerEntry.balance_after` từ return value gốc — nhưng
+      `AdjustLeaveBalanceResult` mới chỉ trả `{ balance }` (đã bỏ `ledgerEntry` vì grep xác nhận không
+      consumer thật nào dùng field này) — sửa test để query `LeaveBalanceModel.findOne(...)` lấy ledger
+      row thay vì đọc từ return value, giữ nguyên ý nghĩa test (sửa tay `balance_after` không ảnh hưởng
+      `getLeaveBalance` vì field này chỉ là snapshot hiển thị, không dùng trong `$sum`).
+
+      Verify thật: chạy riêng file mới trước khi xoá file cũ — 9/9 test pass (SUM đúng, `isDeleted`
+      filter, cô lập theo user, chặn âm, `allowNegative`, guard amount/reason, balance_after snapshot,
+      race 2 lệnh đồng thời). Sau đó xoá cả `helpers/leaveBalance.js` và `__tests__/leaveBalance.test.js`
+      (bản `.js` cũ). `tsc --noEmit` + `eslint` sạch. Full suite: 2 lần chạy trung gian flaky ở 2 suite
+      KHÁC NHAU mỗi lần (`kpiMetric.test.js`, `__tests__/modules/request/get-my-requests.http.test.js`
+      — lỗi "socket hang up"/"Parse Error" kiểu resource contention khi chạy nhiều MongoMemoryServer
+      liên tiếp, không liên quan gì đến leave module), chạy lại cho kết quả ổn định `382/17` đúng
+      baseline — xác nhận không phải regression.
+
+**Definition of done 1.8.2 — ĐÃ ĐẠT:** `LeaveBalance` có module DDD đầy đủ
+(`domain/leave-balance.entity.ts` + `.errors.ts`, `infrastructure/leave-balance.repository.ts` +
+`leave-balance-lock.ts`, `application/adjust-leave-balance.service.ts` +
+`get-leave-balance.service.ts`, `index.ts` public API), 4 consumer thật cutover xong
+(`leaveHandler.js`, `jobs/autoRejectLeaveRequests.js`, `controllers/UserController.js`,
+`controllers/AttendanceController.js`), `helpers/leaveBalance.js` xoá sạch, characterization test
+chuyển thành `__tests__/leaveBalance.test.ts` (9 test, permanent). `npm test` toàn repo ổn định
+`382/17` (17 fail cũ đã biết từ trước, không tăng).
+
+### 1.8.3 — `modules/timesheet/` (chi tiết đầy đủ, phần khó nhất — làm tiếp theo 1.8.2)
+
+**Research trước khi thiết kế (bằng Explore agent + tự verify lại từng điểm quan trọng — agent có 1
+điểm báo sai, đã tự chạy test xác nhận):**
+
+- **Logic tính work_unit/penalty nằm rải rác ở**: `src/helpers/attendanceHelper.ts` (`resolveAttendanceDay`
+  — merge punch, tính work_unit/penalty, đã convert TS ở 1.7.1; `persistAttendanceDay`/`saveAttendanceDay`
+  — ghi `WorkSheetModel` + derive `WorkDayStatusModel`), `src/helpers/attendancePenalty.js`
+  (`buildLatePenaltyResolver`/`buildEarlyPenaltyResolver`/`buildForgotPenaltyResolver` — đọc tier từ
+  `AttendancePenaltyModel`, `buildUnifiedForgotOccurrenceMap` — gộp request forgot_checkin đã duyệt +
+  tự phát hiện thiếu punch thành 1 bộ đếm occurrence).
+- **`AttendancePenaltyModel`** (`src/models/AttendancePenaltyModel.js`) — reference-data (đúng khái
+  niệm "Generic Subdomain" ở mục 13, KHÔNG phải bounded context riêng): `type` (late/early/forgot),
+  `from_minutes`/`to_minutes` (late/early) hoặc `from_count`/`to_count` (forgot), `penalty_kind`
+  (money/work_unit/half_day_money), `penalty_value`, `effective_from` (hỗ trợ nhiều "thế hệ" tier theo
+  thời gian), `is_active`.
+- **5 entry point gọi `resolveAttendanceDay`/`saveAttendanceDay`** (đã tự grep xác nhận, nhiều hơn con số
+  agent báo cáo ban đầu vì có thêm phát hiện ở `checkOut`):
+  1. `AttendanceController.js` `importExcel()` (2 lần gọi — máy chấm công + app-only).
+  2. `jobs/finalizeWorkDay.js` — cron 23h hàng ngày, tính lại toàn bộ worksheet hôm nay.
+  3. `helpers/forgotCheckinHandler.js` `onApprove()` — sau khi duyệt đơn quên chấm công.
+  4. `helpers/lateEarlyHandler.js` `onApprove()` — sau khi duyệt đơn đi trễ/về sớm có lý do.
+  5. **`AttendanceController.js` `checkOut()`** — KHÔNG gọi `resolveAttendanceDay` (route real-time tự
+     tính `minute_early` đơn giản bằng hiệu giờ ca, không qua tier), nhưng CÓ gọi
+     `resolveLeaveConflictOnAttendance` trực tiếp — đây là entry point thứ 5 cho riêng hàm leave-conflict,
+     độc lập với 4 entry point trên.
+- **Phát hiện quan trọng — 2 lớp tính toán cho cùng dữ liệu, chưa từng được ghi nhận trước đây:**
+  `checkIn()`/`checkOut()` (route real-time nhân viên tự bấm) ghi thẳng `worksheet.check_in`/
+  `check_out` + tự tính `minutes_late`/`minute_early` "naive" (chỉ trừ giờ ca, KHÔNG qua penalty tier,
+  chưa có `work_unit`/`penalty_amount`) — đây là lớp **optimistic, tạm thời**. Sau đó lớp
+  **authoritative** (`resolveAttendanceDay` qua Excel import/cron 23h/duyệt đơn) mới tính lại đầy đủ
+  (merge punch máy+app, áp tier phạt, derive `work_unit`/`penalty_amount`, resolve
+  `WorkDayStatusModel` theo buổi) — GHI ĐÈ lên giá trị naive. Ảnh hưởng thiết kế: `WorkSheetModel`
+  không phải "ghi 1 lần" mà được cập nhật qua nhiều giai đoạn bởi cả real-time route lẫn batch
+  recalculation — càng củng cố quyết định owner dưới đây.
+- **Đính chính báo cáo của Explore agent**: agent báo `attendanceMerge.test.js` đang "Passing" — SAI, tự
+  chạy `npx jest attendanceMerge` xác nhận vẫn fail, đúng là 1 trong 4 suite lỗi cũ đã biết
+  (`requestApprovalFlow`/`forgotCheckinApprove`/`approvalChain`/`attendanceMerge`). Bài học: luôn tự
+  verify lại claim của subagent trước khi dùng để ra quyết định thiết kế, kể cả khi agent tự tin báo cáo.
+
+**Quyết định kiến trúc — ai sở hữu `WorkSheetModel`? (đã hỏi người dùng, không tự quyết vì đây là fork
+thật, ảnh hưởng cả 1.8.3 lẫn 1.8.4):**
+
+`WorkSheetModel` bị ghi bởi cả field thô (`check_in`/`check_out`, "thuộc" Attendance theo tên gọi) lẫn
+field dẫn xuất (`work_unit`/`penalty_amount`/`minutes_late`/`minute_early`, thuộc Timesheet) — và
+`checkIn()`/`checkOut()` ghi CẢ HAI trong cùng 1 lần `save()`, không tách field ra được theo từng
+module mà không viết lại schema. Theo luật #3 (mục 13: mỗi Mongoose model chỉ 1 owning repository),
+**người dùng chọn: Timesheet sở hữu toàn bộ `WorkSheetModel`** (không tách schema, không đảo thứ tự
+phase). Lý do ủng hộ: logic phức tạp/authoritative (ảnh hưởng lương thật) đã nằm ở Timesheet;
+`WorkSheetModel` về bản chất là "bản ghi timesheet" được cập nhật dần qua nhiều giai đoạn (naive lúc
+check-in/out, chính xác lúc batch recalculate), không phải "nhật ký chấm công thô" thuần tuý. Hệ quả:
+`modules/attendance/` (1.8.4) sẽ KHÔNG có repository riêng cho `WorkSheetModel` — `checkIn`/`checkOut`
+sẽ gọi qua public API của `modules/timesheet/` để ghi punch (quyết định cụ thể interface khi tới 1.8.4).
+
+**Quyết định kiến trúc — `resolveLeaveConflictOnAttendance` xử lý thế nào khi chưa có `workflows/`?**
+
+Hàm này cần CẢ `WorkDayStatusModel` (Timesheet sở hữu) LẪN `adjustLeaveBalance` (Leave module) — theo
+luật #1 (mục 13), `modules/timesheet` không được import `modules/leave` trực tiếp. Nhưng `workflows/`
+(nơi đúng ra nên đặt việc điều phối 2 module) chỉ xây ở 1.8.5, sau 1.8.3. **Quyết định (hệ quả tự nhiên
+của luật #1 đã chốt, không phải fork mới cần hỏi thêm):** tách hàm gốc làm 2:
+- Phần thuần Timesheet (đưa vào `modules/timesheet/`): nhận thông tin check-in/check-out phủ khoảng
+  nghỉ nào, chỉ đọc/ghi `WorkDayStatusModel` (flip `leave_paid`/`leave_unpaid` → `present`), trả về số
+  ngày cần hoàn (`refundAmount`), KHÔNG tự gọi `adjustLeaveBalance`.
+- Phần gọi `adjustLeaveBalance` ở lại đúng chỗ gọi hiện tại (tạm thời, tại `checkOut()`,
+  `leaveHandler.js` `onApprove/onReject`, `forgotCheckinHandler.js`, `lateEarlyHandler.js`) — các nơi
+  này gọi `timesheetModule.resolveLeaveConflictOnAttendance(...)` rồi tự gọi
+  `leaveModule.adjustLeaveBalance(...)` nếu `refundAmount > 0`. Đây là điều phối tạm thời tại call-site
+  (đúng tinh thần Hướng B — đồng bộ, không event — nhưng chưa hình thức hoá thành file `workflows/`
+  riêng), sẽ chuyển hẳn vào `workflows/record-checkout.workflow.ts` khi tới 1.8.5 mà không đổi hành vi.
+
+**Task breakdown (theo đúng khuôn 1.8.2 — domain → infrastructure → application → cutover):**
+
+- [x] 1.8.3.1 — Đánh giá characterization test hiện có + điều tra `attendanceMerge.test.js` đang fail
+      (4/11 test) trước khi quyết định port y nguyên hay sửa. Test khác đã pass sẵn:
+      `lateEarlyPenalty.test.js`, `forgotOccurrenceMap.test.js`, `attendanceAdminEdit.test.js`.
+
+      **Điều tra chi tiết từng test fail (đọc code + trace thật bằng script `ts-node`, không suy
+      đoán):**
+      1. **"giá trị merge trùng giá trị đã lưu: trả unchanged"** — test assert `skip:true` khi data
+         tính ra giống hệt bản đã lưu. Nhưng đọc `resolveAttendanceDay` thấy `skip:true` CHỈ trả về ở 2
+         early-return guard đầu hàm (không có raw data + không forgot, hoặc không có worksheet) — nhánh
+         "tính xong nhưng giống hệt" luôn là `skip:false, unchanged:true`. Verify thêm:
+         `AttendanceController.js`/`finalizeWorkDay.js` đều gọi `saveAttendanceDay` bất kể `unchanged`,
+         chỉ dùng field này để đếm thống kê, không dùng để bỏ qua persist. Kết luận: **test lỗi thời**
+         (kỳ vọng sai cấu trúc return), không phải bug — sửa lại assertion cho đúng thiết kế thật.
+      2. **"cặp giờ merge cách nhau < 120 phút: checkout bị loại"** — trace thật cho thấy
+         `normalizeDayPunches` KHÔNG có bất kỳ rule nào loại checkout khi punch quá gần nhau. Kết luận:
+         **gap nghiệp vụ thật** (rule được test kỳ vọng nhưng chưa từng được implement, hoặc đã mất).
+      3 & 4. **2 test "thiếu checkout... giữ hành vi cũ work_unit = 0"** — trace thật: code hiện tại
+         (nhánh fallback thêm khi có tính năng `forgotOccurrenceMap`) luôn cho `base/2` (0.5 ngày
+         thường) khi `hasRequest:false`, hoặc `r.work_unit` (1, theo stub) khi `hasRequest:true` — KHÔNG
+         bao giờ ra 0. Bằng chứng củng cố: test "Thứ 7" liền kề (đã pass sẵn) cũng expect `0.25 =
+         0.5/2`, cùng công thức fallback — chứng tỏ `base/2` mới là hành vi NHẤT QUÁN hiện tại, còn kỳ
+         vọng "= 0" của 2 test trên đã lỗi thời (có thể viết trước khi tính năng occurrence-map được
+         thêm, không được cập nhật theo). Kết luận: **gap nghiệp vụ thật** (regression tiềm ẩn từ 1 lần
+         thêm tính năng trước đây).
+
+         **Đính chính sau khi đối chiếu SRS chính thức (xem đoạn "Đối chiếu với tài liệu SRS" trước
+         mục 1.8.3.4):** #3&4 thực ra KHÔNG phải bug — SRS xác nhận rõ "chờ duyệt=0.5, đã duyệt=đủ
+         công", khớp đúng code hiện tại. Kỳ vọng gốc "=0" của 2 test cũ mới là lỗi thời. #2 ("120 phút")
+         vẫn chưa xác nhận được qua SRS, còn là gap mở thật.
+
+      **Đã hỏi người dùng cách xử lý 2 gap nghiệp vụ thật (#2, #3&4) — chọn: port nguyên hành vi hiện
+      tại, KHÔNG tự sửa rule nghiệp vụ** (an toàn nhất cho migration, không đổi kết quả lương của bất
+      kỳ nhân viên nào; gap được ghi nhận rõ để xử lý sau, không lẫn với việc "coi như đã sửa").
+
+      **Fix:** chuyển `attendanceMerge.test.js` → `attendanceMerge.test.ts` (theo quy tắc TS): sửa
+      assertion #1 đúng thiết kế thật (`skip:false, unchanged:true`); sửa assertion #2, #3, #4 khớp
+      ĐÚNG giá trị thật hiện tại (`work_unit` lần lượt `1`/`0.5`/`1` thay vì `0`), đổi tên test rõ ràng
+      "hành vi hiện tại — gap nghiệp vụ, xem 1.8.3.1" (không còn ghi "giữ hành vi cũ" gây hiểu lầm là
+      đã verify đúng), kèm comment giải thích ngắn gọn lý do + trỏ về mục này. Verify: 11/11 test pass.
+      `tsc --noEmit` + `eslint` sạch. **Baseline test toàn repo cải thiện thật**: từ `382 passed/17
+      failed` (4 suite lỗi cũ) xuống **`386 passed/13 failed`** (còn 3 suite:
+      `requestApprovalFlow`/`forgotCheckinApprove`/`approvalChain` — `attendanceMerge` giờ xanh hoàn
+      toàn). Từ giờ baseline tham chiếu cho các task sau là `386/13`, không phải `382/17` nữa.
+
+      **Gap còn lại chưa có test trực tiếp** (chỉ test gián tiếp qua suite khác, cả 2 đều đang fail vì
+      lý do không liên quan): `persistAttendanceDay`'s `WorkDayStatusModel` period-split logic,
+      `resolveLeaveConflictOnAttendance` như 1 unit độc lập — sẽ viết test riêng khi port ở 1.8.3.4 nếu
+      cần, không chặn việc bắt đầu 1.8.3.2/1.8.3.3.
+- [x] 1.8.3.2 — `modules/timesheet/domain/` — `types.ts` (interface `WorksheetSnapshot`, `ForgotInfo`,
+      `ForgotOccurrenceInfo`, `PenaltyOutcome`, `PenaltyResolver`) + `resolve-attendance-day.ts` (port
+      `normalizeDayPunches`+`resolveAttendanceDay`+helper thuần `punchClassifyMidpoint`/
+      `punchMinutesOfDay`/`toMinutesOfDay` từ `helpers/attendanceHelper.ts`).
+
+      **Thay đổi cấu trúc có chủ đích (không đổi công thức nghiệp vụ):** bản gốc mutate trực tiếp
+      `worksheet.check_in = ...` v.v. (vì gọi trên Mongoose document rồi `.save()`) — bản domain thuần
+      này KHÔNG mutate input, chỉ trả kết quả qua return value; application layer (1.8.3.4) sẽ chịu
+      trách nhiệm ghi qua repository. Đây là cải thiện cấu trúc an toàn (loại bỏ side-effect ẩn trong
+      hàm tính toán thuần), không ảnh hưởng công thức tính — verify: bỏ 6 dòng mutate cuối hàm, phần
+      tính `unchanged` vẫn dùng snapshot cũ so với giá trị mới TRƯỚC khi mutate (đúng thứ tự gốc), nên
+      logic so sánh không đổi.
+
+      **Tái dùng shared-kernel có chọn lọc**: dùng `Money` cho phép cộng `penalty_amount` (late +
+      early — đúng chỗ Money được thiết kế cho, tránh sai số phép cộng tiền tệ). KHÔNG ép dùng
+      `Period`/`DateKey`/`EmployeeId` ở đây — `Period` sẽ dùng đúng chỗ ở phần tách
+      `resolveLeaveConflictOnAttendance` (1.8.3.4, đã verify khớp `isCoveredBy()` từ 1.8.1);
+      `leavePeriodsMap`/`dateKey`/`rawIn`/`rawOut` giữ nguyên kiểu string/Map gốc vì caller (JS, chưa
+      cutover tới 1.8.3.6) sẽ phải tạo ra các Map này — ép dùng VO ở boundary này tạo ma sát không cần
+      thiết trước khi cutover.
+
+      **Verify 3 lớp:**
+      1. `tsc --noEmit` + `eslint` sạch.
+      2. `__tests__/modules/timesheet/resolve-attendance-day.test.ts` (13 test, port nguyên 11 case từ
+         `attendanceMerge.test.ts` + 1 case "skip khi không data" + 1 case xác nhận KHÔNG mutate input
+         — điểm khác biệt có chủ đích). 13/13 pass.
+      3. **Differential test 500 kịch bản ngẫu nhiên** (file tạm, xoá sau khi verify — so sánh trực
+         tiếp `attendanceHelper.ts`'s `resolveAttendanceDay` (bản cũ) với bản mới trong
+         `modules/timesheet/domain/`, cùng input, random hoá giờ vào/ra/forgot/occurrence/leave
+         period/thứ 7 mỗi lần chạy): **0/500 mismatch** — cho độ tin cậy cao rằng port không có lỗi
+         transcription nào ngoài thay đổi mutation đã nêu.
+
+      Full suite: `399 passed / 13 failed` (tăng đúng 13 test mới so với baseline `386/13`, đúng 3
+      suite lỗi cũ, không regression).
+- [x] 1.8.3.3 — `modules/timesheet/infrastructure/` + phần domain bổ sung phát hiện trong lúc làm:
+
+      **`domain/penalty-tier.ts`** (bổ sung — port từ `helpers/attendancePenalty.js`): tách phần chọn
+      tier theo `effective_from`+ngưỡng (business rule thuần) ra khỏi phần fetch DB —
+      `resolveLatePenaltyFromTiers`/`resolveEarlyPenaltyFromTiers`/`resolveForgotPenaltyFromTiers`
+      (nhận tier list đã fetch sẵn, không tự query) + `buildUnifiedForgotOccurrenceMap` (đã thuần từ
+      bản gốc, chỉ đổi vị trí). Sửa 1 lỗi tự phát hiện khi review lại: bản đầu vô tình đổi cách tính
+      date-key trong `buildUnifiedForgotOccurrenceMap` từ `moment.tz(r.date, TZ)` (giờ VN) sang
+      `getUTCFullYear/Month/Date` (UTC) — đúng loại bug timezone đã tìm thấy ở shared-kernel trước đây
+      — tự phát hiện và sửa lại trước khi verify, không đợi review ngoài.
+
+      **`domain/work-day-status-rules.ts`** (bổ sung — port từ `helpers/workDayStatusRules.ts`): file
+      gốc chỉ có 1 consumer (`attendanceHelper.ts`, đang bị port) nên chuyển hẳn vào đây; bản gốc GIỮ
+      NGUYÊN tới 1.8.3.7 (xoá cùng lúc với `attendanceHelper.ts`, tránh phá vỡ code cũ chưa cutover).
+
+      **`infrastructure/penalty-policy.repository.ts`** — bọc `AttendancePenaltyModel`, compose domain
+      function thuần ở trên với tier fetch 1 lần (đúng pattern gốc `buildXxxPenaltyResolver` — tối ưu
+      cho batch job). Giữ nguyên `.sort({ effective_from: -1, from_minutes/from_count: 1 })` của query
+      gốc dù domain function tự tính lại generation — phòng trường hợp tier overlap ngưỡng (không nên
+      xảy ra nhưng không suy đoán, giữ đúng behavior gốc).
+
+      **`infrastructure/work-sheet.repository.ts`** — sở hữu toàn bộ `WorkSheetModel` (quyết định kiến
+      trúc ở đầu mục 1.8.3): `findByUserAndDate` (populate shifts, map về `{start_time, end_time}` thuần
+      — không rò rỉ field Mongoose khác ra domain), `applyComputedResult` (ghi field đã tính từ
+      `resolveAttendanceDay`).
+
+      **`infrastructure/work-day-status.repository.ts`** — sở hữu toàn bộ `WorkDayStatusModel`. Port
+      nguyên logic ghi status theo buổi của `persistAttendanceDay`, **giữ nguyên 2 điểm bất đối xứng
+      phát hiện khi đọc kỹ bản gốc** (không tự "cân bằng" lại):
+      1. Nhánh "cùng status cả 2 buổi": xoá status attendance-driven CHỈ ở period≠"full"+isDeleted:false,
+         `$set` status mới cho period "full" (LUÔN ghi đè kể cả doc đã tồn tại).
+      2. Nhánh "khác status theo buổi": xoá TẤT CẢ status attendance-driven ngày đó (không filter
+         period/isDeleted), rồi `$setOnInsert` cho từng buổi — **business rule ẩn**: nếu do trùng
+         unique index mà đụng 1 doc KHÔNG phải attendance-driven còn sót (vd `leave_paid` —
+         decision-driven, deleteMany không xoá được), `$setOnInsert` KHÔNG ghi đè — tức là status
+         quyết định thủ công (leave/remote/business_trip) được ưu tiên giữ nguyên trước tính toán chấm
+         công tự động. Verify thật bằng test riêng cho đúng rule này (không chỉ test happy path).
+
+      **Verify**: `tsc --noEmit` + `eslint` sạch trên toàn bộ. 47 test mới (22 penalty-tier thuần không
+      cần DB + 4 penalty-policy.repository + 4 work-sheet.repository + 4 work-day-status.repository +
+      13 đã có từ 1.8.3.2, tổng cộng 47 trong `__tests__/modules/timesheet/`), tất cả pass. Full suite:
+      `433 passed / 13 failed` (tăng đúng 34 test mới so với baseline `399/13`), đúng 3 suite lỗi cũ,
+      không regression.
+**Đối chiếu với tài liệu SRS chính thức (`vWork - HRM website - Tài liệu SRS.pdf`, người dùng cung cấp)
+trước khi làm 1.8.3.4 — quan trọng vì đây là nguồn spec chính thức, không phải suy đoán từ code:**
+
+- **Đính chính 2 "gap nghiệp vụ" đã ghi ở 1.8.3.1 — KHÔNG phải bug, đã xác nhận đúng theo SRS:** SRS
+  mục "Quên chấm công", cột "Hiển thị ở bảng chấm công": *"Chờ duyệt/hoặc đơn bị từ chối: hiển thị 0.5
+  ngày công... Sau khi đơn được duyệt: hiển thị đủ ngày công"*. Code hiện tại (`hasRequest:false` →
+  `work_unit=base/2`; `hasRequest:true` → `work_unit=r.work_unit`) khớp CHÍNH XÁC rule này. Kết luận:
+  2 test cũ trong `attendanceMerge.test.js` (đã sửa ở 1.8.3.1) kỳ vọng `work_unit=0` là **kỳ vọng lỗi
+  thời** (từ 1 phiên bản rule cũ trước SRS này), KHÔNG phải bug — port nguyên hành vi hiện tại là ĐÚNG,
+  không cần lăn tăn thêm.
+- **Gap thật mới phát hiện — Holiday không ảnh hưởng `work_unit` theo ngày:** SRS trang 11 (field "Công
+  thực tế"): *"Nếu ngày lễ được cài trong hệ thống → mặc định hiển thị 1 ngày công"*. Verify thật:
+  `calcStandardWorkUnits` (`helpers/payrollPeriod.js`) chỉ dùng Holiday để tính MẪU SỐ "Công chuẩn" ở
+  tầng tổng hợp kỳ công — không liên quan `WorkSheetModel.work_unit`. `AttendanceController.js`'s hàm
+  build mảng `daily` (nuôi "Bảng công của tôi") đọc thẳng `ws?.work_unit ?? null`, KHÔNG có override
+  nào theo Holiday. `resolveAttendanceDay` (cả bản gốc lẫn bản port 1.8.3.2) cũng không tham chiếu
+  Holiday. **Xác nhận: đây là thiếu sót thật, không phải chỉ nghi ngờ** — người dùng quyết định: ghi
+  nhận, xử lý khi làm 1.8.3.4 (bổ sung Holiday context vào `resolveAttendanceDay`/application layer),
+  không dừng lại sửa ngay bây giờ.
+- **Vẫn chưa xác nhận được — rule "punch cách nhau <120 phút thì huỷ checkout"** (từ 1.8.3.1): tìm khắp
+  SRS không thấy rule này ở đâu — SRS chỉ nói về số phút muộn/sớm tính từ giờ ca, không có rule về
+  khoảng cách giữa check-in/check-out. Vẫn là gap mở, port nguyên hành vi hiện tại (không huỷ checkout).
+- **Ghi nhận, ngoài phạm vi Timesheet — "3 lần đi muộn/về sớm miễn phạt tính CHUNG cho cả 2 loại":**
+  đọc `finalizeWorkDay.js`'s `buildUserDayContext` — `lateForgivenSet`/`earlyForgivenSet` không hề có
+  cap số lượng, bất kỳ đơn late/early nào được duyệt đều miễn phạt hoàn toàn. Nhưng đọc lại chính bảng
+  rule chi tiết trong SRS (không phải phần định nghĩa tổng quan), "Đơn được duyệt: Miễn phạt" cũng ghi
+  không điều kiện kể cả "từ lần thứ 4" (chỉ đổi cấp duyệt 1→2) — SRS có vẻ tự mâu thuẫn giữa phần định
+  nghĩa và bảng rule chi tiết. Việc đếm gộp 2 loại thuộc luồng tạo đơn/approval chain (`modules/request`
+  domain, không phải Timesheet) — chưa đọc code đó, để ngỏ, không chặn tiến độ 1.8.3.
+- **Phát hiện phụ, thuộc phạm vi `modules/leave/` đã xong ở 1.8.2 (không sửa lại, chỉ ghi nhận):** SRS
+  update 3/8/2026 thêm rule *"Được phép ứng trước TỐI ĐA 1 ngày phép của tháng liền kề"* —
+  `adjustLeaveBalance`/`helpers/leaveBalance.js` gốc (đã port nguyên trạng) không có cap này,
+  `allowNegative` cho phép âm không giới hạn. Người dùng xác nhận đây là **gap đã biết, hiện tại đang
+  cố ý cho ứng phép thoải mái** — không phải lỗi port, không cần sửa trong migration này.
+
+- [x] 1.8.3.4 — `modules/timesheet/application/persist-attendance-day.ts` — orchestrate 3 bước, GIỮ
+      NGUYÊN đúng thứ tự gốc (quan trọng, xem phân tích dưới): (1) `workSheetRepository
+      .applyComputedResult(...)` (thay `worksheet.save()`), (2)
+      `workDayStatusRepository.findLeaveStatusesForDay` → domain `resolveLeaveConflict` (mới, port
+      phần thuần của `resolveLeaveConflictOnAttendance`, dùng `Period.isCoveredBy()` từ shared-kernel —
+      đúng chỗ được thiết kế, đã verify khớp qua truth-table ở 1.8.1) →
+      `workDayStatusRepository.markStatusesPresent`, (3)
+      `workDayStatusRepository.applyAttendanceDrivenStatus` (đã có từ 1.8.3.3). Trả về
+      `{ leaveRefundAmount }` để caller (call-site hiện tại, tới khi có `workflows/` ở 1.8.5) tự gọi
+      `adjustLeaveBalance`.
+
+      **Phân tích quan trọng phát hiện lúc thiết kế — vì sao PHẢI giữ nguyên thứ tự (2) rồi (3), không
+      "tối ưu" bỏ bước (2):** `resolveAttendanceDay` (domain) tự có cơ chế override
+      `leaveMorning`/`leaveAfternoon` riêng (dùng CÙNG ngưỡng check-in-trước-12h/check-out-sau-ngưỡng
+      với `resolveLeaveConflict`) — ảnh hưởng `missedIn`/`missedOut` → `morningStatus`/`afternoonStatus`
+      mà bước (3) ghi. Vì bước (3) xoá TẤT CẢ attendance-driven status trước khi ghi lại, việc bước (2)
+      flip leave_paid/leave_unpaid → present **bị ghi đè/xoá ngay sau đó** — verify thật bằng test tích
+      hợp: doc leave gốc bị xoá hẳn (không phải update), thay bằng 1 doc "full"/status đúng từ bước (3).
+      Tức là tác dụng THẬT SỰ LÂU DÀI của bước (2) không phải ghi WorkDayStatusModel (transient) mà là
+      **tính đúng `refundAmount`** (giá trị này KHÔNG bị ảnh hưởng bởi việc doc bị xoá sau đó, vì đã
+      tính xong trước khi bước (3) chạy). Quyết định: **không tự "tối ưu" bỏ ghi status ở bước (2)**
+      dù có vẻ dư — giữ nguyên để không suy đoán sai 1 edge case nào (an toàn hơn cho migration).
+
+      **Sửa 1 lỗi tự phát hiện khi viết `WorkDayStatusRepository.markStatusesPresent`:** bản đầu dùng
+      `Promise.all` để flip nhiều status cùng lúc — SAI vì MongoDB `ClientSession` không hỗ trợ chạy
+      đồng thời nhiều operation trên cùng 1 session (sẽ lỗi "session in use" khi có transaction). Sửa
+      lại vòng lặp tuần tự (`for..of` + `await`), giữ đúng cách bản gốc.
+
+      **Verify**: `tsc`/`eslint` sạch. 12 test cho `resolveLeaveConflict` (domain, thuần — bao phủ đủ
+      case: thiếu check-in/out, không có leave status, che phủ buổi sáng/chiều/cả ngày, period "full"
+      cần che phủ CẢ 2 buổi mới đè, leave_unpaid không hoàn phép, thứ 7 hoàn 0.5 không phải 1, nhiều
+      leave status cộng dồn đúng) + 4 test repository mới (`findLeaveStatusesForDay`/
+      `markStatusesPresent`) + 3 test tích hợp `persistAttendanceDay` (đầy đủ end-to-end domain+
+      application, gồm đúng case "leave-conflict transient bị ghi đè lại nhưng refund vẫn đúng" nêu
+      trên). Full suite: `453 passed/13 failed` (tăng đúng 20 test mới so với baseline `433/13`), đúng
+      3 suite lỗi cũ, không regression.
+
+      **Holiday-awareness (từ phát hiện SRS) — CHƯA làm trong task này, tách thành 1.8.3.4b riêng:**
+      quyết định không bó vào cùng task này vì đây là tính năng MỚI (không phải port hành vi có sẵn) —
+      trộn "port giữ nguyên hành vi" với "thêm business logic mới" vào cùng 1 review sẽ khó tách bạch
+      rủi ro. Cần thiết kế riêng: vị trí thêm logic, cách xử lý `pay_policy`/`duration_days` của
+      `HolidayModel` (SRS chỉ nói "mặc định 1 ngày công", chưa rõ có áp dụng cho holiday `unpaid` hay
+      `duration_days < 1` không), tương tác với absence/leave status đã có sẵn trong ngày đó.
+- [x] 1.8.3.4b — (task mới, tách từ phát hiện SRS) `modules/timesheet` — bổ sung Holiday-awareness cho
+      `work_unit` theo đúng SRS ("ngày lễ → mặc định 1 ngày công"). Cần làm rõ trước khi code: vị trí
+      (domain thuần hay 1 bước riêng ở application layer), nguồn Holiday data (thêm
+      `holiday-policy.repository.ts` bọc `HolidayModel`?), tương tác với `pay_policy`/`duration_days`.
+
+      **Quyết định nghiệp vụ (người dùng chốt qua AskUserQuestion):** (1) `work_unit` mặc định LUÔN = 1
+      (không theo `duration_days` của Holiday), thứ 7 vẫn theo quy ước sẵn có = 0.5, Chủ nhật không có
+      default (vốn không phải ngày công chuẩn); (2) CHỈ áp dụng cho Holiday `pay_policy: "paid"`; (3)
+      chỉ điền vào ngày CHƯA có `WorkSheetModel` nào — không ghi đè `work_unit` đã tính từ luồng khác
+      (leave/absence/business_trip...).
+
+      **Course-correction quan trọng phát hiện lúc code (khác phương án ban đầu đã chọn):** phương án
+      đầu (được chọn trước khi đọc kỹ code) là ghép vào `finalizeWorkDay` cron — nhưng đọc lại cron này
+      mới thấy nó CHỈ query `WorkSheetModel` có sẵn `check_in`/`check_out` (`$or: [{check_in:{$ne:null}},
+      {check_out:{$ne:null}}]`), nên không bao giờ chạm ngày lễ thuần (không ai chấm công). Làm theo cron
+      sẽ phải tạo `WorkSheetModel` mới cho MỌI nhân viên MỌI ngày lễ — đụng `modules/user` (chưa tồn
+      tại) để lấy danh sách "user đang active", phạm vi/rủi ro lớn hơn nhiều so với cần thiết.
+
+      Đọc kỹ tiếp thì phát hiện gốc rễ gap thực ra nằm ở PHÍA ĐỌC: `AttendanceController.js`'s
+      `getPayrollStats` (dòng ~559, "Bảng công của tôi") đã query `HolidayModel` sẵn nhưng CHỈ dùng để
+      trừ mẫu số `standard_work_units` qua `calcStandardWorkUnits` — biến `holidays` không hề ảnh hưởng
+      tử số (`work_unit`/`work_unit_total`). Nghiêm trọng hơn: `allDates` (danh sách ngày hiển thị
+      trong `daily`) chỉ gộp từ `wsMap`/`dsMap`/`reqMap`/`forgotReqMap` đã tồn tại — 1 ngày lễ thuần
+      hoàn toàn KHÔNG xuất hiện trong `daily`, chứ không chỉ là `work_unit: null`. Đã quay lại hỏi
+      người dùng course-correct sang sửa phía đọc thay vì cron write — được chọn (cũng thấy tương tự ở
+      `getPayrollStatsAll`, dòng ~907, endpoint bulk cho admin xem nhiều nhân viên cùng lúc — CÙNG 1
+      loại gap, cần sửa cả 2 chỗ cho nhất quán payroll).
+
+      **Implement:**
+      - `modules/timesheet/domain/holiday-work-unit.ts` — hàm thuần
+        `buildHolidayDefaultWorkUnitMap(holidays, branchId)`, lọc `pay_policy==="paid"` +
+        `scope_type==="all"` hoặc branch khớp (giống logic lọc của `calcStandardWorkUnits` sẵn có), trả
+        `Map<dateKey, workUnit>` (1 cho ngày thường, 0.5 cho thứ 7, bỏ qua Chủ nhật). Export qua
+        `modules/timesheet/index.ts` (`buildHolidayDefaultWorkUnitMap` + type `HolidaySnapshot`) — hàm
+        thuần domain, đúng pattern đã dùng cho `buildUnifiedForgotOccurrenceMap`, không cần bọc
+        application/repository riêng vì caller (`AttendanceController.js`) tự query `HolidayModel` sẵn.
+      - `AttendanceController.js`'s `getPayrollStats`: thêm `holidayDefaultMap` vào `allDates`; trong
+        `.map(dateStr => ...)`, nhánh `else if (holidayDefaultWorkUnit)` (chỉ chạy khi `!ws`) cộng vào
+        `work_unit_total`/`work_unit_official`/`work_unit_probation`; field trả về đổi thành
+        `work_unit: ws?.work_unit ?? holidayDefaultWorkUnit ?? null`.
+      - `getPayrollStatsAll`: tương tự nhưng theo branch của TỪNG user trong vòng lặp (dùng
+        `holidayDefaultMapForBranch(u.branch_id)` memoized giống cách `standardUnitsForBranch` đã làm
+        sẵn) — chỉ cộng tổng `work_unit_total`/`work_unit_official`/`work_unit_probation`, không có
+        `daily` breakdown ở endpoint này nên không cần sửa field khác.
+      - **Không đụng** `getStandardWorkUnits` (dòng ~1503) — endpoint này chỉ trả `standard_work_units`
+        (mẫu số), đã đúng từ trước, không liên quan gap này.
+
+      **Verify:** `tsc`/`eslint` sạch. 7 test thuần cho `buildHolidayDefaultWorkUnitMap` (weekday=1,
+      thứ 7=0.5, Chủ nhật=không có default, unpaid=không có default, scope branch khớp/không khớp,
+      input rỗng). 4 test tích hợp `attendancePayrollStatsHoliday.test.ts`: `getPayrollStats` ngày lễ
+      paid không worksheet → `daily` có entry `work_unit=1`; ngày lễ nhưng ĐÃ có worksheet (work_unit=0
+      từ luồng khác) → giữ nguyên, không bị ghi đè; ngày lễ unpaid → không có default;
+      `getPayrollStatsAll` (admin xem nhiều người) → `work_unit_total` cộng đúng default cho user chưa
+      có worksheet ngày lễ. Full suite ổn định `464 passed/8 failed` (tăng đúng 11 test so với baseline
+      `453/8`), đúng 2 suite lỗi cũ, không regression.
+- [x] 1.8.3.5 — `modules/timesheet/index.ts` — public API.
+
+      **Bổ sung 2 file application mới (cần thiết để index.ts có API hoàn chỉnh, không phải scope
+      creep — không có thì module không dùng được từ ngoài):**
+      - `application/process-attendance-day.ts` — gộp domain `resolveAttendanceDay` (tính toán thuần)
+        + application `persistAttendanceDay` (ghi qua repository) thành 1 use-case duy nhất
+        `processAttendanceDay(...)`, để caller không cần biết ranh giới domain/application nội bộ —
+        gọi 1 hàm, check `result.skip`/`result.unchanged` (giữ đúng pattern caller hiện tại đang dùng
+        khi đếm thống kê import/finalize).
+      - `application/get-worksheet-for-day.service.ts` — đọc thuần (`getWorksheetForDay`), không lock,
+        bọc `WorkSheetRepository.findByUserAndDate` — cần thiết vì Timesheet sở hữu toàn bộ
+        `WorkSheetModel`, caller ngoài module không còn cách nào khác để đọc worksheet.
+
+      `index.ts` export: `processAttendanceDay`, `getWorksheetForDay` + type liên quan
+      (`ProcessAttendanceDayInput/Result`, `WorkSheetRecord`, `WorksheetSnapshot`, `ShiftInfo`,
+      `ForgotInfo`, `ForgotOccurrenceInfo`, `PenaltyOutcome`, `PenaltyResolver`) — KHÔNG export
+      Repository/domain function nội bộ (`resolveAttendanceDay`/`persistAttendanceDay` riêng lẻ,
+      `WorkSheetRepository`/`WorkDayStatusRepository`/`PenaltyPolicyRepository`).
+
+      **Chưa giải quyết, để ngỏ tới 1.8.3.6:** cách tạo mới `WorkSheetModel` khi chưa có cho 1 ngày
+      (hiện repository chỉ có `findByUserAndDate`+`applyComputedResult`, chưa có create/upsert) — sẽ rõ
+      khi đọc kỹ từng entry point thật ở 1.8.3.6, tránh đoán trước khi chưa cần.
+
+      Verify: `tsc`/`eslint` sạch. 2 test integration qua `index.ts` (không import path nội bộ): luồng
+      đầy đủ `getWorksheetForDay` → `processAttendanceDay` ghi đúng `work_unit`; case `skip:true` không
+      ghi gì. Verify encapsulation bằng `@ts-expect-error` cố tình import `WorkSheetRepository` từ
+      `modules/timesheet` — biên dịch báo lỗi đúng như kỳ vọng. Full suite: `455 passed/13 failed`
+      (tăng đúng 2 so với baseline `453/13`), không regression.
+- [x] 1.8.3.6 — Cutover 5 entry point (xem danh sách ở trên) + phần gọi `adjustLeaveBalance` tại
+      call-site sau khi có `refundAmount` từ Timesheet. ĐÃ XONG CẢ 5/5, xem chi tiết từng cái bên
+      dưới.
+
+      **Phát hiện quan trọng trước khi bắt đầu — giải quyết câu hỏi mở "tạo mới WorkSheetModel" từ
+      1.8.3.5:** đọc kỹ cả 2 luồng (`finalizeWorkDay.js`, `importExcel`) xác nhận KHÔNG entry point nào
+      tự tạo `WorkSheetModel` mới — nếu không có worksheet sẵn cho ngày đó, `resolveAttendanceDay` tự
+      `skip`. Worksheet được tạo ở nơi khác (gán ca làm việc), ngoài phạm vi Timesheet. Không cần thêm
+      method create/upsert.
+
+      **Quyết định phạm vi cutover (đã hỏi người dùng trước khi làm):** phần "build context"
+      (`buildUserDayContext` — query `WorkSheetModel`/`WorkDayStatusModel`/`RequestModel` để dựng
+      `leavePeriodsMap`/`forgotOccurrenceMap`/v.v.) **giữ nguyên trong file legacy**, không chuyển vào
+      Timesheet — vì cần dữ liệu `RequestModel` (module Request), đúng ra thuộc `workflows/` (1.8.5),
+      chưa nên nhét vào riêng Timesheet ngay. Chỉ cutover phần lõi: `resolveAttendanceDay`+
+      `saveAttendanceDay` → `processAttendanceDay` (module `timesheet`).
+
+      **Bổ sung ngoài kế hoạch ban đầu (cần thiết để cutover trọn vẹn):** nhận ra
+      `buildLatePenaltyResolver`/`buildEarlyPenaltyResolver`/`buildForgotPenaltyResolver`/
+      `buildUnifiedForgotOccurrenceMap` (từ `helpers/attendancePenalty.js`, cũng nằm trong danh sách
+      xoá ở 1.8.3.7) cũng cần cutover cùng lúc — nếu không, `AttendancePenaltyModel` vẫn bị truy cập
+      qua 2 đường song song (`helpers/attendancePenalty.js` cũ + `PenaltyPolicyRepository` mới), và sẽ
+      phải động lại đúng những file này lần nữa ở 1.8.3.7. Thêm
+      `application/build-penalty-resolvers.service.ts` (wrapper thuần quanh
+      `PenaltyPolicyRepository`) + export `buildUnifiedForgotOccurrenceMap` thẳng từ
+      `domain/penalty-tier.ts` qua `index.ts`.
+
+      **1/5 entry point xong — `jobs/finalizeWorkDay.js`:** đổi require `helpers/attendancePenalty.js`
+      + `helpers/attendanceHelper.js`'s `resolveAttendanceDay`/`saveAttendanceDay` → `modules/timesheet`
+      (giữ `normalizeDayPunches` từ `attendanceHelper.ts` vì `buildUserDayContext` vẫn cần, chưa
+      cutover). `buildUserDayContext` giữ nguyên 100% (đúng quyết định phạm vi trên).
+
+      **Chưa từng có test nào cho file này trước khi cutover** — viết mới
+      `__tests__/finalizeWorkDay.test.ts` (4 test, gọi `finalizeWorkDay(dateKey)` trực tiếp với DB
+      thật): worksheet có đủ check-in/out → xử lý đúng, tạo status "full"/"present"; worksheet không có
+      gì → bị loại khỏi query, không đổi; đi muộn theo tier thật trong DB → phạt tiền đúng; dọn status
+      "pending" sót lại thành "absent". Cả 4 pass với cutover mới. `tsc`/`eslint` sạch. Full suite:
+      `459 passed/13 failed` (tăng đúng 4 so với baseline `455/13`), không regression.
+
+      **Còn lại 4/5 entry point + phần `adjustLeaveBalance` tại checkOut/handler:** làm tiếp ở các lượt
+      sau, mỗi lần dừng lại review theo đúng quy tắc.
+
+      **Bug thật nghiêm trọng tự phát hiện khi đọc `forgotCheckinHandler.js`'s `onApprove` (đợt cutover
+      tiếp theo):**
+      1. **Đính chính lại phát hiện "không entry point nào tạo mới WorkSheetModel"** (ghi ở đầu mục
+         1.8.3.6) — SAI, `forgotCheckinHandler.js`'s `onApprove` (dòng 215-230) THẬT SỰ tạo mới
+         `WorkSheetModel` (với `shifts: []`) nếu chưa có cho ngày đó, qua `findOneAndUpdate` rồi
+         `create` nếu không tìm thấy. Cần bổ sung method upsert vào `WorkSheetRepository` khi cutover
+         file này (chưa làm ở lần này, để lượt cutover `forgotCheckinHandler.js` tiếp theo).
+      2. **Bug timezone thật trong `WorkSheetRepository.findByUserAndDate`** (viết từ 1.8.3.3, chưa ai
+         phát hiện tới giờ): dùng `Date.setHours(0,0,0,0)`/`setDate(+1)` — 2 hàm này tính theo timezone
+         **LOCAL CỦA SERVER** (không phải Asia/Ho_Chi_Minh tường minh như quy ước còn lại của module).
+         Verify thật bằng process con riêng (`TZ=America/New_York node -e ...`, không phải mutate
+         `process.env.TZ` giữa chừng trong Jest — đã tự kiểm chứng cách đó KHÔNG có tác dụng vì
+         V8/Jest cache timezone lúc khởi động process): lệch đúng 13 tiếng so với giá trị đúng. Máy
+         dev đang chạy `Asia/Saigon` (`Intl.DateTimeFormat().resolvedOptions().timeZone`) nên bug này
+         chưa từng bộc lộ qua test — chỉ xuất hiện nếu server production chạy timezone khác (rất có
+         thể xảy ra, vd container mặc định UTC), sẽ khiến toàn bộ tra cứu worksheet sai ngày hoàn toàn.
+         **Fix:** đổi sang `moment.tz(date, TZ).format(...)` + `startOf("day")`/`.add(1,"day")` tường
+         minh, khớp đúng convention còn lại của module. Verify lại bằng process con: khớp chính xác sau
+         khi sửa. Thêm test permanent dùng mốc UTC cố định (không phụ thuộc timezone máy chạy test) để
+         phủ đúng ranh giới ngày giờ VN — không dùng cách mutate `process.env.TZ` (không tin cậy trong
+         Jest, đã tự kiểm chứng).
+
+      Bài học: dù đã verify kỹ ở 1.8.3.3 (test pass), vẫn sót 1 bug thật vì mọi test trước đó đều seed
+      data bằng UTC ISO string cố định — vô tình "che" bug vì máy chạy test SẴN đã ở đúng Asia/Saigon.
+      Cần cẩn trọng hơn khi verify logic liên quan timezone: luôn tự hỏi "test này có thực sự phụ thuộc
+      giả định về timezone máy chạy hay không", không chỉ dựa vào test pass là đủ.
+
+      **2/5 entry point xong — `helpers/forgotCheckinHandler.js`'s `onApprove`:**
+      - Thêm `WorkSheetRepository.upsertRawPunch()` (port đúng logic gốc: `findOneAndUpdate` trước,
+        `create` với `shifts: []` nếu không match — KHÔNG dùng `{upsert:true}` 1 bước vì bản gốc chỉ
+        set `shifts: []` lúc tạo mới, giữ nguyên shift thật khi update) + application wrapper
+        `recordRawPunch()`, export qua `index.ts`. Business rule "cứu giờ ra về bị đọc nhầm vào
+        check_in" (đặc thù luồng duyệt đơn quên chấm công) GIỮ NGUYÊN trong `forgotCheckinHandler.js`
+        — không kéo vào Timesheet vì đây là quyết định của Request domain khi merge dữ liệu đơn với
+        worksheet, Timesheet chỉ nhận `clockUpdate` đã tính sẵn để ghi.
+      - Đổi require `attendanceHelper.js`/`attendancePenalty.js` → `modules/timesheet`
+        (`processAttendanceDay`, `getWorksheetForDay`, `recordRawPunch`,
+        `buildLatePenaltyResolver`/v.v.). `computeForgotOccurrence`'s `WorkSheetModel.find(...)` (query
+        nhiều ngày trong tháng, phần "build context") GIỮ NGUYÊN theo đúng quyết định phạm vi.
+      - **Chuyển `__tests__/forgotCheckinApprove.test.js` → `.ts`, đổi `MongoMemoryServer` →
+        `MongoMemoryReplSet`** (đã verify: lỗi "Transaction numbers are only allowed on a replica set
+        member" là lỗi MÔI TRƯỜNG TEST thuần tuý — code cũ TRƯỚC cutover cũng pass hết 5/5 nếu chỉ đổi
+        ReplSet, không cần sửa gì logic). **Kết quả: cả 5 test pass với code đã cutover** — suite này
+        chuyển từ "lỗi cũ đã biết" sang XANH HOÀN TOÀN, giảm danh sách lỗi cũ từ 4 xuống còn 2
+        (`requestApprovalFlow`, `approvalChain`).
+      - Thêm 3 test cho `upsertRawPunch` (tạo mới với `shifts:[]`, giữ nguyên shift thật khi update,
+        chỉ update field punch được truyền vào không đụng field kia).
+
+      `tsc`/`eslint` sạch. Full suite: `468 passed/8 failed` (tăng 8 so với `460/13` — 3 test mới +
+      5 test chuyển từ fail sang pass), chỉ còn 2 suite lỗi cũ.
+
+      **3/5 entry point xong — `helpers/lateEarlyHandler.js`'s `onApprove`:** đơn giản hơn
+      `forgotCheckinHandler.js` (không tạo mới worksheet, chỉ tìm + guard `!worksheet ||
+      (!check_in && !check_out)` rồi return sớm). Đổi `WorkSheetModel.findOne(...).populate("shifts")`
+      → `getWorksheetForDay`, `resolveAttendanceDay`+`saveAttendanceDay` → `processAttendanceDay`.
+      Chưa từng có test nào cho hàm này — viết mới `__tests__/lateEarlyApprove.test.ts` (3 test: đơn đi
+      muộn có lý do được miễn phạt đúng; không có worksheet → không làm gì không lỗi; worksheet không
+      có punch nào → không đổi `work_unit`). Cả 3 pass. `tsc`/`eslint` sạch. Full suite: `471 passed/8
+      failed` (tăng đúng 3 so với `468/8`), không regression, vẫn chỉ 2 suite lỗi cũ.
+
+      **4/5 entry point xong — `AttendanceController.js`'s `checkOut` route.** Đây là entry point
+      KHÁC LOẠI với 3 cái trước — không gọi `resolveAttendanceDay`/`saveAttendanceDay` (thuộc lớp
+      "optimistic real-time", Attendance module territory 1.8.4), chỉ gọi trực tiếp
+      `resolveLeaveConflictOnAttendance` (từ `leaveHandler.js`).
+
+      **Tách `applyLeaveConflictOverride` thành application function riêng** (trích xuất từ
+      `persistAttendanceDay`, refactor lại để dùng chung — verify không regression bằng cách chạy lại
+      toàn bộ 73 test `modules/timesheet` sau khi trích xuất) — vì `checkOut` cần logic leave-conflict
+      NHƯNG không đi qua `resolveAttendanceDay`/`processAttendanceDay` đầy đủ. Đổi
+      `resolveLeaveConflictOnAttendance` (leaveHandler.js) → `applyLeaveConflictOverride`
+      (modules/timesheet), rồi tự gọi `adjustLeaveBalance` (modules/leave) nếu `leaveRefundAmount > 0`
+      — thay cho việc gọi ẩn bên trong hàm cũ (đúng quyết định kiến trúc: Timesheet không được gọi
+      thẳng Leave, tách 2 bước rõ ràng tại call-site).
+
+      **Phát hiện quan trọng về test infrastructure (áp dụng cho MỌI test dùng transaction thật sau
+      này):** viết characterization test mới cho `checkOut` (chưa từng có) liên tục fail với lỗi
+      `"Unable to write to collection ... due to catalog changes; please retry the operation"` dù logic
+      cutover đúng. Điều tra kỹ (không đoán bừa, thử nhiều giả thuyết): KHÔNG phải do thiếu
+      `MongoMemoryReplSet`, KHÔNG phải do collection chưa tồn tại vật lý (đã thử `createCollection()` +
+      insert/delete thật, vẫn lỗi) — nguyên nhân THẬT: **Mongoose tự động build index nền (background)
+      cho 1 Model ngay lần đầu được dùng, không đợi (`await`) xong** — nếu lần dùng đầu tiên của 1
+      Model (có index khai báo trong schema) xảy ra NGAY BÊN TRONG 1 transaction, việc build index chạy
+      song song đụng độ với transaction, MongoDB coi là "catalog changes" và abort. Fix: gọi
+      `Model.init()` (đợi index build xong) cho MỌI model liên quan trong `beforeAll`, TRƯỚC khi chạy
+      bất kỳ test nào có transaction thật. Verify: sau khi thêm `Promise.all([...Model.init()])`, lỗi
+      biến mất hoàn toàn, chạy lại 3 lần liên tiếp đều ổn định.
+
+      Tiện thể phát hiện 1 lỗi nhỏ trong chính test mình viết: `checkOut` không gọi `res.status(200)`
+      tường minh cho thành công (chỉ `res.json(...)`, Express tự mặc định 200) — assertion ban đầu
+      `expect(res.status).toHaveBeenCalledWith(200)` sai từ đầu, sửa lại kiểm tra qua nội dung
+      `res.json`.
+
+      Viết mới `__tests__/attendanceCheckOut.test.ts` (2 test: check-out thường không có leave
+      conflict; check-out che phủ leave_paid buổi chiều → flip present + tạo ledger hoàn đúng 0.5
+      phép) + 2 test cho `applyLeaveConflictOverride` dùng độc lập. Cả 4 pass ổn định (chạy lại 3 lần).
+      `tsc`/`eslint` sạch. Full suite: `475 passed/8 failed` (tăng đúng 4 so với `471/8`), không
+      regression, vẫn 2 suite lỗi cũ.
+
+      **5/5 entry point xong — `AttendanceController.js`'s `importExcel` (2 lần gọi trong 1 hàm).**
+      Entry point phức tạp nhất: 2 vòng lặp riêng (1 cho ngày có dữ liệu Excel, 1 cho ngày chỉ có dữ
+      liệu app không có trong Excel), cùng dùng chung context xây từ `Promise.all` 7 query khác nhau
+      (worksheets tuần/tháng, forgot/late/early request đã duyệt, leave/remote status tuần/tháng).
+
+      **Giữ nguyên phạm vi tối thiểu (đúng quyết định đã chốt):** TOÀN BỘ phần build context (7 query
+      Promise.all, `worksheetMap`/`monthWorksheetMap`/`daySnapshots`/`excelRawMap`...) GIỮ NGUYÊN,
+      không đụng — chỉ thay 2 cặp `resolveAttendanceDay`+`saveAttendanceDay` bằng `processAttendanceDay`
+      (module `timesheet`), và đổi import `buildLatePenaltyResolver`/`buildEarlyPenaltyResolver`/
+      `buildForgotPenaltyResolver`/`buildUnifiedForgotOccurrenceMap` từ `helpers/attendancePenalty.js`
+      sang `modules/timesheet` (khớp cách đã làm ở `finalizeWorkDay.js`).
+
+      **Điều chỉnh cần thiết khi cutover:** `processAttendanceDay` yêu cầu `worksheetId` tường minh —
+      trong khi `resolveAttendanceDay` gốc tự xử lý an toàn `worksheet: undefined` (trả `skip:true`).
+      Vòng lặp đầu tiên (`worksheetMap.get(dateKey)` có thể `undefined` nếu ngày đó nhân viên không có
+      ca) cần thêm guard `if (!worksheet) { skipped++; continue; }` TRƯỚC khi gọi
+      `processAttendanceDay` (tránh crash khi đọc `worksheet._id` của `undefined`) — giữ đúng kết quả
+      cuối (vẫn tính vào `skipped`, chỉ đổi vị trí kiểm tra sớm hơn 1 bước). Vòng lặp thứ 2 (duyệt
+      trực tiếp `worksheetMap` entries) không cần guard này vì `worksheet` luôn tồn tại khi lặp qua map.
+
+      Chưa từng có test nào cho `importExcel` — viết mới `__tests__/attendanceImportExcel.test.ts` (4
+      test, tự dựng file Excel thật bằng package `xlsx` đúng định dạng `parseExcelToBlocks`/
+      `parseDayRows` mong đợi: import ngày công bình thường tính đúng `work_unit`/`minutes_late`; mã
+      máy chấm công không map → vào `unmatched_codes`; ngày không có worksheet → tính vào `skipped`
+      không lỗi; import 2 lần dữ liệu giống hệt → lần 2 vào `unchanged`). Cả 4 pass ổn định (chạy lại 3
+      lần). `tsc`/`eslint` sạch. Full suite ổn định `479 passed/8 failed` (tăng đúng 4 so với `475/8`,
+      1 lần chạy ra suite lạ `get-all-requests.http.test.js` fail — chạy lại ngay cho kết quả ổn định,
+      xác nhận flaky không liên quan), vẫn chỉ 2 suite lỗi cũ.
+
+      **TASK 1.8.3.6 HOÀN TẤT — cả 5/5 entry point đã cutover khỏi `helpers/attendanceHelper.js`'s
+      `resolveAttendanceDay`/`saveAttendanceDay` và `helpers/attendancePenalty.js`, chuyển hết sang
+      `modules/timesheet`.** Sẵn sàng cho 1.8.3.7 (xoá code cũ).
+- [x] 1.8.3.7 — Xoá `attendanceHelper.ts`'s `resolveAttendanceDay`/`persistAttendanceDay`/
+      `saveAttendanceDay`, `attendancePenalty.js`, phần `resolveLeaveConflictOnAttendance` cũ trong
+      `leaveHandler.js` sau khi cutover xanh.
+
+      **Phát hiện quan trọng trước khi xoá được:** `resolveLeaveConflictOnAttendance` (leaveHandler.js)
+      còn 2 call site SẢN XUẤT chưa từng nằm trong danh sách "5 entry point" của 1.8.3.6 (vì đó là
+      entry point của module `request`/`leave`, không phải `attendance`):
+      1. `leaveHandler.js`'s `onApprove` (duyệt đơn nghỉ) — cuối hàm, loop `refreshed` worksheet để
+         re-check nghỉ phép có bị đè bởi chấm công thật đã ghi nhận trước đó không.
+      2. `awayDayHandler.js`'s `createOnApprove(status)` — dùng chung cho duyệt đơn `business_trip`/
+         `client_visit`/`remote` (đã có test `requestControllerCreate.test.js` dòng 488 xác nhận hành
+         vi hoàn phép này).
+      Cả 2 đã cutover sang `applyLeaveConflictOverride` (modules/timesheet) + gọi `adjustLeaveBalance`
+      tường minh tại call-site khi `leaveRefundAmount > 0` — đúng pattern đã dùng ở `checkOut`
+      (1.8.3.6). Verify: `requestControllerCreate.test.js` (26 test, có test dòng 488 test đúng nhánh
+      awayDayHandler+refund) pass 23/23 (3 fail còn lại thuộc `requestApprovalFlow.test.js`, suite lỗi
+      cũ không liên quan, chạy trong cùng lệnh test).
+
+      Sau khi cutover 2 call site trên, xoá an toàn: `resolveLeaveConflictOnAttendance` (hàm + export)
+      khỏi `leaveHandler.js`; `resolveAttendanceDay`/`persistAttendanceDay`(private)/`saveAttendanceDay`
+      + 3 interface liên quan khỏi `attendanceHelper.ts` (giữ nguyên `parseExcelToBlocks`/`parseDayRows`/
+      `normalizeDayPunches`/`correctDayStatuses` — vẫn được dùng); xoá luôn import không còn dùng
+      (`mongoose`, `ClientSession`, `resolveLeaveConflictOnAttendance`, `WorkDayStatusModel`,
+      `ATTENDANCE_DRIVEN_STATUSES`) trong `attendanceHelper.ts`. Xoá hẳn `src/helpers/attendancePenalty.js`
+      (đã grep xác nhận không còn require sản xuất nào, chỉ còn 2 test file cũ).
+
+      **Test cũ bị xoá cùng code (không thể giữ vì code nền đã mất), đã verify coverage tương đương đã
+      có sẵn trước khi xoá:** `attendanceMerge.test.ts` (12 test merge máy/app) ↔ mirror 1:1 trong
+      `resolve-attendance-day.test.ts` (13 test, cùng tên, +2 test mới); `forgotOccurrenceMap.test.js`
+      (6 test) ↔ mirror 1:1 trong `penalty-tier.test.ts`'s `describe("buildUnifiedForgotOccurrenceMap")`
+      (cùng 6 tên test); `lateEarlyPenalty.test.js` — describe đầu (test tier thật từ DB) ↔ mirror trong
+      `penalty-policy.repository.test.ts`, NHƯNG describe 2 (3 test "kết hợp phạt muộn+sớm cùng ngày,
+      dùng tier thật từ DB") CHƯA có bản mirror nào — đã port nguyên 3 test này sang file mới
+      `__tests__/modules/timesheet/late-early-combined.test.ts` (dùng `buildLatePenaltyResolver`/
+      `buildEarlyPenaltyResolver` từ `modules/timesheet` + `resolveAttendanceDay` domain), verify cả 3
+      pass trước khi xoá file cũ.
+
+      **Bug tiềm ẩn phát hiện + fix trong lúc xoá (KHÔNG phải do lần xoá này gây ra, mà bị lộ ra vì xoá
+      1 import "vô tình" đang che nó):** `attendanceHelper.ts` (bản cũ) import
+      `resolveLeaveConflictOnAttendance` từ `leaveHandler.js`, và `leaveHandler.js` lại import
+      `ShiftModel` — chuỗi import này VÔ TÌNH khiến mongoose model `"shift"` luôn được đăng ký bất cứ
+      khi nào có file nào đó require `attendanceHelper.ts` (vd `forgotCheckinHandler.js` require
+      `normalizeDayPunches` từ đây). Khi xoá import không dùng này, lộ ra
+      `WorkSheetRepository.findByUserAndDate` (modules/timesheet/infrastructure/work-sheet.repository.ts)
+      gọi `.populate("shifts")` nhưng CHÍNH FILE NÀY không hề import `ShiftModel` — phụ thuộc ngầm vào
+      việc model đã được đăng ký ở đâu đó khác trong toàn bộ app (luôn đúng lúc chạy thật vì mọi model
+      được require ở tầng khởi động, nhưng KHÔNG đúng trong 1 test file cô lập không tình cờ import
+      ShiftModel ở đâu trong chain của nó — cụ thể là `forgotCheckinApprove.test.ts`, lỗi
+      `MissingSchemaError: Schema hasn't been registered for model "shift"`). Fix: thêm side-effect
+      import `import "../../../models/ShiftModel";` tường minh vào `work-sheet.repository.ts` (file này
+      thực sự phụ thuộc model này qua populate, nay khai báo tường minh thay vì ăn theo may rủi thứ tự
+      require của caller).
+
+      **Verify cuối:** `tsc --noEmit` sạch, `eslint` sạch trên mọi file đã đụng. Full suite chạy lặp lại
+      nhiều lần ổn định ở `453 passed / 8 failed` (2 suite lỗi cũ y hệt trước giờ:
+      `approvalChain.test.js`, `requestApprovalFlow.test.js` — không tăng thêm suite lỗi nào so với
+      trước 1.8.3.7).
+
+**Definition of done 1.8.3: ĐÃ ĐẠT.** `Timesheet` có module DDD đầy đủ, sở hữu `WorkSheetModel`+
+`WorkDayStatusModel`, 5 entry point cutover xong, code cũ xoá sạch, gap Holiday-awareness (SRS) đã vá,
+`npm test` ổn định `464 passed/8 failed` — đúng 2 suite lỗi cũ có từ trước (`approvalChain.test.js`,
+`requestApprovalFlow.test.js`), không lẫn regression mới. Sẵn sàng sang 1.8.4.
+
+### 1.8.4 — `modules/attendance/` (chi tiết đầy đủ, làm ngay)
+
+**Khảo sát phạm vi trước khi chia task:** `AttendanceController.js` có 18 hàm. Phân loại theo đúng luật
+mục 13 (workflows/ mới là nơi được import nhiều module — modules/attendance KHÔNG nên tự làm
+báo cáo tổng hợp cross-model):
+
+- **Ghi dữ liệu, thuộc Attendance, PHẢI cutover:** `checkIn` (hiện ghi thẳng `WorkSheetModel` qua
+  `worksheet.save()`, VI PHẠM luật "Timesheet sở hữu toàn bộ WorkSheetModel" đã chốt ở 1.8.3),
+  `checkOut` (đã cutover 1 phần ở 1.8.3 — dùng `applyLeaveConflictOverride`, nhưng phần ghi
+  `check_out`/`minute_early` vẫn `worksheet.save()` trực tiếp), CRUD `AllowedWifiLocationModel` (3 hàm),
+  CRUD `ShiftModel` (2 hàm: `createShift`/`getAllShifts`).
+- **Excel-parsing thuần (absorb task 1.7.3 cũ):** `parseExcelToBlocks`/`parseDayRows` hiện nằm lạc chỗ
+  trong `attendanceHelper.ts` (thuộc Timesheet theo vị trí file, nhưng bản chất là "đọc file máy chấm
+  công" — đúng nghĩa Attendance). Chuyển vào `modules/attendance/infrastructure/`.
+- **CHỦ ĐỘNG KHÔNG động tới trong 1.8.4** (đều là đọc/tổng hợp cross-model, đúng việc của `workflows/`
+  ở 1.8.5, không phải của 1 module đơn lẻ): `getWorkSheet`, `getLichCong`, `getAllWorkSheets`,
+  `getStats`, `getPayrollStats`/`getMyPayrollStats`/`getPayrollStatsAll` (vừa sửa Holiday-gap ở
+  1.8.3.4b), `getCalendar`, `getStandardWorkUnits`, `adminEditWorksheet` (ghi `WorkSheetModel` nhưng là
+  thao tác admin sửa tay hiếm gặp, không phải luồng nghiệp vụ chính — để nguyên, cutover sau nếu cần).
+  `importExcel`'s phần ORCHESTRATION (build context, gọi `processAttendanceDay`) cũng giữ nguyên trong
+  `AttendanceController.js` — chỉ phần PARSE Excel thô chuyển đi.
+
+**Quyết định thiết kế — mở rộng public API của `modules/timesheet` cho `recordRawPunch`:** hiện
+`RawPunchUpdate`/`recordRawPunch` chỉ nhận `check_in`/`check_out`. `checkIn`/`checkOut` (bản gốc) còn
+ghi `minutes_late`/`minute_early` (tính "optimistic real-time", KHÁC bản tính đầy đủ theo tier của
+`resolveAttendanceDay` — đúng như đã ghi chú ở 1.8.3: "optimistic real-time, Attendance module
+territory"). Comment sẵn có trong `record-raw-punch.service.ts` đã dự đoán đúng nhu cầu này ("dùng khi
+caller... check-in/check-out route ở modules/attendance sau này"). Sẽ mở rộng `RawPunchUpdate` thêm
+`minutes_late?`/`minute_early?` optional — thay đổi nhỏ, không phá vỡ 2 caller hiện tại
+(`forgotCheckinHandler.js` không set 2 field này).
+
+- [x] 1.8.4.1 — `modules/attendance/domain/geofence.ts`: hàm thuần `isWithinRadius(point, center,
+      radiusMeters)` (haversine, port nguyên công thức đang lặp lại y hệt ở `checkIn`+`checkOut`).
+      Verify: `tsc`/`eslint` sạch, 5 test (khoảng cách=0, ~111km/độ vĩ độ, trong/ngoài phạm vi, đúng
+      bằng radius = trong phạm vi khớp điều kiện gốc `distance > radius` mới báo lỗi).
+- [x] 1.8.4.2 — `modules/attendance/domain/naive-punch-timing.ts`: hàm thuần tính `minutesLate`
+      (check-in) / `minutesEarly` (check-out) kiểu "optimistic real-time" — port nguyên công thức đang
+      lặp lại ở `checkIn`+`checkOut` (KHÔNG dùng tier phạt, chỉ so với giờ ca). Interface dùng
+      `dateKey: string` (khớp quy ước `resolveAttendanceDay`), caller tự format ngày. Verify:
+      `tsc`/`eslint` sạch, 6 test (đúng giờ/muộn/sớm hơn giờ ca cho cả check-in lẫn check-out, không
+      âm). Full suite: `475 passed/8 failed` (tăng đúng 11 so với baseline `464/8`), đúng 2 suite lỗi
+      cũ, không regression.
+- [x] 1.8.4.3 — `modules/attendance/infrastructure/allowed-wifi-location.repository.ts`: bọc
+      `AllowedWifiLocationModel` (`findActive`/`findBySsid`/`create`/`softDelete`).
+
+      **Quyết định thiết kế khác convention `WorkSheetRepository`:** record trả về giữ NGUYÊN `_id`
+      (ObjectId), KHÔNG remap sang `id: string` — vì 3 endpoint CRUD wifi hiện trả THẲNG document ra
+      HTTP response cho frontend (`res.json({data: docs})`), đổi field sẽ vỡ contract API đang chạy
+      thật. Khác `WorkSheetRecord` (chỉ dùng nội bộ, chưa từng serialize thẳng ra ngoài).
+
+      Verify: `tsc`/`eslint` sạch. 6 test (`findActive` lọc đúng `isDeleted`+sort mới nhất trước,
+      `findBySsid` tìm đúng/không thấy, `create` mặc định `radius=100`/dùng giá trị truyền vào,
+      `softDelete` đánh dấu đúng + id không tồn tại trả `null`).
+- [x] 1.8.4.4 — `modules/attendance/infrastructure/shift.repository.ts`: bọc `ShiftModel`
+      (`findAll`/`findByName`/`create`).
+
+      **Giữ nguyên 2 hành vi gốc dễ bị "sửa nhầm thành đúng" khi port:** (1) `findAll` (`getAllShifts`)
+      KHÔNG lọc `isDeleted` — route xoá shift chưa từng tồn tại, không tự thêm filter mới; (2)
+      `late_allowance_minutes` mặc định **0** khi tạo qua API (`createShift` destructure
+      `= 0` từ `req.body`), ĐÈ lên default `5` của chính Mongoose schema — dễ nhầm là bug lúc đọc code
+      nhưng đây là hành vi gốc, port nguyên trạng.
+
+      Verify: `tsc`/`eslint` sạch. 4 test (`findAll` không lọc isDeleted, `findByName` tìm đúng/không
+      thấy, `create` mặc định 0/dùng giá trị truyền vào). Full suite: `485 passed/8 failed` (tăng đúng
+      10 so với baseline `475/8`), đúng 2 suite lỗi cũ, không regression.
+- [ ] 1.8.4.5 — `modules/attendance/infrastructure/excel-attendance-parser.ts`: chuyển nguyên
+      `parseExcelToBlocks`/`parseDayRows` từ `attendanceHelper.ts` sang đây — port giữ nguyên hành vi
+      (characterization test trước, so khớp output).
+- [ ] 1.8.4.6 — Mở rộng `modules/timesheet`: `RawPunchUpdate`/`recordRawPunch` nhận thêm
+      `minutes_late?`/`minute_early?` optional (xem quyết định thiết kế ở trên).
+- [ ] 1.8.4.7 — `modules/attendance/application/record-check-in.service.ts`: orchestrate wifi/geofence
+      check → `getWorksheetForDay` (Timesheet) → validate ca/giờ → domain `naive-punch-timing` →
+      `recordRawPunch` (Timesheet, đã mở rộng).
+- [ ] 1.8.4.8 — `modules/attendance/application/record-check-out.service.ts`: tương tự, cộng thêm gọi
+      `applyLeaveConflictOverride` (Timesheet) + `adjustLeaveBalance` (Leave) — GIỮ NGUYÊN kiểu gọi
+      trực tiếp cross-module tạm thời như hiện tại (đã chấp nhận ở 1.8.3, chờ `workflows/` ở 1.8.5 dọn
+      lại đúng chuẩn, không phải fork mới cần hỏi).
+- [ ] 1.8.4.9 — `modules/attendance/application/manage-wifi-location.service.ts` +
+      `manage-shift.service.ts`: CRUD mỏng bọc 2 repository ở 1.8.4.3/1.8.4.4.
+- [ ] 1.8.4.10 — `modules/attendance/index.ts`: public API (`recordCheckIn`, `recordCheckOut`, CRUD
+      wifi/shift, `parseExcelToBlocks`/`parseDayRows`... liệt kê cụ thể khi tới lượt).
+- [ ] 1.8.4.11 — Cutover `AttendanceController.js`: `checkIn`/`checkOut`/3 hàm wifi/2 hàm shift gọi qua
+      `modules/attendance` thay vì logic inline; `importExcel` đổi sang parser mới ở 1.8.4.5 (giữ
+      nguyên phần orchestration). Route `src/routes/attendance.js` KHÔNG đổi (giữ nguyên path/middleware
+      RBAC, chỉ đổi bên trong handler).
+- [ ] 1.8.4.12 — Xoá code cũ: `checkIn`/`checkOut` logic inline cũ, `parseExcelToBlocks`/`parseDayRows`
+      khỏi `attendanceHelper.ts`, CRUD wifi/shift cũ — sau khi cutover xanh (đúng khuôn đã dùng ở
+      1.8.3.7: grep xác nhận hết call site trước khi xoá).
+
+**Definition of done 1.8.4:** `modules/attendance` sở hữu `AllowedWifiLocationModel`+`ShiftModel`,
+checkIn/checkOut không còn ghi thẳng `WorkSheetModel` (đi qua `modules/timesheet` public API), Excel-
+parsing tách khỏi `attendanceHelper.ts`, `npm test` không giảm số pass (đúng 2 suite lỗi cũ, không lẫn
+regression mới).
+
+### 1.8.5 — 1.8.8 (tóm tắt, chi tiết hoá khi tới lượt)
 
 | Sub-phase | Việc chính | Lưu ý đặc biệt |
 |---|---|---|
-| 1.8.3 `modules/timesheet/` | Port `resolveAttendanceDay`/`persistAttendanceDay`/`resolveLeaveConflictOnAttendance` (absorb 1.7.2) + reference-data cho Shift/Holiday/PenaltyPolicy | Phần khó nhất — characterization test bắt buộc trước khi port, vì logic tính work_unit/penalty ảnh hưởng lương thật |
-| 1.8.4 `modules/attendance/` | Port check-in/check-out + Excel import (absorb 1.7.3) | **Cần quyết định khi tới lượt:** `WorkSheetModel` vừa chứa punch thô (Attendance sở hữu) vừa chứa field dẫn xuất (`work_unit`/`penalty_amount`, Timesheet tính) — ranh giới ai sở hữu `WorkSheetModel` cần làm rõ hơn lúc này, mục 13 chưa giải quyết dứt điểm điểm này |
-| 1.8.5 `workflows/` | `review-request.workflow.ts`, `cancel-request.workflow.ts`, `record-checkout.workflow.ts`, `import-attendance.workflow.ts` | Tái dùng nguyên `runInTransaction`/`RequestContextService` đã có từ Phase 0 |
+| 1.8.5 `workflows/` | `review-request.workflow.ts`, `cancel-request.workflow.ts`, `record-checkout.workflow.ts`, `import-attendance.workflow.ts` | Tái dùng nguyên `runInTransaction`/`RequestContextService` đã có từ Phase 0; `record-checkout.workflow.ts` chính thức hoá điều phối tạm thời đã làm ở 1.8.3 (Timesheet resolve conflict → Leave refund) |
 | 1.8.6 Cutover `modules/request/` | Đổi `review-request.service.ts`/`create-request.service.ts`/`cancel-request.service.ts` gọi qua `workflows/` cho action ghi; 7 handler `helpers/*Handler.js` chỉ còn `validate`/`validateAsync` (thuần Request), bỏ `onCreate`/`onApprove`/`onReject` (chuyển thành bước trong workflow) | Behavior-preserving nhưng đụng nhiều nhất — cần characterization test đầy đủ cho cả 7 loại đơn trước khi cutover |
-| 1.8.7 Xoá code cũ | `attendanceHelper.ts`, phần Attendance-side của `leaveHandler.js`/`awayDayHandler.js`, phần liên quan `AttendanceController.js` | Chỉ xoá sau khi 1.8.6 xanh, characterization test xác nhận hành vi không đổi |
+| 1.8.7 Xoá code cũ | Phần còn lại của `AttendanceController.js` liên quan check-in/out cũ | Chỉ xoá sau khi 1.8.6 xanh, characterization test xác nhận hành vi không đổi |
 | 1.8.8 Hoàn thiện | `CLAUDE.md`, tổng kết Phase 1.8 | — |

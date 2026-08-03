@@ -124,4 +124,21 @@ export class WorkDayStatusRepository {
       );
     }
   }
+
+  // Port nguyên AttendanceController.checkOut's WorkDayStatusModel.updateMany({status:"pending"}) —
+  // KHÁC markStatusesPresent (scope theo statusId cụ thể, dùng cho flip leave-conflict): đây flip TẤT
+  // CẢ status "pending" (attendance-driven, chưa có chấm công) của 1 worksheet thành "present" ngay khi
+  // check-out xong, không liên quan gì tới leave conflict. Bắt buộc sống ở Timesheet (không phải
+  // attendance) theo luật "1 owner cho WorkDayStatus" (mục 13) — thuộc phạm vi mở rộng cần thiết của
+  // task 1.8.4.8, không có trong danh sách liệt kê ban đầu của task đó.
+  async markPendingAsPresent(worksheetId: string, session?: ClientSession): Promise<void> {
+    await WorkDayStatusModel.updateMany(
+      { worksheet_id: worksheetId, status: "pending", isDeleted: false },
+      {
+        status: "present",
+        $addToSet: { sources: { ref_id: worksheetId, ref_type: "attendance" } }
+      },
+      { session: this.resolveSession(session) }
+    );
+  }
 }

@@ -19,3 +19,9 @@ export function calculateMinutesEarly(now: Date, dateKey: string, shiftEndTime: 
   const shiftEnd = toMomentOnDate(dateKey, shiftEndTime);
   return Math.max(0, Math.floor((shiftEnd.valueOf() - moment.tz(now, TZ).valueOf()) / 60000));
 }
+
+// Port nguyên guard "quá giờ làm việc, không thể check-in" đang lặp ở checkIn (AttendanceController.js).
+export function hasShiftEnded(now: Date, dateKey: string, shiftEndTime: string): boolean {
+  const shiftEnd = toMomentOnDate(dateKey, shiftEndTime);
+  return moment.tz(now, TZ).isAfter(shiftEnd);
+}

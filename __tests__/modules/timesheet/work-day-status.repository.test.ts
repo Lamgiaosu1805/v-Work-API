@@ -218,3 +218,70 @@ describe("WorkDayStatusRepository.findLeaveStatusesForDay / markStatusesPresent"
     await expect(repo.markStatusesPresent([], worksheetId.toString())).resolves.not.toThrow();
   });
 });
+
+// task 1.8.4.8 — port AttendanceController.checkOut's WorkDayStatusModel.updateMany({status:"pending"}).
+describe("WorkDayStatusRepository.markPendingAsPresent", () => {
+  test("flip đúng status 'pending' của worksheet đó thành 'present', gắn source attendance", async () => {
+    const worksheetId = new mongoose.Types.ObjectId();
+    const doc = await WorkDayStatusModel.create({
+      user_id: new mongoose.Types.ObjectId(),
+      worksheet_id: worksheetId,
+      date: new Date("2026-07-01T00:00:00.000Z"),
+      period: "full",
+      status: "pending",
+      sources: []
+    });
+
+    const repo = new WorkDayStatusRepository();
+    await repo.markPendingAsPresent(worksheetId.toString());
+
+    const updated = await WorkDayStatusModel.findById(doc._id);
+    expect(updated?.status).toBe("present");
+    expect(updated?.sources).toHaveLength(1);
+    expect(updated?.sources[0].ref_type).toBe("attendance");
+  });
+
+  test("không đụng status khác 'pending' (vd đã 'present'/'leave_paid') của cùng worksheet", async () => {
+    const worksheetId = new mongoose.Types.ObjectId();
+    const leaveDoc = await WorkDayStatusModel.create({
+      user_id: new mongoose.Types.ObjectId(),
+      worksheet_id: worksheetId,
+      date: new Date("2026-07-01T00:00:00.000Z"),
+      period: "morning",
+      status: "leave_paid",
+      sources: []
+    });
+
+    const repo = new WorkDayStatusRepository();
+    await repo.markPendingAsPresent(worksheetId.toString());
+
+    const unchanged = await WorkDayStatusModel.findById(leaveDoc._id);
+    expect(unchanged?.status).toBe("leave_paid");
+  });
+
+  test("không đụng doc 'pending' của worksheet KHÁC", async () => {
+    const worksheetId = new mongoose.Types.ObjectId();
+    const otherWorksheetId = new mongoose.Types.ObjectId();
+    const otherDoc = await WorkDayStatusModel.create({
+      user_id: new mongoose.Types.ObjectId(),
+      worksheet_id: otherWorksheetId,
+      date: new Date("2026-07-01T00:00:00.000Z"),
+      period: "full",
+      status: "pending",
+      sources: []
+    });
+
+    const repo = new WorkDayStatusRepository();
+    await repo.markPendingAsPresent(worksheetId.toString());
+
+    const unchanged = await WorkDayStatusModel.findById(otherDoc._id);
+    expect(unchanged?.status).toBe("pending");
+  });
+
+  test("không có doc 'pending' nào: không lỗi", async () => {
+    const repo = new WorkDayStatusRepository();
+    await expect(
+      repo.markPendingAsPresent(new mongoose.Types.ObjectId().toString())
+    ).resolves.not.toThrow();
+  });
+});

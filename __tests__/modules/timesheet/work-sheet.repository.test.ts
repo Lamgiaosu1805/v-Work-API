@@ -193,4 +193,62 @@ describe("WorkSheetRepository.upsertRawPunch", () => {
     expect(record.check_in).toEqual(newCheckIn);
     expect(record.check_out).toEqual(existingCheckOut); // không đổi
   });
+
+  // task 1.8.4.6 — mở rộng RawPunchUpdate cho minutes_late/minute_early ("optimistic real-time" từ
+  // modules/attendance/domain/naive-punch-timing.ts).
+  test("truyền kèm minutes_late/minute_early: ghi đúng cả 2 field", async () => {
+    const userId = new mongoose.Types.ObjectId();
+    const checkIn = new Date("2026-07-01T01:20:00.000Z");
+
+    const repo = new WorkSheetRepository();
+    const record = await repo.upsertRawPunch(userId.toString(), dayStart, {
+      check_in: checkIn,
+      minutes_late: 20
+    });
+
+    expect(record.check_in).toEqual(checkIn);
+    expect(record.minutes_late).toBe(20);
+
+    const doc = await WorkSheetModel.findOne({ user_id: userId }).lean();
+    expect(doc?.minutes_late).toBe(20);
+  });
+
+  test("minutes_late/minute_early = 0 vẫn được ghi (không bị coi như falsy/bỏ qua)", async () => {
+    const userId = new mongoose.Types.ObjectId();
+    await WorkSheetModel.create({
+      user_id: userId,
+      date: dayStart,
+      shifts: [],
+      minutes_late: 15,
+      minute_early: 15
+    });
+
+    const repo = new WorkSheetRepository();
+    const record = await repo.upsertRawPunch(userId.toString(), dayStart, {
+      minutes_late: 0,
+      minute_early: 0
+    });
+
+    expect(record.minutes_late).toBe(0);
+    expect(record.minute_early).toBe(0);
+  });
+
+  test("không truyền minutes_late/minute_early: giữ nguyên giá trị cũ, không bị reset", async () => {
+    const userId = new mongoose.Types.ObjectId();
+    await WorkSheetModel.create({
+      user_id: userId,
+      date: dayStart,
+      shifts: [],
+      minutes_late: 30,
+      minute_early: 5
+    });
+
+    const repo = new WorkSheetRepository();
+    const record = await repo.upsertRawPunch(userId.toString(), dayStart, {
+      check_out: new Date("2026-07-01T10:00:00.000Z")
+    });
+
+    expect(record.minutes_late).toBe(30);
+    expect(record.minute_early).toBe(5);
+  });
 });

@@ -1,7 +1,8 @@
 import moment from "moment-timezone";
 import {
   calculateMinutesLate,
-  calculateMinutesEarly
+  calculateMinutesEarly,
+  hasShiftEnded
 } from "../../../src/modules/attendance/domain/naive-punch-timing";
 
 const TZ = "Asia/Ho_Chi_Minh";
@@ -38,5 +39,22 @@ describe("calculateMinutesEarly", () => {
   test("check-out muộn hơn giờ tan ca (17:40, ca tan 17:30): 0 phút sớm (không âm)", () => {
     const now = moment.tz(`${DATE_KEY} 17:40`, "YYYY-MM-DD HH:mm", TZ).toDate();
     expect(calculateMinutesEarly(now, DATE_KEY, "17:30")).toBe(0);
+  });
+});
+
+describe("hasShiftEnded", () => {
+  test("trước giờ tan ca (17:00, ca tan 17:30): false", () => {
+    const now = moment.tz(`${DATE_KEY} 17:00`, "YYYY-MM-DD HH:mm", TZ).toDate();
+    expect(hasShiftEnded(now, DATE_KEY, "17:30")).toBe(false);
+  });
+
+  test("đúng giờ tan ca (17:30): false (isAfter không tính bằng)", () => {
+    const now = moment.tz(`${DATE_KEY} 17:30`, "YYYY-MM-DD HH:mm", TZ).toDate();
+    expect(hasShiftEnded(now, DATE_KEY, "17:30")).toBe(false);
+  });
+
+  test("sau giờ tan ca (17:31, ca tan 17:30): true", () => {
+    const now = moment.tz(`${DATE_KEY} 17:31`, "YYYY-MM-DD HH:mm", TZ).toDate();
+    expect(hasShiftEnded(now, DATE_KEY, "17:30")).toBe(true);
   });
 });

@@ -30,6 +30,8 @@ export interface WorkSheetComputedUpdate {
 export interface RawPunchUpdate {
   check_in?: Date;
   check_out?: Date;
+  minutes_late?: number;
+  minute_early?: number;
 }
 
 interface WorkSheetLeanDoc {
@@ -129,9 +131,11 @@ export class WorkSheetRepository {
     const dayEnd = moment.tz(dateKey, TZ).add(1, "day").startOf("day").toDate();
     const resolvedSession = this.resolveSession(session);
 
-    const update: Record<string, Date> = {};
+    const update: Record<string, Date | number> = {};
     if (clockUpdate.check_in) update.check_in = clockUpdate.check_in;
     if (clockUpdate.check_out) update.check_out = clockUpdate.check_out;
+    if (clockUpdate.minutes_late !== undefined) update.minutes_late = clockUpdate.minutes_late;
+    if (clockUpdate.minute_early !== undefined) update.minute_early = clockUpdate.minute_early;
 
     const updated = await WorkSheetModel.findOneAndUpdate(
       { user_id: userId, date: { $gte: dayStart, $lt: dayEnd }, isDeleted: false },

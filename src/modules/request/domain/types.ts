@@ -19,12 +19,12 @@ export interface ReviewerProfile {
   department_name: string | null;
 }
 
+// onCreate/onApprove/onReject đã bỏ khỏi type này (task 1.8.6) — side-effect xuyên module giờ sống ở
+// workflows/request-side-effects/ (xem RequestSideEffects trong index.ts ở đó), 7 handler ở helpers/
+// chỉ còn đúng validate/validateAsync (business rule thuần Request).
 export interface RequestTypeHandler {
   validate: (...args: any[]) => any;
   validateAsync: (...args: any[]) => any;
-  onCreate?: (...args: any[]) => any;
-  onApprove?: (...args: any[]) => any;
-  onReject?: (...args: any[]) => any;
 }
 
 export type RequestStatus = "pending" | "approved" | "rejected" | "cancelled";
@@ -43,6 +43,10 @@ export interface RequestProps {
   to_date?: Date;
   to_period?: "morning" | "afternoon";
   total_days?: number;
+  origin_location?: string;
+  destination_location?: string;
+  start_time?: string;
+  end_time?: string;
   leave_type?: "paid" | "unpaid";
   paid_days?: number;
   unpaid_days?: number;

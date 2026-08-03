@@ -167,6 +167,42 @@ describe("getRequestById()", () => {
     expect(String(data.pending_reviewer.accountId)).toBe(String(reviewerB));
   });
 
+  it("approval_chain: trả đủ cả 2 cấp kèm trạng thái đã duyệt/chưa duyệt của từng cấp", async () => {
+    const { account, userInfo } = await createUserInfo(1);
+    const reviewerA = new mongoose.Types.ObjectId();
+    const reviewerB = new mongoose.Types.ObjectId();
+    const doc = await LeaveRequest.create(
+      leaveRequestPayload(userInfo._id, {
+        status: "pending",
+        approvals: [{ account: reviewerA, reviewed_at: new Date() }]
+      })
+    );
+    can.mockResolvedValue(true);
+    getApprovalChain.mockResolvedValue([{ accountId: reviewerA }, { accountId: reviewerB }]);
+
+    const data = await getRequestById(account, String(doc._id));
+    expect(data.approval_chain).toHaveLength(2);
+    expect(data.approval_chain[0]).toMatchObject({
+      accountId: reviewerA,
+      approved: true
+    });
+    expect(data.approval_chain[1]).toMatchObject({
+      accountId: reviewerB,
+      approved: false
+    });
+  });
+
+  it("approval_chain: mảng rỗng khi status khác 'pending'", async () => {
+    const { account, userInfo } = await createUserInfo(1);
+    const doc = await LeaveRequest.create(
+      leaveRequestPayload(userInfo._id, { status: "cancelled" })
+    );
+    can.mockResolvedValue(false);
+
+    const data = await getRequestById(account, String(doc._id));
+    expect(data.approval_chain).toEqual([]);
+  });
+
   it("getApprovalChain chỉ gọi 1 lần dù cả nhánh canSee VÀ pending_reviewer đều cần dùng (memoize đúng)", async () => {
     const { account } = await createUserInfo(1);
     const { userInfo: owner } = await createUserInfo(2);

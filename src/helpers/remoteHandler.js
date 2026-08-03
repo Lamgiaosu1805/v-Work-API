@@ -1,6 +1,5 @@
 const { RequestModel } = require("../models/RequestModel");
 const { calcTotalDays } = require("./requestUtils");
-const { createOnApprove } = require("./awayDayHandler");
 
 function validate(body) {
   const { from_date, to_date } = body;
@@ -27,4 +26,4 @@ async function validateAsync(payload, userInfo, session) {
   return overlap ? { status: 409, message: "Đã có đơn remote trong khoảng thời gian này" } : null;
 }
 
-module.exports = { validate, validateAsync, onApprove: createOnApprove("remote") };
+module.exports = { validate, validateAsync };

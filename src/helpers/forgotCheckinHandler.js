@@ -3,17 +3,8 @@ const { RequestModel } = require("../models/RequestModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const { normalizeDayPunches } = require("./attendanceHelper");
-const {
-  processAttendanceDay,
-  getWorksheetForDay,
-  recordRawPunch,
-  buildLatePenaltyResolver,
-  buildEarlyPenaltyResolver,
-  buildForgotPenaltyResolver,
-  buildUnifiedForgotOccurrenceMap
-} = require("../modules/timesheet");
+const { buildUnifiedForgotOccurrenceMap } = require("../modules/timesheet");
 const { getPayrollPeriodRange } = require("./payrollPeriod");
-const { buildUserDayContext } = require("../jobs/finalizeWorkDay");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -149,103 +140,4 @@ async function computeForgotOccurrence(userId, date, session) {
   return occMap.get(dateKey)?.occurrence || monthRequests.length + 1;
 }
 
-async function onCreate(request, _userInfo, session) {
-  const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
-  const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
-  await WorkDayStatusModel.updateMany(
-    {
-      user_id: request.user_id,
-      date: { $gte: dateStart, $lte: dateEnd },
-      isDeleted: false
-    },
-    { $addToSet: { sources: { ref_id: request._id, ref_type: "request" } } },
-    { session }
-  );
-}
-
-async function onReject(request, session) {
-  const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
-  const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
-  await WorkDayStatusModel.updateMany(
-    {
-      user_id: request.user_id,
-      date: { $gte: dateStart, $lte: dateEnd },
-      isDeleted: false
-    },
-    { $pull: { sources: { ref_id: request._id, ref_type: "request" } } },
-    { session }
-  );
-}
-
-async function onApprove(request, session) {
-  const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
-  const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
-
-  const existing = await getWorksheetForDay(request.user_id.toString(), dateStart, session);
-
-  const clockUpdate = {};
-  if (request.expected_check_in) {
-    if (
-      request.type === "check_in" &&
-      existing?.check_in &&
-      !existing?.check_out &&
-      new Date(existing.check_in) > new Date(request.expected_check_in)
-    ) {
-      clockUpdate.check_out = existing.check_in;
-    }
-    clockUpdate.check_in = new Date(request.expected_check_in);
-  }
-  if (request.expected_check_out) {
-    if (
-      request.type === "check_out" &&
-      existing?.check_out &&
-      !existing?.check_in &&
-      new Date(existing.check_out) < new Date(request.expected_check_out)
-    ) {
-      clockUpdate.check_in = existing.check_out;
-    }
-    clockUpdate.check_out = new Date(request.expected_check_out);
-  }
-
-  const worksheet = await recordRawPunch({
-    userId: request.user_id.toString(),
-    date: dateStart,
-    checkIn: clockUpdate.check_in,
-    checkOut: clockUpdate.check_out,
-    session
-  });
-
-  const dateKey = moment.tz(request.date, TZ).format("YYYY-MM-DD");
-  const { start: periodStart, end: periodEnd } = getPayrollPeriodRange(request.date);
-  const [context, resolveLatePenalty, resolveEarlyPenalty, resolveForgotPenalty] =
-    await Promise.all([
-      buildUserDayContext(
-        request.user_id,
-        dateKey,
-        dateStart,
-        dateEnd,
-        periodStart,
-        periodEnd,
-        session
-      ),
-      buildLatePenaltyResolver(),
-      buildEarlyPenaltyResolver(),
-      buildForgotPenaltyResolver()
-    ]);
-
-  await processAttendanceDay({
-    userId: request.user_id.toString(),
-    worksheetId: worksheet.id,
-    dateKey,
-    rawIn: worksheet.check_in ? moment.tz(worksheet.check_in, TZ).format("HH:mm") : null,
-    rawOut: worksheet.check_out ? moment.tz(worksheet.check_out, TZ).format("HH:mm") : null,
-    worksheet,
-    ...context,
-    resolveLatePenalty,
-    resolveEarlyPenalty,
-    resolveForgotPenalty,
-    session
-  });
-}
-
-module.exports = { validate, validateAsync, onCreate, onReject, onApprove };
+module.exports = { validate, validateAsync };

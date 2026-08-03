@@ -1,25 +1,31 @@
-const moment = require("moment-timezone");
-const WorkSheetModel = require("../models/WorkSheetModel");
-const WorkDayStatusModel = require("../models/WorkDayStatusModel");
-const ShiftModel = require("../models/ShiftModel");
-const { applyLeaveConflictOverride } = require("../modules/timesheet");
-const { adjustLeaveBalance } = require("../modules/leave");
-const { LEAVE_BALANCE_REASON } = require("../constants");
+import moment from "moment-timezone";
+import { ClientSession } from "mongoose";
+import WorkSheetModel from "../../models/WorkSheetModel";
+import WorkDayStatusModel from "../../models/WorkDayStatusModel";
+import ShiftModel from "../../models/ShiftModel";
+import { applyLeaveConflictOverride } from "../../modules/timesheet";
+import { adjustLeaveBalance } from "../../modules/leave";
+import { LEAVE_BALANCE_REASON } from "../../constants";
 
 const TZ = "Asia/Ho_Chi_Minh";
 
-function buildTimeOnDate(dateMoment, hhmm) {
+function buildTimeOnDate(dateMoment: moment.Moment, hhmm: string): Date {
   const [h, m] = hhmm.split(":").map(Number);
   return dateMoment.clone().hour(h).minute(m).second(0).millisecond(0).toDate();
 }
-function createOnApprove(status) {
-  return async function onApprove(request, session) {
+
+// Port nguyên helpers/awayDayHandler.js's createOnApprove (task 1.8.6) — dùng chung cho remote/
+// business_trip/client_visit's onApprove. Chuyển vào workflows/ vì gọi thẳng modules/timesheet +
+// modules/leave (rule #1 mục 13 — 7 handler Request chỉ còn validate/validateAsync, side-effect xuyên
+// module sống ở workflows/).
+export function createOnApprove(status: string) {
+  return async function onApprove(request: any, session: ClientSession): Promise<void> {
     const fromMoment = moment.tz(request.from_date, TZ).startOf("day");
     const toMoment = moment.tz(request.to_date, TZ).startOf("day");
     const fromStart = fromMoment.toDate();
     const toEnd = moment.tz(request.to_date, TZ).endOf("day").toDate();
 
-    const workDates = [];
+    const workDates: moment.Moment[] = [];
     const cursor = fromMoment.clone();
     while (cursor.isSameOrBefore(toMoment, "day")) {
       if (cursor.day() !== 0) workDates.push(cursor.clone());
@@ -39,16 +45,19 @@ function createOnApprove(status) {
     })
       .populate("shifts")
       .session(session);
-    const sheetMap = new Map(existing.map((w) => [moment.tz(w.date, TZ).format("YYYY-MM-DD"), w]));
+    const sheetMap = new Map(
+      existing.map((w: any) => [moment.tz(w.date, TZ).format("YYYY-MM-DD"), w])
+    );
 
     for (const dateMoment of workDates) {
       const dateKey = dateMoment.format("YYYY-MM-DD");
       const isSaturday = dateMoment.day() === 6;
-      let worksheet = sheetMap.get(dateKey);
+      let worksheet: any = sheetMap.get(dateKey);
 
       if (!worksheet) {
         const defaultShift = isSaturday ? morningShift : adminShift;
-        const [created] = await WorkSheetModel.create(
+        // eslint-disable-next-line no-await-in-loop
+        const [created]: any[] = await WorkSheetModel.create(
           [
             {
               user_id: request.user_id,
@@ -58,6 +67,7 @@ function createOnApprove(status) {
           ],
           { session }
         );
+        // eslint-disable-next-line no-await-in-loop
         worksheet = await created.populate("shifts");
         sheetMap.set(dateKey, worksheet);
       }
@@ -73,6 +83,7 @@ function createOnApprove(status) {
       const check_out = buildTimeOnDate(dateMoment, endTime);
       const work_unit = isSaturday ? 0.5 : 1;
 
+      // eslint-disable-next-line no-await-in-loop
       await WorkSheetModel.updateOne(
         { _id: worksheet._id },
         {
@@ -86,6 +97,7 @@ function createOnApprove(status) {
         { session }
       );
 
+      // eslint-disable-next-line no-await-in-loop
       const { leaveRefundAmount } = await applyLeaveConflictOverride({
         userId: request.user_id.toString(),
         worksheetId: worksheet._id.toString(),
@@ -96,6 +108,7 @@ function createOnApprove(status) {
         session
       });
       if (leaveRefundAmount > 0) {
+        // eslint-disable-next-line no-await-in-loop
         await adjustLeaveBalance({
           userId: request.user_id,
           amount: leaveRefundAmount,
@@ -107,6 +120,7 @@ function createOnApprove(status) {
         });
       }
 
+      // eslint-disable-next-line no-await-in-loop
       await WorkDayStatusModel.findOneAndUpdate(
         { user_id: request.user_id, date: dateMoment.toDate(), period: "full" },
         {
@@ -119,5 +133,3 @@ function createOnApprove(status) {
     }
   };
 }
-
-module.exports = { createOnApprove };

@@ -33,6 +33,15 @@ const { PERMISSION } = require("../constants");
 const { correctDayStatuses } = require("../helpers/attendanceHelper");
 const { getPayrollPeriodRange, calcStandardWorkUnits } = require("../helpers/payrollPeriod");
 const { sendExceptionResponse } = require("../core/http/handle-exception");
+const { mapWithConcurrency } = require("../core/async/map-with-concurrency");
+
+// importExcel xử lý từng ngày của 1 nhân viên tuần tự trước đây — mỗi ngày tốn vài round-trip DB nối
+// tiếp nhau, cộng dồn latency mạng tới DB (đo thực tế: ~100-140ms/ngày khi WorkSheet đã tồn tại) x 31
+// ngày x nhiều nhân viên dễ vượt timeout. Chạy song song có giới hạn (không phải Promise.all không
+// giới hạn, tránh tràn connection pool — maxPoolSize=50 ở connectDB.js) để giảm tổng thời gian mà vẫn
+// an toàn: mỗi ngày ghi vào WorkSheet/WorkDayStatus của đúng ngày đó, không đụng ngày khác trong cùng
+// 1 nhân viên nên không có xung đột ghi khi chạy đồng thời.
+const IMPORT_EXCEL_DAY_CONCURRENCY = 10;
 
 const AttendanceController = {
   getAllowedWifiLocations: async (req, res) => {
@@ -975,7 +984,7 @@ const AttendanceController = {
         .startOf("day");
       const endOfMonth = startOfMonth.clone().endOf("month");
 
-      const [holidays, dayStatuses] = await Promise.all([
+      const [holidays, dayStatuses, worksheets] = await Promise.all([
         HolidayModel.find(
           {
             date: { $gte: startOfMonth.toDate(), $lte: endOfMonth.toDate() },
@@ -983,14 +992,26 @@ const AttendanceController = {
           },
           "date name"
         ),
+        // Không lọc theo status nữa — 1 ngày có thể cần hiện nhiều badge cùng lúc (vd quên chấm công
+        // buổi sáng + đi làm bình thường buổi chiều), FE tự quyết định badge nào ưu tiên hiển thị.
         WorkDayStatusModel.find(
           {
             user_id: user._id,
             date: { $gte: startOfMonth.toDate(), $lte: endOfMonth.toDate() },
-            status: { $in: ["leave_paid", "leave_unpaid", "absent"] },
             isDeleted: false
           },
           "date period status"
+        ),
+        // minutes_late/minute_early sống trên WorkSheet, độc lập với WorkDayStatus.status — 1 ngày có
+        // thể vừa "present" vừa đi muộn/về sớm, FE cần cả 2 để ghép badge (xem yêu cầu nghiệp vụ: 1
+        // ngày có thể trả nhiều trạng thái cùng lúc).
+        WorkSheetModel.find(
+          {
+            user_id: user._id,
+            date: { $gte: startOfMonth.toDate(), $lte: endOfMonth.toDate() },
+            isDeleted: false
+          },
+          "date minutes_late minute_early"
         )
       ]);
 
@@ -1007,7 +1028,14 @@ const AttendanceController = {
             date: moment.tz(s.date, "Asia/Ho_Chi_Minh").format("YYYY-MM-DD"),
             period: s.period,
             status: s.status
-          }))
+          })),
+          late_early: worksheets
+            .filter((w) => w.minutes_late > 0 || w.minute_early > 0)
+            .map((w) => ({
+              date: moment.tz(w.date, "Asia/Ho_Chi_Minh").format("YYYY-MM-DD"),
+              minutes_late: w.minutes_late,
+              minute_early: w.minute_early
+            }))
         }
       });
     } catch (err) {
@@ -1018,10 +1046,16 @@ const AttendanceController = {
 
   importExcel: async (req, res) => {
     const TZ = "Asia/Ho_Chi_Minh";
+    // Đo thời gian để xác định import-excel chậm ở bước nào (parse file / query context / ghi từng
+    // ngày) khi nghi ngờ timeout — log tách biệt hoàn toàn với response HTTP nên vẫn in ra dù
+    // res.setTimeout(30000) (index.js) đã trả 503 trước khi xử lý xong.
+    const importStartedAt = Date.now();
+    const elapsed = (from) => `${Date.now() - from}ms`;
     try {
       if (!req.file) return res.status(400).json({ message: "Chưa upload file" });
 
       let blocks;
+      const parseStartedAt = Date.now();
       try {
         blocks = parseExcelToBlocks(req.file.buffer);
       } catch (e) {
@@ -1030,14 +1064,19 @@ const AttendanceController = {
           message: "Không đọc được file Excel. Kiểm tra lại định dạng file (.xlsx)."
         });
       }
+      console.log(
+        `[importExcel][timing] parse file: ${elapsed(parseStartedAt)}, ${blocks.length} block(s), file size ${req.file.size} bytes`
+      );
       if (!blocks.length)
         return res.status(400).json({
           message: "File không đúng định dạng bảng chấm công (không tìm thấy nhân viên nào)."
         });
 
+      const mappingStartedAt = Date.now();
       const allMappings = await AttendanceMachineMappingModel.find({
         isDeleted: false
       });
+      console.log(`[importExcel][timing] load mapping: ${elapsed(mappingStartedAt)}`);
       if (!allMappings.length)
         return res.status(400).json({
           message:
@@ -1045,17 +1084,23 @@ const AttendanceController = {
         });
       const mappingMap = new Map(allMappings.map((m) => [m.machine_code, m.user_id]));
 
+      const resolverStartedAt = Date.now();
       const resolveLatePenalty = await buildLatePenaltyResolver();
       const resolveEarlyPenalty = await buildEarlyPenaltyResolver();
       const resolveForgotPenalty = await buildForgotPenaltyResolver();
+      console.log(`[importExcel][timing] build penalty resolvers: ${elapsed(resolverStartedAt)}`);
 
       const unmatched = [];
       const failures = [];
-      let imported = 0;
-      let skipped = 0;
-      let unchanged = 0;
+      // Object thay vì 3 biến `let` riêng — closures song song trong mapWithConcurrency chỉ mutate
+      // property của object này (không reassign biến), tránh no-loop-func (eslint) mà không cần
+      // disable comment.
+      const counts = { imported: 0, skipped: 0, unchanged: 0 };
+      let blockIndex = 0;
 
       for (const block of blocks) {
+        blockIndex += 1;
+        const blockStartedAt = Date.now();
         const userId = mappingMap.get(block.machine_code);
         if (!userId) {
           unmatched.push(block.machine_code);
@@ -1071,6 +1116,7 @@ const AttendanceController = {
         let lateForgivenSet;
         let earlyForgivenSet;
         let leavePeriodsMap;
+        const contextStartedAt = Date.now();
         try {
           const rangeStart = moment
             .tz(dayRows[0].dateStr, "DD/MM/YYYY", TZ)
@@ -1112,6 +1158,9 @@ const AttendanceController = {
           );
           ({ forgotMap, forgotOccurrenceMap, lateForgivenSet, earlyForgivenSet, leavePeriodsMap } =
             context);
+          console.log(
+            `[importExcel][timing] block ${blockIndex}/${blocks.length} (mã ${block.machine_code}, ${dayRows.length} ngày) - load context: ${elapsed(contextStartedAt)}`
+          );
         } catch (e) {
           console.error(`[importExcel] Lỗi tải dữ liệu nhân viên (mã ${block.machine_code}):`, e);
           failures.push({
@@ -1119,125 +1168,152 @@ const AttendanceController = {
             date: null,
             reason: `Không tải được dữ liệu: ${e.message}`
           });
-          skipped += dayRows.length;
+          counts.skipped += dayRows.length;
           continue;
         }
 
         const excelDateKeys = new Set();
+        const excelLoopStartedAt = Date.now();
 
-        for (const { dateStr, rawIn, rawOut } of dayRows) {
-          const dateKey = moment.tz(dateStr, "DD/MM/YYYY", TZ).format("YYYY-MM-DD");
+        await mapWithConcurrency(
+          dayRows,
+          IMPORT_EXCEL_DAY_CONCURRENCY,
+          async ({ dateStr, rawIn, rawOut }) => {
+            const dateKey = moment.tz(dateStr, "DD/MM/YYYY", TZ).format("YYYY-MM-DD");
 
-          if (rawIn || rawOut || forgotMap.has(dateKey)) {
-            excelDateKeys.add(dateKey);
-          }
-          const worksheet = worksheetMap.get(dateKey);
-          if (!worksheet) {
-            // Giữ đúng behavior gốc: resolveAttendanceDay(worksheet:undefined) trả skip:true —
-            // processAttendanceDay cần worksheetId tường minh nên guard sớm hơn 1 bước, không đổi
-            // kết quả (vẫn tính vào skipped).
-            skipped++;
-            continue;
-          }
-
-          try {
-            const result = await processAttendanceDay({
-              userId,
-              worksheetId: worksheet._id.toString(),
-              dateKey,
-              rawIn,
-              rawOut,
-              worksheet,
-              forgotMap,
-              forgotOccurrenceMap,
-              lateForgivenSet,
-              earlyForgivenSet,
-              leavePeriodsMap,
-              resolveLatePenalty,
-              resolveEarlyPenalty,
-              resolveForgotPenalty
-            });
-            if (result.skip) {
-              skipped++;
-            } else if (result.unchanged) {
-              unchanged++;
-            } else {
-              imported++;
+            if (rawIn || rawOut || forgotMap.has(dateKey)) {
+              excelDateKeys.add(dateKey);
             }
-          } catch (e) {
-            console.error(`[importExcel] Lỗi ngày ${dateStr} (mã ${block.machine_code}):`, e);
-            failures.push({
-              machine_code: block.machine_code,
-              date: dateStr,
-              reason: e.message
-            });
-            skipped++;
-          }
-        }
-
-        for (const [dateKey, worksheet] of worksheetMap) {
-          if (excelDateKeys.has(dateKey)) continue;
-          if (!worksheet.check_in && !worksheet.check_out) continue;
-          const rawIn = worksheet.check_in
-            ? moment.tz(worksheet.check_in, TZ).format("HH:mm")
-            : null;
-          const rawOut = worksheet.check_out
-            ? moment.tz(worksheet.check_out, TZ).format("HH:mm")
-            : null;
-
-          try {
-            const result = await processAttendanceDay({
-              userId,
-              worksheetId: worksheet._id.toString(),
-              dateKey,
-              rawIn,
-              rawOut,
-              worksheet,
-              forgotMap,
-              forgotOccurrenceMap,
-              lateForgivenSet,
-              earlyForgivenSet,
-              leavePeriodsMap,
-              resolveLatePenalty,
-              resolveEarlyPenalty,
-              resolveForgotPenalty
-            });
-            if (result.skip) {
-              skipped++;
-            } else if (result.unchanged) {
-              unchanged++;
-            } else {
-              imported++;
+            const worksheet = worksheetMap.get(dateKey);
+            if (!worksheet) {
+              // Giữ đúng behavior gốc: resolveAttendanceDay(worksheet:undefined) trả skip:true —
+              // processAttendanceDay cần worksheetId tường minh nên guard sớm hơn 1 bước, không đổi
+              // kết quả (vẫn tính vào skipped).
+              counts.skipped++;
+              return;
             }
-          } catch (e) {
-            console.error(
-              `[importExcel] Lỗi ngày ${dateKey} (mã ${block.machine_code}, dữ liệu app):`,
-              e
-            );
-            failures.push({
-              machine_code: block.machine_code,
-              date: moment.tz(dateKey, TZ).format("DD/MM/YYYY"),
-              reason: e.message
-            });
-            skipped++;
+
+            try {
+              const result = await processAttendanceDay({
+                userId,
+                worksheetId: worksheet._id.toString(),
+                dateKey,
+                rawIn,
+                rawOut,
+                worksheet,
+                forgotMap,
+                forgotOccurrenceMap,
+                lateForgivenSet,
+                earlyForgivenSet,
+                leavePeriodsMap,
+                resolveLatePenalty,
+                resolveEarlyPenalty,
+                resolveForgotPenalty
+              });
+              if (result.skip) {
+                counts.skipped++;
+              } else if (result.unchanged) {
+                counts.unchanged++;
+              } else {
+                counts.imported++;
+              }
+            } catch (e) {
+              console.error(`[importExcel] Lỗi ngày ${dateStr} (mã ${block.machine_code}):`, e);
+              failures.push({
+                machine_code: block.machine_code,
+                date: dateStr,
+                reason: e.message
+              });
+              counts.skipped++;
+            }
           }
-        }
+        );
+
+        console.log(
+          `[importExcel][timing] block ${blockIndex}/${blocks.length} (mã ${block.machine_code}) - process ${dayRows.length} ngày (excel): ${elapsed(excelLoopStartedAt)}`
+        );
+
+        const catchupLoopStartedAt = Date.now();
+        const catchupEntries = [...worksheetMap.entries()].filter(
+          ([dateKey, worksheet]) =>
+            !excelDateKeys.has(dateKey) && (worksheet.check_in || worksheet.check_out)
+        );
+
+        await mapWithConcurrency(
+          catchupEntries,
+          IMPORT_EXCEL_DAY_CONCURRENCY,
+          async ([dateKey, worksheet]) => {
+            const rawIn = worksheet.check_in
+              ? moment.tz(worksheet.check_in, TZ).format("HH:mm")
+              : null;
+            const rawOut = worksheet.check_out
+              ? moment.tz(worksheet.check_out, TZ).format("HH:mm")
+              : null;
+
+            try {
+              const result = await processAttendanceDay({
+                userId,
+                worksheetId: worksheet._id.toString(),
+                dateKey,
+                rawIn,
+                rawOut,
+                worksheet,
+                forgotMap,
+                forgotOccurrenceMap,
+                lateForgivenSet,
+                earlyForgivenSet,
+                leavePeriodsMap,
+                resolveLatePenalty,
+                resolveEarlyPenalty,
+                resolveForgotPenalty
+              });
+              if (result.skip) {
+                counts.skipped++;
+              } else if (result.unchanged) {
+                counts.unchanged++;
+              } else {
+                counts.imported++;
+              }
+            } catch (e) {
+              console.error(
+                `[importExcel] Lỗi ngày ${dateKey} (mã ${block.machine_code}, dữ liệu app):`,
+                e
+              );
+              failures.push({
+                machine_code: block.machine_code,
+                date: moment.tz(dateKey, TZ).format("DD/MM/YYYY"),
+                reason: e.message
+              });
+              counts.skipped++;
+            }
+          }
+        );
+
+        const catchupCount = catchupEntries.length;
+
+        console.log(
+          `[importExcel][timing] block ${blockIndex}/${blocks.length} (mã ${block.machine_code}) - process ${catchupCount} ngày (dữ liệu app, ngoài excel): ${elapsed(catchupLoopStartedAt)}, tổng block: ${elapsed(blockStartedAt)}`
+        );
       }
+
+      console.log(
+        `[importExcel][timing] TỔNG THỜI GIAN: ${elapsed(importStartedAt)} (${counts.imported} ngày cập nhật, ${counts.unchanged} không đổi, ${counts.skipped} bỏ qua, ${blocks.length} block)`
+      );
 
       const unmatchedUniq = [...new Set(unmatched)];
 
       return res.json({
-        message: `Import hoàn tất: ${imported} ngày cập nhật, ${unchanged} ngày không đổi, ${skipped} ngày bỏ qua`,
+        message: `Import hoàn tất: ${counts.imported} ngày cập nhật, ${counts.unchanged} ngày không đổi, ${counts.skipped} ngày bỏ qua`,
         data: {
-          imported,
-          unchanged,
-          skipped,
+          imported: counts.imported,
+          unchanged: counts.unchanged,
+          skipped: counts.skipped,
           unmatched_codes: unmatchedUniq,
           failures
         }
       });
     } catch (err) {
-      console.error(err);
+      console.error(`[importExcel][timing] LỖI sau ${elapsed(importStartedAt)}:`, err);
       return res.status(500).json({ message: "Lỗi server", error: err.message });
     }
   },

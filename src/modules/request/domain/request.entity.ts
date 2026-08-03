@@ -34,8 +34,8 @@ export const REQUEST_TYPE_FIELDS: Record<RequestType, string[]> = {
   ],
   late_early: ["date", "shift_id", "type", "minutes", "occurrence"],
   remote: ["from_date", "to_date", "total_days"],
-  business_trip: ["from_date", "to_date", "total_days"],
-  client_visit: ["from_date", "to_date", "total_days"],
+  business_trip: ["from_date", "to_date", "total_days", "origin_location", "destination_location"],
+  client_visit: ["from_date", "to_date", "total_days", "start_time", "end_time"],
   explanation: ["date", "shift_id", "content"],
   forgot_checkin: ["date", "type", "expected_check_in", "expected_check_out", "occurrence"]
 };

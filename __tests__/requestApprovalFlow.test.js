@@ -18,7 +18,9 @@ const UserRoleModel = require("../src/models/UserRoleModel");
 const NotificationModel = require("../src/models/NotificationModel");
 const { LeaveRequest } = require("../src/models/RequestModel");
 const { PERMISSION } = require("../src/constants");
-const leaveHandler = require("../src/helpers/leaveHandler");
+// leaveHandler.js chỉ còn validate/validateAsync từ task 1.8.6 — onApprove/onReject (side-effect xuyên
+// Timesheet/Leave) đã chuyển sang workflows/request-side-effects/leave.ts, spy nhắm vào đó.
+const leaveHandler = require("../src/workflows/request-side-effects/leave");
 const redisMock = require("./mocks/redis");
 
 let mongod;

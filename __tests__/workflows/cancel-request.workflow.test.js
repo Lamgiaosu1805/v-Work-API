@@ -1,19 +1,17 @@
 const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 
-const AccountModel = require("../../../src/models/AccountModel");
-const UserInfoModel = require("../../../src/models/UserInfoModel");
-const LeaveBalanceModel = require("../../../src/models/LeaveBalanceModel");
-const { LeaveRequest, RemoteRequest } = require("../../../src/models/RequestModel");
-const { RequestEntity } = require("../../../src/modules/request/domain/request.entity");
+const AccountModel = require("../../src/models/AccountModel");
+const UserInfoModel = require("../../src/models/UserInfoModel");
+const LeaveBalanceModel = require("../../src/models/LeaveBalanceModel");
+const { LeaveRequest, RemoteRequest } = require("../../src/models/RequestModel");
+const { RequestEntity } = require("../../src/modules/request/domain/request.entity");
 const {
   RequestRepository
-} = require("../../../src/modules/request/infrastructure/request.repository");
-const {
-  cancelRequest
-} = require("../../../src/modules/request/application/cancel-request.service");
-const { RequestContextService } = require("../../../src/core/context/request-context");
-const leaveHandler = require("../../../src/helpers/leaveHandler");
+} = require("../../src/modules/request/infrastructure/request.repository");
+const { cancelRequest } = require("../../src/workflows/cancel-request.workflow");
+const { RequestContextService } = require("../../src/core/context/request-context");
+const leaveSideEffects = require("../../src/workflows/request-side-effects/leave");
 
 let mongod;
 let repo;
@@ -76,7 +74,12 @@ async function insertEntity(entity) {
   await RequestContextService.run({ requestId: "setup" }, () => repo.insert(entity));
 }
 
-describe("cancelRequest()", () => {
+// Port nguyên __tests__/modules/request/cancel-request.test.js (task 1.8.6) — orchestration (mở
+// transaction + dispatch side-effect xuyên module) đã chuyển từ modules/request/application/
+// cancel-request.service.ts sang workflows/cancel-request.workflow.ts, giữ nguyên toàn bộ assertion.
+// Khác biệt duy nhất: spy onReject giờ nhắm vào workflows/request-side-effects/leave thay vì
+// helpers/leaveHandler (giờ chỉ còn validate/validateAsync).
+describe("cancelRequest() (workflows/cancel-request.workflow)", () => {
   it("throw ArgumentInvalidException (400) khi id không hợp lệ", async () => {
     const { account } = await createUserInfo(1);
     await expect(cancelRequest(account, "not-an-object-id")).rejects.toMatchObject({
@@ -132,7 +135,7 @@ describe("cancelRequest()", () => {
     const entity = newLeaveEntity(userInfo._id, { paid_days: 2 });
     await insertEntity(entity);
 
-    const onRejectSpy = jest.spyOn(leaveHandler, "onReject");
+    const onRejectSpy = jest.spyOn(leaveSideEffects, "onReject");
 
     await cancelRequest(account, entity.id);
 

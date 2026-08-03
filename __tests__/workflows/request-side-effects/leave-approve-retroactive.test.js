@@ -2,15 +2,15 @@ const mongoose = require("mongoose");
 const moment = require("moment-timezone");
 const { MongoMemoryServer } = require("mongodb-memory-server");
 
-const { onApprove } = require("../src/helpers/leaveHandler");
-const { getLeaveBalance } = require("../src/modules/leave");
-const UserInfoModel = require("../src/models/UserInfoModel");
-const WorkSheetModel = require("../src/models/WorkSheetModel");
-const WorkDayStatusModel = require("../src/models/WorkDayStatusModel");
-const ShiftModel = require("../src/models/ShiftModel");
-const LeaveBalanceModel = require("../src/models/LeaveBalanceModel");
-const { LEAVE_BALANCE_REASON } = require("../src/constants");
-const redisMock = require("./mocks/redis");
+const { onApprove } = require("../../../src/workflows/request-side-effects/leave");
+const { getLeaveBalance } = require("../../../src/modules/leave");
+const UserInfoModel = require("../../../src/models/UserInfoModel");
+const WorkSheetModel = require("../../../src/models/WorkSheetModel");
+const WorkDayStatusModel = require("../../../src/models/WorkDayStatusModel");
+const ShiftModel = require("../../../src/models/ShiftModel");
+const LeaveBalanceModel = require("../../../src/models/LeaveBalanceModel");
+const { LEAVE_BALANCE_REASON } = require("../../../src/constants");
+const redisMock = require("../../mocks/redis");
 
 const TZ = "Asia/Ho_Chi_Minh";
 const DATE_KEY = "2026-06-24"; // thứ 4
@@ -77,7 +77,7 @@ const makeLeaveRequest = () => ({
   unpaid_days: 0
 });
 
-describe("onApprove — đơn nghỉ phép hồi tố đè lên ngày đã đi làm", () => {
+describe("workflows/request-side-effects/leave's onApprove — đơn nghỉ phép hồi tố đè lên ngày đã đi làm", () => {
   test("ngày đã chấm công đủ in+out: status lật về present và hoàn phép", async () => {
     await WorkSheetModel.create({
       user_id: userInfo._id,

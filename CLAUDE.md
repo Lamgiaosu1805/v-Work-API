@@ -33,15 +33,21 @@ src/
     firebase.js                 # Firebase Admin SDK (push notification)
     redis.js                    # Redis client
     common/utils.js
-  core/                         # DDD/Hexagonal building blocks dùng chung — xem mục "DDD + Hexagonal"
+  core/                         # DDD/Hexagonal building blocks dùng chung — xem mục "DDD + Hexagonal", 100% .ts
     ddd/                        # Entity, AggregateRoot, DomainEvent base class
     db/                         # MongooseRepositoryBase, runInTransaction
-    events/                     # event-bus.js (EventEmitter2 singleton)
+    events/                     # event-bus.ts (EventEmitter2 singleton)
     exceptions/                 # ExceptionBase + Exception cụ thể (404/403/409/400)
     context/                    # RequestContextService (AsyncLocalStorage — requestId, transaction session)
-    http/                       # asyncHandler, error-handler middleware, parsePagination
-  modules/                      # Module theo DDD/Hexagonal — MỚI, xem mục "DDD + Hexagonal"
-    request/                    # Module tham chiếu đầu tiên (hoàn thành)
+    http/                       # asyncHandler, error-handler middleware, parsePagination, express.d.ts
+  shared-kernel/                # Value object dùng chung xuyên module (EmployeeId, DateKey, Period, Money)
+  modules/                      # Module theo DDD/Hexagonal — xem mục "DDD + Hexagonal"
+    request/                    # Module tham chiếu đầu tiên (hoàn thành, có route/controller riêng)
+    leave/                      # LeaveBalance — sổ cái ngày phép (adjust/get), Redis lock
+    timesheet/                  # Engine đối soát ngày công — sở hữu WorkSheetModel + WorkDayStatusModel
+    attendance/                 # Wifi/geofence check-in/out (thuần), CRUD wifi/shift, Excel parser
+  workflows/                    # Tầng orchestration xuyên module — xem mục "workflows/" trong "DDD + Hexagonal"
+    request-side-effects/       # Side-effect theo request_type (leave/late_early/forgot_checkin/away-day)
   controllers/                  # Pattern CŨ — xử lý logic request/response trực tiếp (chưa migrate)
   middlewares/
     authMiddleware.js           # authenticate + isAdmin + isManager + hasCrmAccess
@@ -68,7 +74,7 @@ uploads/                        # Thư mục upload (dev), gitignored
 Từ module `request` (`src/modules/request/`) trở đi, module mới áp dụng DDD + Hexagonal thay cho
 pattern `controllers/` + `routes/` cũ. Chi tiết lộ trình đầy đủ + mọi quyết định kiến trúc/deviation:
 xem `docs/DDD-HEXAGONAL-MIGRATION-PLAN.md`. **Dùng `src/modules/request/` làm ví dụ tham chiếu khi bắt
-đầu module tiếp theo.**
+đầu module tiếp theo.** Module mới viết thẳng TypeScript (`.ts`) ngay từ đầu, không còn `.js`.
 
 ### Cấu trúc 1 module
 
@@ -76,28 +82,51 @@ xem `docs/DDD-HEXAGONAL-MIGRATION-PLAN.md`. **Dùng `src/modules/request/` làm 
 src/modules/<name>/
   domain/                 # Entity, AggregateRoot, DomainEvent, business invariant — KHÔNG import Mongoose
     events/
-    <name>.entity.js
-    <name>.errors.js
+    <name>.entity.ts
+    <name>.errors.ts
   infrastructure/         # Nơi DUY NHẤT trong module biết Mongoose
-    <name>.repository.js  # extends MongooseRepositoryBase
-    <name>.mapper.js      # Mongoose doc <-> Entity <-> persistence object
-  application/            # Service — orchestrate domain + repository + gọi runInTransaction
-    <use-case>.service.js
-  interface/              # HTTP — mỏng, chỉ map request -> service -> response
-    <name>.http.controller.js
-    <name>.routes.js
+    <name>.repository.ts  # extends MongooseRepositoryBase
+    <name>.mapper.ts      # Mongoose doc <-> Entity <-> persistence object
+  application/            # Use-case service — orchestrate domain + repository (KHÔNG tự import module khác)
+    <use-case>.service.ts
+  interface/              # HTTP — mỏng, chỉ map request -> service/workflow -> response (chỉ module có route riêng, vd `request`)
+    <name>.http.controller.ts
+    <name>.routes.ts
+  index.ts                # Public API — CHỈ export application service + type cần dùng ngoài module,
+                           # KHÔNG export domain Entity/Repository (để workflows/ hoặc module khác import)
 ```
+
+### `workflows/` — tầng orchestration xuyên module (từ Phase 1.8)
+
+`src/workflows/` là nơi **DUY NHẤT** được phép import ≥2 module cùng lúc. 4 luật:
+
+1. `modules/<x>/**` chỉ import `core/`, `shared-kernel/`, và chính nó — **không** import `modules/<y>`.
+2. `workflows/*.workflow.ts` import nhiều module, chỉ qua `index.ts` (public API) của mỗi module —
+   không thò vào `domain/`/`infrastructure/` module khác.
+3. Mỗi Mongoose model có đúng 1 owner = repository của đúng 1 module.
+4. Transaction xuyên module: workflow mở `runInTransaction` 1 lần duy nhất, session tự chảy qua
+   `AsyncLocalStorage` (`RequestContextService`) — mọi repository của mọi module tự nhặt session này,
+   không cần truyền tay qua nhiều lớp hàm.
+
+Ví dụ: `workflows/review-request.workflow.ts` mở 1 transaction, gọi `modules/request`'s
+`reviewRequestEntity()` (duyệt/từ chối đơn — thuần Request, không side-effect) rồi dispatch side-effect
+xuyên Timesheet/Leave qua registry `workflows/request-side-effects/` theo `request_type` — atomicity
+được giữ nguyên vì cả 2 bước nằm chung 1 transaction.
+
+**Composition-root code cũ** (`src/controllers/*.js`, `src/jobs/*.js` — chưa migrate DDD) vẫn được phép
+tự import nhiều module trực tiếp (không bắt buộc qua `workflows/`) — luật #1/#2 chỉ áp cho code sống
+BÊN TRONG `src/modules/`.
 
 ### Quy ước đã chốt
 
 - **Đọc bypass domain (CQRS-lite):** API đọc (list/getById) query thẳng Mongoose, KHÔNG dựng Entity —
   chỉ API ghi (create/update/cancel/review...) mới đi qua Entity + Repository.
-- **Transaction:** dùng `core/db/run-in-transaction.js` (`runInTransaction(work)`), không tự quản
+- **Transaction:** dùng `core/db/run-in-transaction.ts` (`runInTransaction(work)`), không tự quản
   session thủ công. Tự map lỗi MongoDB write-conflict (`TransientTransactionError`) thành
   `ConflictException` (409) sạch, không rò `MongoServerError` ra ngoài.
 - **Domain Event:** `AggregateRoot.addEvent()` buffer event trong entity; gọi
   `entity.publishEvents(eventBus)` (fire-and-forget, sau khi transaction đã commit) để publish.
-  `eventBus` là singleton `EventEmitter2` ở `core/events/event-bus.js`. Handler side-effect (vd
+  `eventBus` là singleton `EventEmitter2` ở `core/events/event-bus.ts`. Handler side-effect (vd
   notify) đăng ký qua `eventBus.on(...)` trong 1 file riêng ở `application/`, và **mỗi service publish
   event đó tự `require()` file handler** (side-effect import, không chỉ wire ở composition root) — để
   listener luôn sẵn sàng kể cả khi test gọi thẳng service, không qua route.
@@ -105,14 +134,18 @@ src/modules/<name>/
   `ConflictException`, `ArgumentInvalidException`...) từ domain/application — route dùng `asyncHandler`
   (bắt reject) + `errorHandlerMiddleware` tự format response, controller không cần try/catch thủ công.
 - **Request-type handler** (riêng module `request`): mỗi loại đơn (`leave`, `late_early`, `remote`,
-  `business_trip`, `client_visit`, `explanation`, `forgot_checkin`) có 1 file
-  `helpers/<type>Handler.js` theo contract `validate`/`validateAsync`/`onCreate`/`onApprove`/
-  `onReject` — **chưa di chuyển vào `domain/`** (2 handler phụ thuộc sâu vào Attendance, dời Phase 8).
+  `business_trip`, `client_visit`, `explanation`, `forgot_checkin`) có 1 file `helpers/<type>Handler.js`
+  theo contract **chỉ còn `validate`/`validateAsync`** (business rule thuần Request, không đụng module
+  khác). Side-effect xuyên module (`onCreate`/`onApprove`/`onReject` cũ) đã chuyển hết vào
+  `workflows/request-side-effects/<type>.ts`, dispatch qua registry `REQUEST_SIDE_EFFECTS` theo
+  `request_type` — xem `workflows/review-request.workflow.ts` để rõ cách gọi.
 
 ### Trạng thái
 
-Chỉ module `request` đã hoàn thành theo pattern này. Các module khác vẫn dùng `controllers/` +
-`routes/` cũ cho tới khi tới lượt migrate (xem thứ tự ở migration plan).
+Đã hoàn thành theo pattern DDD/Hexagonal: `request`, `leave`, `timesheet`, `attendance` (module) +
+`workflows/` (tầng orchestration cho check-in/out, import Excel, tạo/duyệt/huỷ đơn). Các phần còn lại
+(`user`, `department`, `weekly-report`, `chat`, `post`, `labor-contract`) vẫn dùng `controllers/` +
+`routes/` cũ cho tới khi tới lượt migrate (xem thứ tự ở migration plan, mục 10 và mục 12 "Tiến độ").
 
 ---
 

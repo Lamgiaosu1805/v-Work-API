@@ -1,11 +1,9 @@
+import { ClientSession } from "mongoose";
 import UserInfoModel from "../../../models/UserInfoModel";
 import { RequestEntity } from "../domain/request.entity";
 import { RequestRepository } from "../infrastructure/request.repository";
 import { REQUEST_TYPE_HANDLERS } from "../domain/request-type-handlers";
 import { VALID_TYPES } from "./request-query-filters";
-import { runInTransaction } from "../../../core/db/run-in-transaction";
-import { eventBus } from "../../../core/events/event-bus";
-import "./request-notification.handlers";
 import {
   ArgumentInvalidException,
   NotFoundException,
@@ -17,19 +15,33 @@ import { RequestType } from "../domain/types";
 
 const requestRepository = new RequestRepository();
 
-interface HandlerError {
+export interface HandlerError {
   status?: number;
   message: string;
 }
 
-function toHandlerException({ status, message }: HandlerError): ExceptionBase {
+export function toHandlerException({ status, message }: HandlerError): ExceptionBase {
   if (status === 403) return new ForbiddenException(message);
   if (status === 404) return new NotFoundException(message);
   if (status === 409) return new ConflictException(message);
   return new ArgumentInvalidException(message);
 }
 
-export async function createRequest(account: any, body: any) {
+export interface CreateRequestEntityResult {
+  entity: RequestEntity;
+  userInfo: any;
+}
+
+// Chỉ còn phần thuần Request: validate/validateAsync (business rule của handler, không đụng module
+// khác) + tạo entity + persist. KHÔNG còn tự mở transaction (nhận `session` từ ngoài) và KHÔNG còn tự
+// dispatch handler.onCreate (side-effect xuyên Timesheet/Leave — đã chuyển sang
+// workflows/request-side-effects/, xem workflows/create-request.workflow.ts, task 1.8.6) — đúng rule #1
+// mục 13 ("modules/x chỉ import core/, shared-kernel/, và chính nó").
+export async function createRequestEntity(
+  account: any,
+  body: any,
+  session: ClientSession
+): Promise<CreateRequestEntityResult> {
   const { request_type, reason } = body;
   if (!VALID_TYPES.includes(request_type)) {
     throw new ArgumentInvalidException("Loại đơn không hợp lệ");
@@ -37,40 +49,42 @@ export async function createRequest(account: any, body: any) {
 
   const handler = REQUEST_TYPE_HANDLERS[request_type as RequestType];
 
-  const userInfo = await UserInfoModel.findOne({ id_account: account._id, isDeleted: false });
+  const userInfo = await UserInfoModel.findOne({
+    id_account: account._id,
+    isDeleted: false
+  }).session(session);
   if (!userInfo) throw new NotFoundException("Không tìm thấy thông tin nhân viên");
+
+  // SRS "Đơn từ" (update 3/8/2026) — "Lý do" là field bắt buộc chung cho popup tạo đơn của MỌI loại
+  // đơn (không riêng 1 loại) — max 100 ký tự, tự loại bỏ khoảng trắng đầu/cuối. Trước đây `reason`
+  // mặc định "" nếu không nhập (RequestEntity.create), không thực sự bắt buộc — sửa lại đúng SRS.
+  const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+  if (!trimmedReason) {
+    throw new ArgumentInvalidException("Vui lòng nhập lý do");
+  }
+  if (trimmedReason.length > 100) {
+    throw new ArgumentInvalidException("Lý do không được vượt quá 100 ký tự");
+  }
 
   const { payload, error } = await handler.validate(body, userInfo);
   if (error) throw toHandlerException(error);
 
-  const entity = await runInTransaction(async (session) => {
-    // validateAsync trả về: null (không có gì thêm) | {status, message} (lỗi) |
-    // {...field} (field bổ sung cần merge vào entity trước khi tạo, vd occurrence
-    // của late_early/forgot_checkin — tính trước khi tạo nên không cần loại trừ
-    // chính đơn đang tạo ra khỏi phép đếm).
-    const asyncResult = await handler.validateAsync(payload, userInfo, session);
-    if (asyncResult?.status) throw toHandlerException(asyncResult);
+  // validateAsync trả về: null (không có gì thêm) | {status, message} (lỗi) |
+  // {...field} (field bổ sung cần merge vào entity trước khi tạo, vd occurrence
+  // của late_early/forgot_checkin — tính trước khi tạo nên không cần loại trừ
+  // chính đơn đang tạo ra khỏi phép đếm).
+  const asyncResult = await handler.validateAsync(payload, userInfo, session);
+  if (asyncResult?.status) throw toHandlerException(asyncResult);
 
-    const newEntity = RequestEntity.create({
-      userId: userInfo._id.toString(),
-      requestType: request_type,
-      reason,
-      ...payload,
-      ...asyncResult
-    });
-
-    await requestRepository.insert(newEntity);
-
-    if (handler.onCreate) {
-      const props = newEntity.getProps();
-      const sideError = await handler.onCreate({ ...props, _id: props.id }, userInfo, session);
-      if (sideError) throw toHandlerException(sideError);
-    }
-
-    return newEntity;
+  const newEntity = RequestEntity.create({
+    userId: userInfo._id.toString(),
+    requestType: request_type,
+    reason: trimmedReason,
+    ...payload,
+    ...asyncResult
   });
 
-  entity.publishEvents(eventBus).catch(() => {});
+  await requestRepository.insert(newEntity);
 
-  return entity;
+  return { entity: newEntity, userInfo };
 }

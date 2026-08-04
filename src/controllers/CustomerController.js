@@ -429,15 +429,50 @@ const CustomerController = {
         ];
       }
 
-      const [customers, total] = await Promise.all([
-        CustomerModel.find(filter)
-          .populate("app_id", "name code")
-          .select("-identity.id_front_url -identity.id_back_url -identity.selfie_url") // ẩn ảnh CCCD
-          .sort({ registeredAt: -1 })
-          .skip(skip)
-          .limit(Number(limit)),
-        CustomerModel.countDocuments(filter)
-      ]);
+      const pipeline = [
+        { $match: search },
+        { $addFields: { _sortRegisteredAt: { $ifNull: ["$registeredAt", "$createdAt"] } } },
+        { $sort: { _sortRegisteredAt: -1 } },
+        {
+          $lookup: {
+            from: "apps",
+            localField: "app_id",
+            foreignField: "_id",
+            as: "app_id"
+          }
+        },
+        { $unwind: { path: "$app_id", preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: "user_info",
+            localField: "referred_by",
+            foreignField: "_id",
+            as: "referred_by"
+          }
+        },
+        { $unwind: { path: "$referred_by", preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            _sortRegisteredAt: 0,
+            "identity.id_front_url": 0,
+            "identity.id_back_url": 0,
+            "identity.selfie_url": 0,
+            "app_id.createdAt": 0,
+            "app_id.updatedAt": 0,
+            "app_id.__v": 0
+          }
+        },
+        {
+          $facet: {
+            data: [{ $skip: skip }, { $limit: Number(limit) }],
+            total: [{ $count: "value" }]
+          }
+        }
+      ];
+
+      const [result] = await CustomerModel.aggregate(pipeline);
+      const customers = result?.data || [];
+      const total = result?.total?.[0]?.value || 0;
 
       return res.status(200).json({
         message: "Lấy danh sách khách hàng thành công",

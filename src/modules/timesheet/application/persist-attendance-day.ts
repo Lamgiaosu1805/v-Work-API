@@ -20,9 +20,6 @@ export interface PersistAttendanceDayInput {
 }
 
 export interface PersistAttendanceDayResult {
-  // Số ngày phép cần hoàn lại — caller (call-site hiện tại, cho tới khi có workflows/ ở 1.8.5) chịu
-  // trách nhiệm gọi modules/leave's adjustLeaveBalance với số này (nếu > 0). Xem quyết định tách
-  // resolveLeaveConflictOnAttendance ở đầu mục 1.8.3.
   leaveRefundAmount: number;
 }
 
@@ -32,13 +29,6 @@ function resolvePeriodStatus(isAbsent: boolean, isMissed: boolean): WorkDayStatu
   return "present";
 }
 
-// Port `persistAttendanceDay` (helpers/attendanceHelper.ts) — orchestrate qua repository thay vì
-// mutate + .save() trực tiếp Mongoose document. Giữ nguyên đúng thứ tự thao tác gốc: (1) ghi field đã
-// tính của worksheet, (2) resolve + áp dụng leave-conflict override, (3) ghi status theo buổi — vì
-// (3) sẽ xoá/ghi đè lại toàn bộ attendance-driven status của ngày, kể cả những gì (2) vừa flip, nên
-// thứ tự này PHẢI giữ nguyên (không tự "tối ưu" bỏ bước 2 dù có vẻ dư — xem phân tích trong lúc thiết
-// kế: (2) và (3) tính leave-override độc lập nhưng theo cùng ngưỡng, thứ tự gốc là an toàn nhất để
-// không suy đoán sai 1 edge case nào).
 export async function persistAttendanceDay({
   userId,
   worksheetId,

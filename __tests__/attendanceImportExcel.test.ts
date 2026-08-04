@@ -280,4 +280,54 @@ describe("AttendanceController.importExcel", () => {
       expect(ws.work_unit).toBe(1);
     }
   });
+
+  // User hỏi trực tiếp: import Excel có check dữ liệu ĐÃ CÓ SẴN trong DB (từ app check-in/check-out
+  // hoặc lần import trước) để lấy giờ sớm nhất làm check-in, muộn nhất làm check-out không? Verify
+  // thật qua importExcel (không chỉ domain function thuần) — đã có sẵn ở resolveAttendanceDay
+  // (normalizeDayPunches), test này xác nhận hành vi đó áp dụng đúng khi đi qua importExcel thật.
+  test("worksheet đã có check_in/check_out sẵn trong DB (vd từ app): import Excel giờ hẹp hơn -> merge lấy sớm nhất/muộn nhất, KHÔNG bị giờ Excel ghi đè thu hẹp lại", async () => {
+    const userId = new mongoose.Types.ObjectId();
+    await UserInfoModel.create({
+      full_name: "NV Test 5",
+      cccd: "000000000005",
+      phone_number: "0900000005",
+      sex: 1,
+      date_of_birth: new Date("1995-01-01"),
+      address: "HN",
+      tinh_trang_hon_nhan: 0,
+      id_account: new mongoose.Types.ObjectId(),
+      ma_nv: "NV005",
+      employment_type: "fulltime"
+    });
+    await AttendanceMachineMappingModel.create({ machine_code: "M005", user_id: userId });
+    const shift = await ShiftModel.create({
+      name: "Ca hành chính",
+      start_time: "08:00",
+      end_time: "17:30"
+    });
+    // Đã có data trong DB từ trước (vd nhân viên tự check-in/check-out qua app): vào 07:50, ra 17:40 —
+    // RỘNG hơn khoảng giờ sẽ có trong file Excel sắp import (08:01 - 17:31).
+    await WorkSheetModel.create({
+      user_id: userId,
+      date: moment.tz(DATE_KEY, TZ).startOf("day").toDate(),
+      shifts: [shift._id],
+      check_in: moment.tz(`${DATE_KEY} 07:50`, "YYYY-MM-DD HH:mm", TZ).toDate(),
+      check_out: moment.tz(`${DATE_KEY} 17:40`, "YYYY-MM-DD HH:mm", TZ).toDate()
+    });
+
+    const buffer = buildExcelBuffer([
+      {
+        machineCode: "M005",
+        days: [{ dateStr: "01/07/2026", inTime: "08:01", outTime: "17:31" }]
+      }
+    ]);
+
+    await AttendanceController.importExcel({ file: { buffer } }, makeRes());
+
+    const ws: any = await WorkSheetModel.findOne({ user_id: userId }).lean();
+    // check_in: min(07:50 đã có sẵn, 08:01 từ Excel) = 07:50 (giữ nguyên, không bị Excel ghi đè muộn hơn)
+    expect(moment.tz(ws.check_in, TZ).format("HH:mm")).toBe("07:50");
+    // check_out: max(17:40 đã có sẵn, 17:31 từ Excel) = 17:40 (giữ nguyên, không bị Excel ghi đè sớm hơn)
+    expect(moment.tz(ws.check_out, TZ).format("HH:mm")).toBe("17:40");
+  });
 });

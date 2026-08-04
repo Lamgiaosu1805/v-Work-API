@@ -90,6 +90,37 @@ describe("parseDayRows", () => {
     expect(rows[0].rawOut).toBeNull();
   });
 
+  // Bug thật phát hiện qua báo cáo user + file Excel thật (mã 0038, ngày 26/05/2026): 1 số máy chấm
+  // công xuất cell giờ dưới dạng SỐ THÔ kiểu Time thật của Excel (phân số của 1 ngày) khi ngày có đủ
+  // cả vào/ra, thay vì chuỗi "HH:mm" — regex cũ bỏ sót hoàn toàn, cả ngày bị coi như trống -> import
+  // skip, giữ nguyên giá trị cũ trong DB không báo lỗi. Giá trị test lấy đúng từ file thật của user:
+  // 0.29583333333333334 = 07:06, 0.7090277777777778 = 17:01 (đã verify bằng node -e thủ công).
+  test("nhận diện được cell giờ dạng số thô kiểu Time của Excel (không chỉ chuỗi HH:mm)", () => {
+    const rows = parseDayRows({
+      rows: [["26/05/2026", "Ba", 0.29583333333333334, 0.7090277777777778, "", "", "", ""]]
+    });
+
+    expect(rows[0].rawIn).toBe("07:06");
+    expect(rows[0].rawOut).toBe("17:01");
+  });
+
+  test("cell giờ dạng số thô nhưng chỉ có 1 lần quét (ở row[3], nhóm out): vẫn nhận diện đúng", () => {
+    const rows = parseDayRows({
+      rows: [["01/07/2026", "", "", 0.7375, "", "", "", ""]] // 0.7375 * 1440 = 1062 phút = 17:42
+    });
+
+    expect(rows[0].rawIn).toBeNull();
+    expect(rows[0].rawOut).toBe("17:42");
+  });
+
+  test("giá trị số ngoài phạm vi giờ-trong-ngày (>= 1, có phần ngày kèm theo): bỏ qua, không nhận nhầm", () => {
+    const rows = parseDayRows({
+      rows: [["01/07/2026", "", 45678.5, "", "", "", "", ""]]
+    });
+
+    expect(rows[0].rawIn).toBeNull();
+  });
+
   // Bug nghiệp vụ có sẵn (KHÔNG sửa ở đây, xem note task 1.8.4.5 trong
   // docs/DDD-HEXAGONAL-MIGRATION-PLAN.md): khi chỉ có ĐÚNG 1 lần quét trong ngày, việc phân loại
   // in/out theo vị trí cột cố định có thể sai nếu quét đó thực chất thuộc phía ngược lại — test này

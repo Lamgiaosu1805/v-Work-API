@@ -80,6 +80,20 @@ export function normalizeDayPunches({
     checkOut = null;
   }
 
+  // 2 mốc quẹt quá gần nhau (<1h) là lỗi quẹt trùng/quẹt nhầm, không phải giờ vào-ra thật của cùng 1
+  // ngày công — chỉ giữ lại 1 mốc theo buổi (so với midpoint ca làm): buổi sáng giữ mốc sớm nhất (coi
+  // là check-in), buổi chiều giữ mốc muộn nhất (coi là check-out), mốc còn lại coi như thiếu (quên
+  // chấm công vế đó). Đồng bộ y hệt helpers/attendanceHelper.ts (2 bản normalizeDayPunches duplicate).
+  if (!forgot && checkIn && checkOut) {
+    const diffMinutes = (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 60000;
+    if (diffMinutes > 0 && diffMinutes < 60) {
+      const midpoint = punchClassifyMidpoint(worksheet, leaveMorning, leaveAfternoon);
+      const avgMinutes = (punchMinutesOfDay(checkIn) + punchMinutesOfDay(checkOut)) / 2;
+      if (avgMinutes <= midpoint) checkOut = null;
+      else checkIn = null;
+    }
+  }
+
   if (!forgot && !!checkIn !== !!checkOut) {
     const midpoint = punchClassifyMidpoint(worksheet, leaveMorning, leaveAfternoon);
     const single = checkIn || checkOut;
@@ -256,8 +270,28 @@ export function resolveAttendanceDay({
     const hasRequest = occInfo ? occInfo.hasRequest : !!forgot;
     const base = isSaturday ? 0.5 : 1;
     const r = resolveForgotPenalty(dayStart, occInfo?.occurrence || 0, isSaturday);
-    work_unit = Math.max(0, (hasRequest ? r.work_unit : base / 2) - leaveDeduction);
+    let unit = hasRequest ? r.work_unit : base / 2;
     penalty_amount = r.penalty_amount;
+
+    // Vế nào có dữ liệu chấm công thật (không thuộc diện quên) vẫn tính phạt đi muộn/về sớm riêng,
+    // cộng dồn với phạt quên chấm công của vế còn thiếu — trước đây "quên" và "muộn/sớm" loại trừ
+    // nhau hoàn toàn nên vế có dữ liệu không bị tính phạt gì.
+    if (hasIn) {
+      const lateResult = resolveLatePenalty(dayStart, penaltyLateMinutes, isSaturday);
+      unit = Math.min(unit, lateResult.work_unit);
+      penalty_amount = Money.of(penalty_amount).add(Money.of(lateResult.penalty_amount)).toNumber();
+      morning_absent = lateResult.morning_absent ?? false;
+    }
+    if (hasOut) {
+      const earlyResult = resolveEarlyPenalty(dayStart, penaltyEarlyMinutes, isSaturday);
+      unit = Math.min(unit, earlyResult.work_unit);
+      penalty_amount = Money.of(penalty_amount)
+        .add(Money.of(earlyResult.penalty_amount))
+        .toNumber();
+      afternoon_absent = earlyResult.afternoon_absent ?? false;
+    }
+
+    work_unit = Math.max(0, unit - leaveDeduction);
   } else {
     const lateResult = resolveLatePenalty(dayStart, penaltyLateMinutes, isSaturday);
     const earlyResult = resolveEarlyPenalty(dayStart, penaltyEarlyMinutes, isSaturday);

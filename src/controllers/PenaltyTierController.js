@@ -41,7 +41,7 @@ const PenaltyTierController = {
               ? "Mỗi tier cần from_count, penalty_kind, penalty_value"
               : "Mỗi tier cần from_minutes, penalty_kind, penalty_value",
           });
-        if (!["money", "work_unit", "half_day_money"].includes(t.penalty_kind))
+        if (!["money", "work_unit", "half_day_money", "full_day_money"].includes(t.penalty_kind))
           return res.status(400).json({ message: `penalty_kind không hợp lệ: ${t.penalty_kind}` });
       }
 
@@ -100,7 +100,7 @@ const PenaltyTierController = {
       if (from_count != null) tier.from_count = from_count;
       if (to_count !== undefined) tier.to_count = to_count;
       if (penalty_kind) {
-        if (!["money", "work_unit", "half_day_money"].includes(penalty_kind))
+        if (!["money", "work_unit", "half_day_money", "full_day_money"].includes(penalty_kind))
           return res.status(400).json({ message: "penalty_kind không hợp lệ" });
         tier.penalty_kind = penalty_kind;
       }

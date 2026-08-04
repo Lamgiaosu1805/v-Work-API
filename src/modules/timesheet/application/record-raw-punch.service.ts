@@ -19,11 +19,6 @@ export interface RecordRawPunchInput {
   session?: ClientSession;
 }
 
-// Ghi/tạo mới field punch thô (check_in/check_out, và tùy chọn minutes_late/minute_early kiểu
-// "optimistic real-time" — xem modules/attendance/domain/naive-punch-timing.ts) cho 1 ngày — dùng khi
-// caller (vd luồng duyệt đơn quên chấm công, hoặc check-in/check-out route ở modules/attendance) đã tự
-// quyết định giá trị cần ghi (business rule "cứu giờ ra về bị đọc nhầm" v.v. thuộc về caller, đây chỉ
-// là plumbing ghi dữ liệu thô, không có invariant nghiệp vụ riêng).
 export async function recordRawPunch({
   userId,
   date,

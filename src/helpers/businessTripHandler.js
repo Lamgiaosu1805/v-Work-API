@@ -10,8 +10,8 @@ function validate(body) {
   const trimmedOrigin = typeof origin_location === "string" ? origin_location.trim() : "";
   const trimmedDestination =
     typeof destination_location === "string" ? destination_location.trim() : "";
-  if (!trimmedOrigin || !trimmedDestination)
-    return { error: { status: 400, message: "Vui lòng nhập nơi đi và nơi đến" } };
+  if (!trimmedDestination)
+    return { error: { status: 400, message: "Vui lòng nhập địa điểm công tác" } };
 
   const total_days = calcTotalDays(from_date, "morning", to_date, "afternoon");
   if (total_days === null || total_days === 0)

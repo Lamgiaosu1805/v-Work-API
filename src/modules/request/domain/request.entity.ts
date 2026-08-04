@@ -15,8 +15,10 @@ import { RequestType, RequestProps, RequestStatus } from "./types";
 
 const VALID_STATUSES: RequestStatus[] = ["pending", "approved", "rejected", "cancelled"];
 
+// SRS "Nghỉ dài hạn": ngưỡng 2 cấp duyệt là "> 2 ngày" (không phải > 3 — đã sửa theo yêu cầu người
+// dùng sau khi đối chiếu lại tài liệu SRS v2.0, 03/08/2026).
 const MULTI_APPROVAL_RULES: Partial<Record<RequestType, (props: RequestProps) => boolean>> = {
-  leave: (props) => (props.total_days ?? 0) > 3,
+  leave: (props) => (props.total_days ?? 0) > 2,
   forgot_checkin: (props) => (props.occurrence ?? 0) >= 6,
   late_early: (props) => (props.occurrence ?? 0) >= 4
 };
@@ -34,7 +36,7 @@ export const REQUEST_TYPE_FIELDS: Record<RequestType, string[]> = {
   ],
   late_early: ["date", "shift_id", "type", "minutes", "occurrence"],
   remote: ["from_date", "to_date", "total_days"],
-  business_trip: ["from_date", "to_date", "total_days", "origin_location", "destination_location"],
+  business_trip: ["from_date", "to_date", "total_days", "destination_location"],
   client_visit: ["from_date", "to_date", "total_days", "start_time", "end_time"],
   explanation: ["date", "shift_id", "content"],
   forgot_checkin: ["date", "type", "expected_check_in", "expected_check_out", "occurrence"]
@@ -159,6 +161,15 @@ export class RequestEntity extends AggregateRoot<RequestProps> {
 
   cancel(): void {
     this._assertPending();
+    // Đơn đa cấp (leave >3 ngày / forgot_checkin >=6 lần / late_early >=4 lần): sau khi cấp 1 đã duyệt,
+    // status vẫn "pending" cho tới khi đủ cấp cuối (xem approve() bên dưới) — nếu chỉ check status thì
+    // nhân viên tự huỷ được đơn đã có người duyệt mà không ai hay biết. Chặn thêm ở đây.
+    if (this.props.approvals.length > 0) {
+      throw new InvalidStatusTransitionError(
+        "Đơn đã có người duyệt, không thể tự huỷ — vui lòng liên hệ người duyệt để từ chối đơn",
+        { metadata: { requestId: this.id, approvalsCount: this.props.approvals.length } }
+      );
+    }
     this._setProps({ status: "cancelled" });
     this.addEvent(
       new RequestCancelledDomainEvent({

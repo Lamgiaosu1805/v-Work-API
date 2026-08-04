@@ -1,7 +1,7 @@
 const { RequestEntity } = require("../../../src/modules/request/domain/request.entity");
 
 function newLongLeaveEntity(userId) {
-  // total_days > 3 -> needsMultiApproval() === true
+  // total_days > 2 -> needsMultiApproval() === true (SRS "Nghỉ dài hạn": >2 ngày, không phải >3)
   return RequestEntity.create({
     userId,
     requestType: "leave",
@@ -57,5 +57,33 @@ describe("RequestEntity.reject() — veto-1-người, giữ nguyên hành vi g�
 
     expect(entity.status).toBe("rejected");
     expect(findRejectedEvent(entity).overriddenApprovals[0].account).toBe("reviewer-1");
+  });
+});
+
+// Người dùng chốt (sau khi đối chiếu lại SRS v2.0, 03/08/2026): ngưỡng đa duyệt của "Nghỉ dài hạn" là
+// "> 2 ngày", KHÔNG phải "> 3 ngày" như code cũ — khoá đúng ngưỡng biên để không bị lệch lại.
+describe("RequestEntity.needsMultiApproval() — ngưỡng 'Nghỉ dài hạn' đúng SRS (> 2 ngày)", () => {
+  function newLeaveEntity(totalDays) {
+    return RequestEntity.create({
+      userId: "employee-1",
+      requestType: "leave",
+      reason: "test",
+      from_date: new Date("2026-01-05"),
+      from_period: "morning",
+      to_date: new Date("2026-01-05"),
+      to_period: "afternoon",
+      total_days: totalDays,
+      leave_type: "paid",
+      paid_days: totalDays,
+      unpaid_days: 0
+    });
+  }
+
+  it("total_days = 2: chỉ cần 1 cấp (không needsMultiApproval)", () => {
+    expect(newLeaveEntity(2).needsMultiApproval()).toBe(false);
+  });
+
+  it("total_days = 3: cần 2 cấp (needsMultiApproval) — trước đây (ngưỡng >3 cũ) sẽ là false, giờ phải true", () => {
+    expect(newLeaveEntity(3).needsMultiApproval()).toBe(true);
   });
 });

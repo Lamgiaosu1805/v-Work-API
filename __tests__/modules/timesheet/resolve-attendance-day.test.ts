@@ -216,3 +216,56 @@ describe("resolveAttendanceDay (modules/timesheet/domain) — merge máy chấm 
     expect(worksheet.work_unit).toBeNull();
   });
 });
+
+// Case: 2 mốc quẹt quá gần nhau (<60 phút) là lỗi quẹt trùng/quẹt nhầm, không phải giờ vào-ra thật
+// của cùng 1 ngày công — chỉ giữ lại 1 mốc theo buổi, mốc còn lại coi như thiếu (quên chấm công).
+// Shift mặc định trong makeArgs: 08:00-17:30 -> midpoint = 12:45.
+describe("resolveAttendanceDay — quẹt trùng/quẹt nhầm quá gần nhau (<60 phút)", () => {
+  test("cặp giờ buổi sáng cách nhau 45 phút: chỉ giữ mốc sớm nhất làm check-in, check-out coi như thiếu", () => {
+    const result = resolveAttendanceDay(
+      makeArgs({ rawIn: "08:00", rawOut: "08:45" })
+    ) as ResolveAttendanceDayComputed;
+    expect(result.newCheckIn).toEqual(at("08:00"));
+    expect(result.newCheckOut).toBeNull();
+    expect(result.hasOut).toBe(false);
+    expect(result.missedOut).toBe(true);
+  });
+
+  test("cặp giờ buổi chiều cách nhau 30 phút: chỉ giữ mốc muộn nhất làm check-out, check-in coi như thiếu", () => {
+    const result = resolveAttendanceDay(
+      makeArgs({ rawIn: "17:00", rawOut: "17:30" })
+    ) as ResolveAttendanceDayComputed;
+    expect(result.newCheckIn).toBeNull();
+    expect(result.newCheckOut).toEqual(at("17:30"));
+    expect(result.hasIn).toBe(false);
+    expect(result.missedIn).toBe(true);
+  });
+
+  test("cách nhau đúng 59 phút (< 60): vẫn coi là quẹt trùng, bị loại bớt 1 mốc", () => {
+    const result = resolveAttendanceDay(
+      makeArgs({ rawIn: "08:00", rawOut: "08:59" })
+    ) as ResolveAttendanceDayComputed;
+    expect(result.newCheckIn).toEqual(at("08:00"));
+    expect(result.newCheckOut).toBeNull();
+  });
+
+  test("cách nhau đúng 60 phút (không < 60): KHÔNG loại — giữ cả 2 (biên dưới của rule mới, khớp test 'cặp giờ merge cách nhau < 120 phút' ở trên)", () => {
+    const result = resolveAttendanceDay(
+      makeArgs({ rawIn: "08:00", rawOut: "09:00" })
+    ) as ResolveAttendanceDayComputed;
+    expect(result.newCheckIn).toEqual(at("08:00"));
+    expect(result.newCheckOut).toEqual(at("09:00"));
+  });
+
+  test("có đơn quên chấm công đã duyệt (forgot) che phủ ngày: KHÔNG áp dụng loại-bớt dù 2 mốc worksheet gần nhau", () => {
+    const forgotMap = new Map([[DATE_KEY, { type: "both" as const }]]);
+    const result = resolveAttendanceDay(
+      makeArgs({
+        worksheet: { check_in: at("08:00"), check_out: at("08:30") },
+        forgotMap
+      })
+    ) as ResolveAttendanceDayComputed;
+    expect(result.newCheckIn).toEqual(at("08:00"));
+    expect(result.newCheckOut).toEqual(at("08:30"));
+  });
+});

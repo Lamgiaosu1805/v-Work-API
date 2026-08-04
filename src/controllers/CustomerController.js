@@ -432,6 +432,15 @@ const CustomerController = {
         },
         { $unwind: { path: "$app_id", preserveNullAndEmptyArrays: true } },
         {
+          $lookup: {
+            from: "user_info",
+            localField: "referred_by",
+            foreignField: "_id",
+            as: "referred_by"
+          }
+        },
+        { $unwind: { path: "$referred_by", preserveNullAndEmptyArrays: true } },
+        {
           $project: {
             _sortRegisteredAt: 0,
             "identity.id_front_url": 0,

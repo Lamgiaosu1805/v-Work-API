@@ -4,7 +4,7 @@ import { PenaltyOutcome } from "./types";
 const TZ = "Asia/Ho_Chi_Minh";
 
 export type PenaltyTierType = "late" | "early" | "forgot";
-export type PenaltyKind = "money" | "work_unit" | "half_day_money";
+export type PenaltyKind = "money" | "work_unit" | "half_day_money" | "full_day_money";
 
 export interface PenaltyTier {
   from_minutes: number | null;
@@ -51,6 +51,9 @@ export function resolveLatePenaltyFromTiers(
   if (tier.penalty_kind === "half_day_money")
     return { work_unit: 0.5, penalty_amount: tier.penalty_value, morning_absent: true };
 
+  if (tier.penalty_kind === "full_day_money")
+    return { work_unit: 0, penalty_amount: tier.penalty_value, morning_absent: true };
+
   return {
     work_unit: Math.max(0, base - tier.penalty_value),
     penalty_amount: 0,
@@ -86,6 +89,9 @@ export function resolveEarlyPenaltyFromTiers(
 
   if (tier.penalty_kind === "half_day_money")
     return { work_unit: 0.5, penalty_amount: tier.penalty_value, afternoon_absent: true };
+
+  if (tier.penalty_kind === "full_day_money")
+    return { work_unit: 0, penalty_amount: tier.penalty_value, afternoon_absent: true };
 
   return {
     work_unit: Math.max(0, base - tier.penalty_value),

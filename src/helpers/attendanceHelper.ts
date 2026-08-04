@@ -75,6 +75,20 @@ export function normalizeDayPunches({
     checkOut = null;
   }
 
+  // 2 mốc quẹt quá gần nhau (<1h) là lỗi quẹt trùng/quẹt nhầm, không phải giờ vào-ra thật của cùng 1
+  // ngày công — chỉ giữ lại 1 mốc theo buổi (so với midpoint ca làm): buổi sáng giữ mốc sớm nhất (coi
+  // là check-in), buổi chiều giữ mốc muộn nhất (coi là check-out), mốc còn lại coi như thiếu (quên
+  // chấm công vế đó).
+  if (!forgot && checkIn && checkOut) {
+    const diffMinutes = (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 60000;
+    if (diffMinutes > 0 && diffMinutes < 60) {
+      const midpoint = punchClassifyMidpoint(worksheet, leaveMorning, leaveAfternoon);
+      const avgMinutes = (punchMinutesOfDay(checkIn) + punchMinutesOfDay(checkOut)) / 2;
+      if (avgMinutes <= midpoint) checkOut = null;
+      else checkIn = null;
+    }
+  }
+
   if (!forgot && !!checkIn !== !!checkOut) {
     const midpoint = punchClassifyMidpoint(worksheet, leaveMorning, leaveAfternoon);
     const single = checkIn || checkOut;

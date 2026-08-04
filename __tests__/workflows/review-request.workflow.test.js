@@ -378,8 +378,11 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     expect(finalized[0].entity.approvals).toHaveLength(2);
   });
 
-  describe("rule 'trưởng bộ phận duyệt trước' (forgot_checkin/late_early đa duyệt)", () => {
-    it("throw ForbiddenException (403) khi reviewer trong chain nhưng KHÔNG phải chain[0] duyệt lần đầu", async () => {
+  // Người dùng chốt qua hỏi trực tiếp: KHÔNG ràng buộc thứ tự duyệt giữa 2 cấp — ai trong chain
+  // duyệt trước cũng được, kể cả forgot_checkin/late_early (trước đây có rule "trưởng bộ phận
+  // (chain[0]) phải duyệt trước", đã bỏ hẳn — leave vốn dĩ chưa từng bị ràng buộc này).
+  describe("đơn đa cấp: không ràng buộc thứ tự duyệt giữa cấp 1 và cấp 2", () => {
+    it("200: chain[1] (gián tiếp) duyệt lần đầu dù chain[0] (trực tiếp) chưa duyệt — vẫn được phép, isFinal=false", async () => {
       const { account: r1 } = await createUserInfo(1);
       const { account: r2 } = await createUserInfo(2);
       const { userInfo: owner } = await createUserInfo(3);
@@ -389,29 +392,13 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
       can.mockResolvedValue(false);
       getApprovalChain.mockResolvedValue([{ accountId: r1._id }, { accountId: r2._id }]);
 
-      await expect(reviewRequest(r2, entity.id, { action: "approve" })).rejects.toMatchObject({
-        statusCode: 403,
-        message: "Cần trưởng bộ phận duyệt trước"
-      });
-    });
-
-    it("200: chain[0] (trưởng bộ phận) duyệt lần đầu — được phép, isFinal=false", async () => {
-      const { account: r1 } = await createUserInfo(1);
-      const { account: r2 } = await createUserInfo(2);
-      const { userInfo: owner } = await createUserInfo(3);
-      const entity = newMultiApprovalForgotCheckinEntity(owner._id);
-      await insertEntity(entity);
-
-      can.mockResolvedValue(false);
-      getApprovalChain.mockResolvedValue([{ accountId: r1._id }, { accountId: r2._id }]);
-
-      const result = await reviewRequest(r1, entity.id, { action: "approve" });
+      const result = await reviewRequest(r2, entity.id, { action: "approve" });
 
       expect(result.isFinal).toBe(false);
       expect(result.entity.approvals).toHaveLength(1);
     });
 
-    it("200: sau khi chain[0] đã duyệt, reviewer khác trong chain duyệt tiếp bình thường (rule chỉ áp dụng khi approvals rỗng)", async () => {
+    it("200: chain[1] duyệt trước, sau đó chain[0] duyệt tiếp — hoàn tất đủ 2 cấp bất kể thứ tự", async () => {
       const { account: r1 } = await createUserInfo(1);
       const { account: r2 } = await createUserInfo(2);
       const { userInfo: owner } = await createUserInfo(3);
@@ -422,15 +409,15 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
       getApprovalChain.mockResolvedValue([{ accountId: r1._id }, { accountId: r2._id }]);
       jest.spyOn(forgotCheckinSideEffects, "onApprove").mockResolvedValue(undefined);
 
-      await reviewRequest(r1, entity.id, { action: "approve" });
-      const result = await reviewRequest(r2, entity.id, { action: "approve" });
+      await reviewRequest(r2, entity.id, { action: "approve" });
+      const result = await reviewRequest(r1, entity.id, { action: "approve" });
 
       expect(result.isFinal).toBe(true);
       expect(result.entity.status).toBe("approved");
       expect(result.entity.approvals).toHaveLength(2);
     });
 
-    it("200: canReviewAll=true bỏ qua rule trưởng bộ phận — duyệt lần đầu dù không phải chain[0]", async () => {
+    it("200: canReviewAll=true vẫn duyệt được lần đầu dù không nằm trong chain", async () => {
       const { account: r2 } = await createUserInfo(2);
       const { userInfo: owner } = await createUserInfo(3);
       const entity = newMultiApprovalForgotCheckinEntity(owner._id);

@@ -35,12 +35,6 @@ const { getPayrollPeriodRange, calcStandardWorkUnits } = require("../helpers/pay
 const { sendExceptionResponse } = require("../core/http/handle-exception");
 const { mapWithConcurrency } = require("../core/async/map-with-concurrency");
 
-// importExcel xử lý từng ngày của 1 nhân viên tuần tự trước đây — mỗi ngày tốn vài round-trip DB nối
-// tiếp nhau, cộng dồn latency mạng tới DB (đo thực tế: ~100-140ms/ngày khi WorkSheet đã tồn tại) x 31
-// ngày x nhiều nhân viên dễ vượt timeout. Chạy song song có giới hạn (không phải Promise.all không
-// giới hạn, tránh tràn connection pool — maxPoolSize=50 ở connectDB.js) để giảm tổng thời gian mà vẫn
-// an toàn: mỗi ngày ghi vào WorkSheet/WorkDayStatus của đúng ngày đó, không đụng ngày khác trong cùng
-// 1 nhân viên nên không có xung đột ghi khi chạy đồng thời.
 const IMPORT_EXCEL_DAY_CONCURRENCY = 10;
 
 const AttendanceController = {
@@ -1046,9 +1040,6 @@ const AttendanceController = {
 
   importExcel: async (req, res) => {
     const TZ = "Asia/Ho_Chi_Minh";
-    // Đo thời gian để xác định import-excel chậm ở bước nào (parse file / query context / ghi từng
-    // ngày) khi nghi ngờ timeout — log tách biệt hoàn toàn với response HTTP nên vẫn in ra dù
-    // res.setTimeout(30000) (index.js) đã trả 503 trước khi xử lý xong.
     const importStartedAt = Date.now();
     const elapsed = (from) => `${Date.now() - from}ms`;
     try {
@@ -1092,9 +1083,6 @@ const AttendanceController = {
 
       const unmatched = [];
       const failures = [];
-      // Object thay vì 3 biến `let` riêng — closures song song trong mapWithConcurrency chỉ mutate
-      // property của object này (không reassign biến), tránh no-loop-func (eslint) mà không cần
-      // disable comment.
       const counts = { imported: 0, skipped: 0, unchanged: 0 };
       let blockIndex = 0;
 
@@ -1186,9 +1174,6 @@ const AttendanceController = {
             }
             const worksheet = worksheetMap.get(dateKey);
             if (!worksheet) {
-              // Giữ đúng behavior gốc: resolveAttendanceDay(worksheet:undefined) trả skip:true —
-              // processAttendanceDay cần worksheetId tường minh nên guard sớm hơn 1 bước, không đổi
-              // kết quả (vẫn tính vào skipped).
               counts.skipped++;
               return;
             }

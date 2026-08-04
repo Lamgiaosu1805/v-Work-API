@@ -13,11 +13,9 @@ import {
   ConflictException
 } from "../../../core/exceptions/exceptions";
 import { RequestEntity } from "../domain/request.entity";
-import { RequestType } from "../domain/types";
 
 const requestRepository = new RequestRepository();
 export const VALID_ACTIONS = ["approve", "reject"];
-const LEVEL1_FIRST_TYPES: RequestType[] = ["forgot_checkin", "late_early"];
 
 // Redis lock (chỉ cần khi action=approve và đơn cần đa duyệt) phải acquire TRƯỚC khi mở Mongo
 // transaction (snapshot isolation) — giữ nguyên vị trí gọi ở workflows/review-request.workflow.ts,
@@ -83,18 +81,10 @@ export async function reviewRequestEntity(
     if (!isInChain) throw new ForbiddenException("Bạn không được chỉ định duyệt đơn này");
   }
 
-  if (
-    action === "approve" &&
-    !canReviewAll &&
-    entity.needsMultiApproval() &&
-    LEVEL1_FIRST_TYPES.includes(entity.requestType) &&
-    entity.approvals.length === 0
-  ) {
-    const isLevel1 = chain[0]?.accountId
-      ? String(chain[0].accountId) === account._id.toString()
-      : false;
-    if (!isLevel1) throw new ForbiddenException("Cần trưởng bộ phận duyệt trước");
-  }
+  // Người dùng xác nhận (chốt qua hỏi trực tiếp): bỏ hẳn ràng buộc "cấp 1 (trực tiếp) phải duyệt
+  // trước cấp 2 (gián tiếp)" cho MỌI loại đơn đa cấp — ai trong chain duyệt trước cũng được, không
+  // quan tâm thứ tự. Trước đây chỉ forgot_checkin/late_early bị ràng buộc (LEVEL1_FIRST_TYPES), leave
+  // vốn dĩ đã không bị — giờ đồng nhất bằng cách bỏ ràng buộc luôn, không phải mở rộng thêm nó.
 
   if (action === "approve") {
     entity.approve(reviewerInfo._id.toString(), reviewer_note);

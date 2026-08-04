@@ -130,6 +130,31 @@ describe("cancelRequest() (workflows/cancel-request.workflow)", () => {
     await expect(cancelRequest(account, entity.id)).rejects.toMatchObject({ statusCode: 409 });
   });
 
+  // Bug thật phát hiện khi user hỏi trực tiếp: đơn đa cấp (leave >3 ngày) sau khi cấp 1 duyệt,
+  // `status` vẫn "pending" (chỉ đổi khi đủ cấp cuối) — nếu cancel() chỉ check status thì nhân viên
+  // vẫn tự huỷ được đơn đã có người duyệt, quản lý không hề hay biết. Fix: chặn thêm khi
+  // `approvals.length > 0`, xem request.entity.ts's cancel().
+  it("throw InvalidStatusTransitionError (409) khi đơn đa cấp đã có 1 cấp duyệt dù status vẫn pending", async () => {
+    const { account, userInfo } = await createUserInfo(1);
+    const entity = newLeaveEntity(userInfo._id, {
+      total_days: 5, // >3 ngày -> needsMultiApproval() = true
+      approvals: [{ account: new mongoose.Types.ObjectId(), reviewed_at: new Date() }]
+    });
+    await insertEntity(entity);
+
+    const doc = await LeaveRequest.findById(entity.id);
+    expect(doc.status).toBe("pending"); // xác nhận đúng tiền đề: status chưa đổi dù đã 1 cấp duyệt
+
+    await expect(cancelRequest(account, entity.id)).rejects.toMatchObject({
+      statusCode: 409,
+      message:
+        "Đơn đã có người duyệt, không thể tự huỷ — vui lòng liên hệ người duyệt để từ chối đơn"
+    });
+
+    const after = await LeaveRequest.findById(entity.id);
+    expect(after.status).toBe("pending"); // vẫn giữ nguyên, không bị huỷ
+  });
+
   it("200: huỷ thành công, status chuyển thành cancelled, gọi đúng handler.onReject với _id map từ entity.id", async () => {
     const { account, userInfo } = await createUserInfo(1);
     const entity = newLeaveEntity(userInfo._id, { paid_days: 2 });

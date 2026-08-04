@@ -433,7 +433,7 @@ const CustomerController = {
         { $unwind: { path: "$app_id", preserveNullAndEmptyArrays: true } },
         {
           $lookup: {
-            from: "user_info",
+            from: "user_infos",
             localField: "referred_by",
             foreignField: "_id",
             as: "referred_by"
@@ -448,7 +448,9 @@ const CustomerController = {
             "identity.selfie_url": 0,
             "app_id.createdAt": 0,
             "app_id.updatedAt": 0,
-            "app_id.__v": 0
+            "app_id.__v": 0,
+            "referred_by.password": 0,
+            "referred_by.__v": 0
           }
         },
         {

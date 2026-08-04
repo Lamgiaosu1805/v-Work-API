@@ -1,6 +1,6 @@
 export interface ShiftInfo {
-  start_time: string; // "HH:mm"
-  end_time: string; // "HH:mm"
+  start_time: string;
+  end_time: string;
 }
 
 export interface WorksheetSnapshot {

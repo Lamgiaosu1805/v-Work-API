@@ -80,7 +80,7 @@ const BusinessTripRequest = RequestModel.discriminator(
     from_date: { type: Date, required: true },
     to_date: { type: Date, required: true },
     total_days: { type: Number, required: true },
-    origin_location: { type: String, required: true, trim: true },
+    origin_location: { type: String, trim: true },
     destination_location: { type: String, required: true, trim: true }
   })
 );

@@ -18,6 +18,8 @@ const AccountModel = require("../../src/models/AccountModel");
 const UserInfoModel = require("../../src/models/UserInfoModel");
 const LeaveBalanceModel = require("../../src/models/LeaveBalanceModel");
 const { RequestModel, RemoteRequest, LeaveRequest } = require("../../src/models/RequestModel");
+const WorkSheetModel = require("../../src/models/WorkSheetModel");
+const ShiftModel = require("../../src/models/ShiftModel");
 const leaveSideEffects = require("../../src/workflows/request-side-effects/leave");
 const { createRequest } = require("../../src/workflows/create-request.workflow");
 
@@ -39,6 +41,8 @@ afterEach(async () => {
   await UserInfoModel.deleteMany({});
   await RequestModel.deleteMany({});
   await LeaveBalanceModel.deleteMany({});
+  await WorkSheetModel.deleteMany({});
+  await ShiftModel.deleteMany({});
   jest.restoreAllMocks();
   getApprovalChain.mockReset();
   notify.mockReset();
@@ -268,5 +272,179 @@ describe("createRequest() (workflows/create-request.workflow)", () => {
 
     const count = await LeaveRequest.countDocuments({});
     expect(count).toBe(0);
+  });
+});
+
+// Bug thật phát hiện (user báo): tạo nhiều đơn "quên chấm công" liên tiếp trong cùng kỳ công mà CHƯA
+// AI DUYỆT cái nào — trước khi sửa, đơn nào cũng ra occurrence=1 (không tăng dần), khiến việc xác định
+// ngưỡng "từ lần thứ 6 -> 2 cấp" (SRS) sai hoàn toàn. Gốc rễ: buildUnifiedForgotOccurrenceMap chỉ tự
+// nhận diện được ngày thiếu ĐÚNG 1 vế qua worksheet; ngày "quên cả 2" (type=both) không tự nhận diện
+// được nếu chưa có đơn NÀO liên quan được duyệt — rơi vào fallback chỉ đếm đơn approved (luôn = 0 lúc
+// chưa duyệt gì). Fix: computeForgotOccurrence (forgotCheckinHandler.js) giờ đếm cả đơn "pending" lẫn
+// "approved" khi tính occurrence lúc tạo đơn mới.
+describe("createRequest() forgot_checkin — occurrence tính đúng khi chưa có đơn nào được duyệt", () => {
+  async function seedWorksheet(userId, dateKey, overrides = {}) {
+    const shift = await ShiftModel.findOne({}).sort({ createdAt: 1 });
+    await WorkSheetModel.create({
+      user_id: userId,
+      date: moment.tz(dateKey, TZ).startOf("day").toDate(),
+      shifts: shift ? [shift._id] : [],
+      check_in: null,
+      check_out: null,
+      ...overrides
+    });
+  }
+
+  it("8 đơn quên chấm công CẢ 2 vế (type=both) liên tiếp, chưa đơn nào được duyệt: occurrence tăng dần 1..8 (không bị kẹt ở 1)", async () => {
+    const { account, userInfo } = await createUserInfo(1);
+    await ShiftModel.create({ name: "Ca hành chính", start_time: "08:00", end_time: "17:30" });
+
+    const dates = [
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-06",
+      "2026-07-07",
+      "2026-07-08",
+      "2026-07-09",
+      "2026-07-10"
+    ];
+    for (const d of dates) {
+      // eslint-disable-next-line no-await-in-loop
+      await seedWorksheet(userInfo._id, d);
+    }
+
+    const occurrences = [];
+    for (const d of dates) {
+      // eslint-disable-next-line no-await-in-loop
+      const entity = await createRequest(account, {
+        request_type: "forgot_checkin",
+        reason: "quên chấm công cả ngày",
+        date: d,
+        type: "both",
+        expected_check_in: moment.tz(`${d} 08:00`, "YYYY-MM-DD HH:mm", TZ).toISOString(),
+        expected_check_out: moment.tz(`${d} 17:30`, "YYYY-MM-DD HH:mm", TZ).toISOString()
+      });
+      occurrences.push(entity.getProps().occurrence);
+    }
+
+    expect(occurrences).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    // occurrence >= 6 -> needsMultiApproval() = true (khớp SRS "từ lần thứ 6")
+    expect(occurrences.filter((o) => o >= 6)).toHaveLength(3);
+  });
+});
+
+// Chỉ chặn tạo đơn khi ngày đã ĐỦ CẢ 2 mốc (thật sự không thiếu gì). Nếu chỉ có 1 mốc vẫn cho tạo —
+// máy chấm công chỉ ghi 1 lần quẹt trong ngày có thể gán nhầm vào field check_in dù thực chất là giờ
+// ra (khi đó onApprove tự "cứu" giá trị cũ sang field đối diện, xem forgot-checkin-approve.test.ts).
+describe("createRequest() forgot_checkin — chặn/không chặn theo dữ liệu check-in/check-out đã có", () => {
+  async function seedWorksheet(userId, dateKey, overrides = {}) {
+    await WorkSheetModel.create({
+      user_id: userId,
+      date: moment.tz(dateKey, TZ).startOf("day").toDate(),
+      shifts: [],
+      check_in: null,
+      check_out: null,
+      ...overrides
+    });
+  }
+
+  const dt = (dateKey, hhmm) => moment.tz(`${dateKey} ${hhmm}`, "YYYY-MM-DD HH:mm", TZ).toDate();
+  const iso = (dateKey, hhmm) => dt(dateKey, hhmm).toISOString();
+
+  it("chỉ có check_in (máy ghi nhầm giờ ra vào field check_in), check_out trống: vẫn tạo được đơn 'quên check-in'", async () => {
+    const { account, userInfo } = await createUserInfo(1);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d, { check_in: dt(d, "17:00") });
+
+    const entity = await createRequest(account, {
+      request_type: "forgot_checkin",
+      reason: "quên chấm công vào",
+      date: d,
+      type: "check_in",
+      expected_check_in: iso(d, "08:00")
+    });
+    expect(entity.getProps().type).toBe("check_in");
+  });
+
+  it("chỉ có check_in, check_out trống: tạo đơn 'quên check-out' bình thường", async () => {
+    const { account, userInfo } = await createUserInfo(2);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d, { check_in: dt(d, "08:00") });
+
+    const entity = await createRequest(account, {
+      request_type: "forgot_checkin",
+      reason: "quên chấm công ra",
+      date: d,
+      type: "check_out",
+      expected_check_out: iso(d, "17:00")
+    });
+    expect(entity.getProps().type).toBe("check_out");
+  });
+
+  it("đã có ĐỦ cả check_in lẫn check_out: bị chặn 409", async () => {
+    const { account, userInfo } = await createUserInfo(3);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d, { check_in: dt(d, "08:00"), check_out: dt(d, "17:00") });
+
+    await expect(
+      createRequest(account, {
+        request_type: "forgot_checkin",
+        reason: "quên chấm công",
+        date: d,
+        type: "check_in",
+        expected_check_in: iso(d, "08:05")
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it("type='both' nhưng đã có check_in: bị chặn 409", async () => {
+    const { account, userInfo } = await createUserInfo(4);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d, { check_in: dt(d, "08:00") });
+
+    await expect(
+      createRequest(account, {
+        request_type: "forgot_checkin",
+        reason: "quên chấm công",
+        date: d,
+        type: "both",
+        expected_check_in: iso(d, "08:00"),
+        expected_check_out: iso(d, "17:00")
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it("type='both' nhưng đã có check_out: bị chặn 409", async () => {
+    const { account, userInfo } = await createUserInfo(5);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d, { check_out: dt(d, "17:00") });
+
+    await expect(
+      createRequest(account, {
+        request_type: "forgot_checkin",
+        reason: "quên chấm công",
+        date: d,
+        type: "both",
+        expected_check_in: iso(d, "08:00"),
+        expected_check_out: iso(d, "17:00")
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it("type='both', chưa có gì cả: tạo được bình thường", async () => {
+    const { account, userInfo } = await createUserInfo(6);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d);
+
+    const entity = await createRequest(account, {
+      request_type: "forgot_checkin",
+      reason: "quên chấm công cả ngày",
+      date: d,
+      type: "both",
+      expected_check_in: iso(d, "08:00"),
+      expected_check_out: iso(d, "17:00")
+    });
+    expect(entity.getProps().type).toBe("both");
   });
 });

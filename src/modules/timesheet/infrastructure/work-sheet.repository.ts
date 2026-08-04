@@ -73,10 +73,6 @@ export class WorkSheetRepository {
     date: Date,
     session?: ClientSession
   ): Promise<WorkSheetRecord | null> {
-    // Bug thật phát hiện lúc cutover 1.8.3.6: bản đầu dùng Date.setHours/setDate (theo timezone LOCAL
-    // của server, không phải Asia/Ho_Chi_Minh) — nếu server không chạy đúng ICT, tính sai ranh giới
-    // ngày (verify thật: lệch 13 tiếng khi server TZ=America/New_York). Dùng moment-timezone tường
-    // minh, không phụ thuộc timezone hệ điều hành của server, khớp convention còn lại của module.
     const dateKey = moment.tz(date, TZ).format("YYYY-MM-DD");
     const dayStart = moment.tz(dateKey, TZ).startOf("day").toDate();
     const dayEnd = moment.tz(dateKey, TZ).add(1, "day").startOf("day").toDate();
@@ -114,12 +110,6 @@ export class WorkSheetRepository {
     );
   }
 
-  // Port phần tạo/cập nhật punch thô của `forgotCheckinHandler.js`'s `onApprove` (task 1.8.3.6) —
-  // phát hiện lúc cutover: entry point NÀY thực sự tạo mới `WorkSheetModel` (với `shifts: []`) nếu
-  // chưa có cho ngày đó, khác các entry point khác (Excel import/finalizeWorkDay chỉ update). Dùng
-  // `findOneAndUpdate` trước, `create` nếu không có doc nào matched — giữ đúng logic gốc, KHÔNG dùng
-  // `{upsert:true}` một bước vì bản gốc chỉ set `shifts: []` lúc TẠO MỚI, không đụng field này khi
-  // update (worksheet có sẵn có thể đã có shift thật, không được ghi đè thành rỗng).
   async upsertRawPunch(
     userId: string,
     date: Date,

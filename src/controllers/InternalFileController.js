@@ -43,7 +43,15 @@ async function canUploadToDept(accountId, deptId) {
     if (account?.role === "admin") return true;
 
     const userDeptIds = await getUserDeptIds(accountId);
-    return userDeptIds.includes(deptId.toString());
+    if (userDeptIds.includes(deptId.toString())) return true;
+
+    const permission = await DeptFolderPermissionModel.findOne({ department: deptId });
+    if (!permission) return false;
+
+    if (permission.grantedUsers.some((id) => id.toString() === accountId.toString())) return true;
+    if (permission.grantedDepts.some((id) => userDeptIds.includes(id.toString()))) return true;
+
+    return false;
 }
 
 // BFS để collect tất cả folder IDs kể cả chính nó

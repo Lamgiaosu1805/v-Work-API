@@ -41,12 +41,6 @@ router.get(
   hasModuleAccess("crm"),
   CustomerController.getCustomerStaffInfo
 );
-router.get(
-  "/interactions/:externalId",
-  authenticate,
-  hasModuleAccess("crm"),
-  CustomerInteractionController.list
-);
 
 // POST
 router.post("/upsert", verifyInternalRequest, CustomerController.upsert);

@@ -79,7 +79,9 @@ const BusinessTripRequest = RequestModel.discriminator(
   new mongoose.Schema({
     from_date: { type: Date, required: true },
     to_date: { type: Date, required: true },
-    total_days: { type: Number, required: true }
+    total_days: { type: Number, required: true },
+    origin_location: { type: String, required: true, trim: true },
+    destination_location: { type: String, required: true, trim: true }
   })
 );
 
@@ -88,7 +90,9 @@ const ClientVisitRequest = RequestModel.discriminator(
   new mongoose.Schema({
     from_date: { type: Date, required: true },
     to_date: { type: Date, required: true },
-    total_days: { type: Number, required: true }
+    total_days: { type: Number, required: true },
+    start_time: { type: String, required: true, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
+    end_time: { type: String, required: true, match: /^([01]\d|2[0-3]):[0-5]\d$/ }
   })
 );
 

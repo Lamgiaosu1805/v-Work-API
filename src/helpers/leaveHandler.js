@@ -1,21 +1,16 @@
 const moment = require("moment-timezone");
 const { RequestModel } = require("../models/RequestModel");
-const UserInfoModel = require("../models/UserInfoModel");
-const WorkSheetModel = require("../models/WorkSheetModel");
-const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const HolidayModel = require("../models/HolidayModel");
 const EmploymentStatusModel = require("../models/EmploymentStatusModel");
-const WorkScheduleModel = require("../models/WorkScheduleModel");
-const ShiftModel = require("../models/ShiftModel");
-const { calcTotalDays, buildWorkDatesWithStatus } = require("./requestUtils");
+const { calcTotalDays } = require("./requestUtils");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
-const { getLeaveBalance, adjustLeaveBalance, LeaveLockTimeoutError } = require("../modules/leave");
-const { applyLeaveConflictOverride } = require("../modules/timesheet");
-const { ArgumentInvalidException } = require("../core/exceptions/exceptions");
-const { LEAVE_BALANCE_REASON } = require("../constants");
+const { getLeaveBalance } = require("../modules/leave");
 
 const TZ = "Asia/Ho_Chi_Minh";
 const RETROACTIVE_LIMIT_DAYS = 3;
+// SRS (update 3/8/2026): chỉ được ứng trước tối đa 1 ngày phép của tháng liền kề sau — không còn
+// cộng dồn không giới hạn theo số tháng (monthDiff * MONTHLY_ACCRUAL cũ cho phép ứng trước cả năm).
+const ADVANCE_BORROW_MAX_DAYS = 1;
 
 async function validate(body, userInfo) {
   const { from_date, from_period, to_date, to_period, leave_type } = body;
@@ -61,7 +56,8 @@ async function validate(body, userInfo) {
 
   const balance = await getLeaveBalance(userInfo._id);
   const monthDiff = fromMoment.diff(moment.tz(TZ).startOf("month"), "months");
-  const projectedBalance = balance + monthDiff * MONTHLY_ACCRUAL;
+  const advanceBorrow = monthDiff === 1 ? Math.min(MONTHLY_ACCRUAL, ADVANCE_BORROW_MAX_DAYS) : 0;
+  const projectedBalance = balance + advanceBorrow;
 
   if (leave_type === "paid" && projectedBalance <= 0)
     return {
@@ -142,201 +138,7 @@ async function validateAsync(payload, userInfo, session) {
   return null;
 }
 
-async function onCreate(request, userInfo, session) {
-  if (request.paid_days > 0) {
-    try {
-      await adjustLeaveBalance({
-        userId: userInfo._id,
-        amount: -request.paid_days,
-        reason: LEAVE_BALANCE_REASON.LEAVE_REQUEST_DEDUCTION,
-        refId: request._id,
-        refType: "request",
-        createdBy: userInfo.id_account,
-        allowNegative: true,
-        session
-      });
-    } catch (e) {
-      const isKnownLeaveError =
-        e instanceof ArgumentInvalidException || e instanceof LeaveLockTimeoutError;
-      return { status: isKnownLeaveError ? e.statusCode : 500, message: e.message };
-    }
-  }
-  return null;
-}
-
-async function resolveShiftsForDates(userId, dates, session) {
-  const userInfo = await UserInfoModel.findById(userId, {
-    employment_type: 1,
-  }).session(session);
-  const isParttime = userInfo?.employment_type === "parttime";
-
-  const dated = dates.map(({ date }) => {
-    const m = moment.tz(date, TZ);
-    return { key: m.format("YYYY-MM-DD"), dayOfWeek: m.day() === 0 ? 7 : m.day() };
-  });
-
-  const map = new Map();
-
-  if (isParttime) {
-    const schedules = await WorkScheduleModel.find({ userId }).session(session);
-    const byDow = new Map();
-    for (const s of schedules) {
-      const arr = byDow.get(s.dayOfWeek) || [];
-      arr.push(...s.shifts);
-      byDow.set(s.dayOfWeek, arr);
-    }
-    for (const { key, dayOfWeek } of dated) {
-      map.set(key, byDow.get(dayOfWeek) || []);
-    }
-  } else {
-    const [adminShift, morningShift] = await Promise.all([
-      ShiftModel.findOne({ name: "Ca hành chính" }).session(session),
-      ShiftModel.findOne({ name: "Ca sáng" }).session(session),
-    ]);
-    for (const { key, dayOfWeek } of dated) {
-      const shift = dayOfWeek === 6 ? morningShift : adminShift;
-      map.set(key, shift ? [shift._id] : []);
-    }
-  }
-
-  return map;
-}
-
-async function onApprove(request, session) {
-  const fromMoment = moment.tz(request.from_date, TZ).startOf("day");
-  const toMoment = moment.tz(request.to_date, TZ).startOf("day");
-  const fromStart = fromMoment.toDate();
-  const toEnd = moment.tz(request.to_date, TZ).endOf("day").toDate();
-
-  const datesWithStatus = buildWorkDatesWithStatus(request, fromMoment, toMoment);
-
-  const existing = await WorkSheetModel.find(
-    { user_id: request.user_id, date: { $gte: fromStart, $lte: toEnd }, isDeleted: false },
-    { date: 1, check_in: 1, check_out: 1, shifts: 1 }
-  )
-    .populate("shifts")
-    .session(session);
-  const sheetMap = new Map(
-    existing.map((w) => [moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id]),
-  );
-
-  const missing = datesWithStatus.filter(
-    (d) => !sheetMap.has(moment.tz(d.date, TZ).format("YYYY-MM-DD")),
-  );
-  if (missing.length) {
-    const shiftMap = await resolveShiftsForDates(request.user_id, missing, session);
-    const created = await WorkSheetModel.insertMany(
-      missing.map(({ date }) => ({
-        user_id: request.user_id,
-        date,
-        shifts: shiftMap.get(moment.tz(date, TZ).format("YYYY-MM-DD")) || [],
-      })),
-      { session },
-    );
-    created.forEach((w) => sheetMap.set(moment.tz(w.date, TZ).format("YYYY-MM-DD"), w._id));
-  }
-
-  const AWAY_STATUSES = ["business_trip", "client_visit", "remote"];
-
-  for (const { date, status, period, weight } of datesWithStatus) {
-    const worksheet_id = sheetMap.get(moment.tz(date, TZ).format("YYYY-MM-DD"));
-
-    const priorStatuses = await WorkDayStatusModel.find(
-      { user_id: request.user_id, date, isDeleted: false },
-      { status: 1 }
-    ).session(session);
-    const wasAwayDay = priorStatuses.some((s) => AWAY_STATUSES.includes(s.status));
-    const existingWs = existing.find(
-      (w) => moment.tz(w.date, TZ).format("YYYY-MM-DD") === moment.tz(date, TZ).format("YYYY-MM-DD")
-    );
-    const hasGenuineAttendance = !wasAwayDay && existingWs?.check_in && existingWs?.check_out;
-
-    await WorkDayStatusModel.deleteMany(
-      { user_id: request.user_id, date, isDeleted: false },
-      { session }
-    );
-    await WorkDayStatusModel.create(
-      [
-        {
-          user_id: request.user_id,
-          worksheet_id,
-          date,
-          period,
-          status,
-          sources: [{ ref_id: request._id, ref_type: "request" }]
-        }
-      ],
-      { session }
-    );
-
-    if (!hasGenuineAttendance) {
-      const wsUpdate = {
-        work_unit: status === "leave_paid" ? weight : 0,
-        minutes_late: 0,
-        minute_early: 0,
-        penalty_amount: 0
-      };
-      if (wasAwayDay) {
-        wsUpdate.check_in = null;
-        wsUpdate.check_out = null;
-      }
-      await WorkSheetModel.updateOne({ _id: worksheet_id }, wsUpdate, { session });
-    }
-  }
-
-  const refreshed = await WorkSheetModel.find(
-    { user_id: request.user_id, date: { $gte: fromStart, $lte: toEnd }, isDeleted: false },
-    { date: 1, check_in: 1, check_out: 1, shifts: 1 }
-  )
-    .populate("shifts")
-    .session(session);
-
-  for (const w of refreshed) {
-    if (!w.check_in || !w.check_out) continue;
-    const lastShift = w.shifts?.length ? w.shifts[w.shifts.length - 1] : null;
-    // eslint-disable-next-line no-await-in-loop
-    const { leaveRefundAmount } = await applyLeaveConflictOverride({
-      userId: request.user_id.toString(),
-      worksheetId: w._id.toString(),
-      dateKey: moment.tz(w.date, TZ).format("YYYY-MM-DD"),
-      checkInTime: w.check_in,
-      checkOutTime: w.check_out,
-      lastShiftEnd: lastShift?.end_time ?? null,
-      session
-    });
-    if (leaveRefundAmount > 0) {
-      // eslint-disable-next-line no-await-in-loop
-      await adjustLeaveBalance({
-        userId: request.user_id,
-        amount: leaveRefundAmount,
-        reason: LEAVE_BALANCE_REASON.ATTENDANCE_OVERRIDE_REFUND,
-        refId: w._id,
-        refType: "system",
-        allowNegative: true,
-        session
-      });
-    }
-  }
-}
-
-async function onReject(request, session, isCancel = false) {
-  if (request.paid_days > 0) {
-    await adjustLeaveBalance({
-      userId: request.user_id,
-      amount: request.paid_days,
-      reason: isCancel ? LEAVE_BALANCE_REASON.CANCEL_REFUND : LEAVE_BALANCE_REASON.REJECT_REFUND,
-      refId: request._id,
-      refType: "request",
-      allowNegative: true,
-      session
-    });
-  }
-}
-
 module.exports = {
   validate,
-  validateAsync,
-  onCreate,
-  onApprove,
-  onReject
+  validateAsync
 };

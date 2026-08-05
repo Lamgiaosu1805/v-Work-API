@@ -60,7 +60,7 @@ async function createUserInfo(n) {
 }
 
 describe("GET /requests/eligible-reviewers — full HTTP pipeline (route -> asyncHandler -> service -> global error middleware)", () => {
-  it("200: trả về data: null khi chain rỗng (không có ai đủ quyền duyệt được seed)", async () => {
+  it("200: trả về data: [] khi chain rỗng (không có ai đủ quyền duyệt được seed)", async () => {
     const userInfo = await createUserInfo(1);
 
     const res = await request(app)
@@ -68,7 +68,7 @@ describe("GET /requests/eligible-reviewers — full HTTP pipeline (route -> asyn
       .set("x-test-account", String(userInfo.id_account));
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ message: "OK", data: null });
+    expect(res.body).toEqual({ message: "OK", data: [] });
   });
 
   it("404: không tìm thấy user_info — lỗi từ application service tự propagate qua asyncHandler tới global error middleware, đúng format { message }", async () => {

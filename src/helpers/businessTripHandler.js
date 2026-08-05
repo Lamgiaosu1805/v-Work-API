@@ -1,18 +1,31 @@
 const { RequestModel } = require("../models/RequestModel");
 const { calcTotalDays } = require("./requestUtils");
-const { createOnApprove } = require("./awayDayHandler");
 
 function validate(body) {
-  const { from_date, to_date } = body;
+  const { from_date, to_date, origin_location, destination_location } = body;
 
   if (!from_date || !to_date)
     return { error: { status: 400, message: "Thông tin đầu vào không hợp lệ" } };
+
+  const trimmedOrigin = typeof origin_location === "string" ? origin_location.trim() : "";
+  const trimmedDestination =
+    typeof destination_location === "string" ? destination_location.trim() : "";
+  if (!trimmedOrigin || !trimmedDestination)
+    return { error: { status: 400, message: "Vui lòng nhập nơi đi và nơi đến" } };
 
   const total_days = calcTotalDays(from_date, "morning", to_date, "afternoon");
   if (total_days === null || total_days === 0)
     return { error: { status: 400, message: "Khoảng thời gian không hợp lệ" } };
 
-  return { payload: { from_date, to_date, total_days } };
+  return {
+    payload: {
+      from_date,
+      to_date,
+      total_days,
+      origin_location: trimmedOrigin,
+      destination_location: trimmedDestination
+    }
+  };
 }
 
 async function validateAsync(payload, userInfo, session) {
@@ -27,4 +40,4 @@ async function validateAsync(payload, userInfo, session) {
   return overlap ? { status: 409, message: "Đã có đơn công tác trong khoảng thời gian này" } : null;
 }
 
-module.exports = { validate, validateAsync, onApprove: createOnApprove("business_trip") };
+module.exports = { validate, validateAsync };

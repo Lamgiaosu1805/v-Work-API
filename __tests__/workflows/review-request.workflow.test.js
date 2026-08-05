@@ -1,38 +1,36 @@
 const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 
-jest.mock("../../../src/helpers/rbac", () => ({
+jest.mock("../../src/helpers/rbac", () => ({
   can: jest.fn(),
   getAccountsWithPermission: jest.fn().mockResolvedValue([])
 }));
-jest.mock("../../../src/modules/request/domain/approval-chain", () => ({
+jest.mock("../../src/modules/request/domain/approval-chain", () => ({
   getApprovalChain: jest.fn()
 }));
-jest.mock("../../../src/helpers/requestUtils", () => {
-  const actual = jest.requireActual("../../../src/helpers/requestUtils");
+jest.mock("../../src/helpers/requestUtils", () => {
+  const actual = jest.requireActual("../../src/helpers/requestUtils");
   return { ...actual, notify: jest.fn() };
 });
 
-const { can } = require("../../../src/helpers/rbac");
-const { getApprovalChain } = require("../../../src/modules/request/domain/approval-chain");
-const { notify } = require("../../../src/helpers/requestUtils");
-const AccountModel = require("../../../src/models/AccountModel");
-const UserInfoModel = require("../../../src/models/UserInfoModel");
+const { can } = require("../../src/helpers/rbac");
+const { getApprovalChain } = require("../../src/modules/request/domain/approval-chain");
+const { notify } = require("../../src/helpers/requestUtils");
+const AccountModel = require("../../src/models/AccountModel");
+const UserInfoModel = require("../../src/models/UserInfoModel");
 const {
   ExplanationRequest,
   LeaveRequest,
   ForgotCheckinRequest
-} = require("../../../src/models/RequestModel");
-const leaveHandler = require("../../../src/helpers/leaveHandler");
-const forgotCheckinHandler = require("../../../src/helpers/forgotCheckinHandler");
-const { RequestEntity } = require("../../../src/modules/request/domain/request.entity");
+} = require("../../src/models/RequestModel");
+const leaveSideEffects = require("../../src/workflows/request-side-effects/leave");
+const forgotCheckinSideEffects = require("../../src/workflows/request-side-effects/forgot-checkin");
+const { RequestEntity } = require("../../src/modules/request/domain/request.entity");
 const {
   RequestRepository
-} = require("../../../src/modules/request/infrastructure/request.repository");
-const {
-  reviewRequest
-} = require("../../../src/modules/request/application/review-request.service");
-const { RequestContextService } = require("../../../src/core/context/request-context");
+} = require("../../src/modules/request/infrastructure/request.repository");
+const { reviewRequest } = require("../../src/workflows/review-request.workflow");
+const { RequestContextService } = require("../../src/core/context/request-context");
 
 let mongod;
 let repo;
@@ -122,7 +120,13 @@ function newMultiApprovalForgotCheckinEntity(userId) {
   });
 }
 
-describe("reviewRequest()", () => {
+// Port nguyên __tests__/modules/request/review-request.test.js (task 1.8.6) — orchestration (acquire
+// lock + mở transaction + dispatch side-effect xuyên module) đã chuyển từ modules/request/application/
+// review-request.service.ts sang workflows/review-request.workflow.ts, giữ nguyên toàn bộ assertion.
+// Khác biệt duy nhất: spy onApprove/onReject giờ nhắm vào workflows/request-side-effects/leave và
+// forgot-checkin (nơi logic thật đang sống) thay vì helpers/leaveHandler/forgotCheckinHandler (giờ chỉ
+// còn validate/validateAsync).
+describe("reviewRequest() (workflows/review-request.workflow)", () => {
   it("throw ArgumentInvalidException (400) khi id không hợp lệ", async () => {
     const { account } = await createUserInfo(1);
     await expect(
@@ -246,7 +250,7 @@ describe("reviewRequest()", () => {
     await insertEntity(entity);
 
     can.mockResolvedValue(true);
-    const onApproveSpy = jest.spyOn(leaveHandler, "onApprove");
+    const onApproveSpy = jest.spyOn(leaveSideEffects, "onApprove");
 
     const result = await reviewRequest(r1, entity.id, { action: "approve" });
 
@@ -264,7 +268,7 @@ describe("reviewRequest()", () => {
     await insertEntity(entity);
 
     can.mockResolvedValue(true);
-    const onApproveSpy = jest.spyOn(leaveHandler, "onApprove").mockResolvedValue(undefined);
+    const onApproveSpy = jest.spyOn(leaveSideEffects, "onApprove").mockResolvedValue(undefined);
 
     await reviewRequest(r1, entity.id, { action: "approve" });
     const result = await reviewRequest(r2, entity.id, { action: "approve" });
@@ -299,7 +303,7 @@ describe("reviewRequest()", () => {
     await insertEntity(entity);
 
     can.mockResolvedValue(true);
-    const onRejectSpy = jest.spyOn(leaveHandler, "onReject").mockResolvedValue(undefined);
+    const onRejectSpy = jest.spyOn(leaveSideEffects, "onReject").mockResolvedValue(undefined);
 
     await reviewRequest(r1, entity.id, { action: "approve" });
     const result = await reviewRequest(r2, entity.id, { action: "reject" });
@@ -337,7 +341,7 @@ describe("reviewRequest()", () => {
 
     can.mockResolvedValue(true);
     getApprovalChain.mockResolvedValue([]);
-    jest.spyOn(leaveHandler, "onReject").mockResolvedValue(undefined);
+    jest.spyOn(leaveSideEffects, "onReject").mockResolvedValue(undefined);
 
     await reviewRequest(r1, entity.id, { action: "approve" });
     await reviewRequest(r2, entity.id, { action: "reject" });
@@ -361,7 +365,7 @@ describe("reviewRequest()", () => {
     await insertEntity(entity);
 
     can.mockResolvedValue(true);
-    jest.spyOn(leaveHandler, "onApprove").mockResolvedValue(undefined);
+    jest.spyOn(leaveSideEffects, "onApprove").mockResolvedValue(undefined);
 
     const [res1, res2] = await Promise.all([
       reviewRequest(r1, entity.id, { action: "approve" }),
@@ -416,7 +420,7 @@ describe("reviewRequest()", () => {
 
       can.mockResolvedValue(false);
       getApprovalChain.mockResolvedValue([{ accountId: r1._id }, { accountId: r2._id }]);
-      jest.spyOn(forgotCheckinHandler, "onApprove").mockResolvedValue(undefined);
+      jest.spyOn(forgotCheckinSideEffects, "onApprove").mockResolvedValue(undefined);
 
       await reviewRequest(r1, entity.id, { action: "approve" });
       const result = await reviewRequest(r2, entity.id, { action: "approve" });

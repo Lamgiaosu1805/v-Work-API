@@ -2,7 +2,18 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
-function parsePagination(query = {}) {
+export interface PaginationQuery {
+  page?: unknown;
+  limit?: unknown;
+}
+
+export interface PaginationResult {
+  page: number;
+  limit: number;
+  skip: number;
+}
+
+export function parsePagination(query: PaginationQuery = {}): PaginationResult {
   const page = Number(query.page);
   const limit = Number(query.limit);
 
@@ -16,5 +27,3 @@ function parsePagination(query = {}) {
     skip: (safePage - 1) * safeLimit
   };
 }
-
-module.exports = { parsePagination };

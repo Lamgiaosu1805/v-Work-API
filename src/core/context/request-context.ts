@@ -1,9 +1,15 @@
-const { AsyncLocalStorage } = require("async_hooks");
+import { AsyncLocalStorage } from "async_hooks";
 
-const storage = new AsyncLocalStorage();
+export interface Store {
+  requestId?: string;
+  transactionSession?: unknown;
+  [key: string]: unknown;
+}
 
-class RequestContextService {
-  static run(store, callback) {
+const storage = new AsyncLocalStorage<Store>();
+
+export class RequestContextService {
+  static run<T>(store: Store, callback: () => T): T {
     if (storage.getStore()) {
       throw new Error(
         "RequestContextService.run() called while already inside a context — " +
@@ -13,12 +19,12 @@ class RequestContextService {
     return storage.run(store, callback);
   }
 
-  static runChild(partialStore, callback) {
+  static runChild<T>(partialStore: Partial<Store>, callback: () => T): T {
     const parentStore = storage.getStore() ?? {};
     return storage.run({ ...parentStore, ...partialStore }, callback);
   }
 
-  static getContext() {
+  static getContext(): Store {
     const store = storage.getStore();
     if (!store) {
       throw new Error(
@@ -28,25 +34,23 @@ class RequestContextService {
     return store;
   }
 
-  static getRequestId() {
+  static getRequestId(): string | undefined {
     return storage.getStore()?.requestId;
   }
 
-  static setRequestId(requestId) {
+  static setRequestId(requestId: string): void {
     this.getContext().requestId = requestId;
   }
 
-  static getTransactionSession() {
+  static getTransactionSession(): unknown {
     return storage.getStore()?.transactionSession;
   }
 
-  static setTransactionSession(session) {
+  static setTransactionSession(session: unknown): void {
     this.getContext().transactionSession = session;
   }
 
-  static clearTransactionSession() {
+  static clearTransactionSession(): void {
     this.getContext().transactionSession = undefined;
   }
 }
-
-module.exports = { RequestContextService };

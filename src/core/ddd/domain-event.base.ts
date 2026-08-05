@@ -1,9 +1,22 @@
-const { randomUUID } = require("crypto");
-const { ArgumentNotProvidedException } = require("../exceptions/exceptions");
-const { RequestContextService } = require("../context/request-context");
+import { randomUUID } from "crypto";
+import { ArgumentNotProvidedException } from "../exceptions/exceptions";
+import { RequestContextService } from "../context/request-context";
+import { Metadata } from "./types";
 
-class DomainEvent {
-  constructor(props) {
+export interface DomainEventProps {
+  aggregateId: string;
+  metadata?: Partial<Metadata>;
+  [key: string]: unknown;
+}
+
+export abstract class DomainEvent {
+  readonly id: string;
+
+  readonly aggregateId: string;
+
+  readonly metadata: Metadata;
+
+  constructor(props: DomainEventProps) {
     if (!props || typeof props !== "object" || !props.aggregateId) {
       throw new ArgumentNotProvidedException("DomainEvent requires props.aggregateId.");
     }
@@ -18,5 +31,3 @@ class DomainEvent {
     };
   }
 }
-
-module.exports = { DomainEvent };

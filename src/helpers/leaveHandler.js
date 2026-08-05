@@ -9,7 +9,8 @@ const WorkScheduleModel = require("../models/WorkScheduleModel");
 const ShiftModel = require("../models/ShiftModel");
 const { calcTotalDays, buildWorkDatesWithStatus } = require("./requestUtils");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
-const { getLeaveBalance, adjustLeaveBalance, LeaveBalanceError } = require("./leaveBalance");
+const { getLeaveBalance, adjustLeaveBalance, LeaveLockTimeoutError } = require("../modules/leave");
+const { ArgumentInvalidException } = require("../core/exceptions/exceptions");
 const { LEAVE_BALANCE_REASON } = require("../constants");
 
 const TZ = "Asia/Ho_Chi_Minh";
@@ -154,7 +155,9 @@ async function onCreate(request, userInfo, session) {
         session
       });
     } catch (e) {
-      return { status: e instanceof LeaveBalanceError ? e.status : 500, message: e.message };
+      const isKnownLeaveError =
+        e instanceof ArgumentInvalidException || e instanceof LeaveLockTimeoutError;
+      return { status: isKnownLeaveError ? e.statusCode : 500, message: e.message };
     }
   }
   return null;

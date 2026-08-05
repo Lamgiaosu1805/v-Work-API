@@ -3,7 +3,7 @@ const moment = require("moment-timezone");
 const { MongoMemoryServer } = require("mongodb-memory-server");
 
 const { onApprove } = require("../src/helpers/leaveHandler");
-const { getLeaveBalance } = require("../src/helpers/leaveBalance");
+const { getLeaveBalance } = require("../src/modules/leave");
 const UserInfoModel = require("../src/models/UserInfoModel");
 const WorkSheetModel = require("../src/models/WorkSheetModel");
 const WorkDayStatusModel = require("../src/models/WorkDayStatusModel");

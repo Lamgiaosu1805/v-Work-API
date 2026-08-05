@@ -7,12 +7,9 @@ const heicConvert = require("heic-convert");
 const AccountModel = require("../models/AccountModel");
 const EmploymentStatusModel = require("../models/EmploymentStatusModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
-const {
-  adjustLeaveBalance,
-  getLeaveBalance,
-  LeaveBalanceError
-} = require("../helpers/leaveBalance");
-const { LEAVE_BALANCE_REASON, PERMISSION } = require("../constants");
+const { adjustLeaveBalance, getLeaveBalance, LeaveLockTimeoutError } = require("../modules/leave");
+const { ArgumentInvalidException } = require("../core/exceptions/exceptions");
+const { LEAVE_BALANCE_REASON } = require("../constants");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDocumentModel = require("../models/UserDocumentModel");
 const Utils = require("../config/common/utils");
@@ -771,8 +768,8 @@ const UserController = {
         } catch (e) {
           await session.abortTransaction();
           session.endSession();
-          if (e instanceof LeaveBalanceError)
-            return res.status(e.status).json({ message: e.message });
+          if (e instanceof ArgumentInvalidException || e instanceof LeaveLockTimeoutError)
+            return res.status(e.statusCode).json({ message: e.message });
           console.error("Error adjusting leave balance in updateUser:", e);
           return res.status(500).json({ message: "Lỗi server", error: e.message });
         }

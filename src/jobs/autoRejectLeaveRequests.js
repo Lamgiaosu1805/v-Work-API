@@ -5,7 +5,7 @@ const { RequestModel } = require("../models/RequestModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const notificationService = require("../services/notificationService");
 const { AUTO_REJECT_AFTER_DAYS } = require("../config/common/leaveConfig");
-const { adjustLeaveBalance } = require("../helpers/leaveBalance");
+const { adjustLeaveBalance } = require("../modules/leave");
 const { LEAVE_BALANCE_REASON } = require("../constants");
 
 const TZ = "Asia/Ho_Chi_Minh";

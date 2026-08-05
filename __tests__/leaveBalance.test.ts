@@ -1,16 +1,16 @@
-const mongoose = require("mongoose");
-const { MongoMemoryServer } = require("mongodb-memory-server");
-
-const {
+import mongoose from "mongoose";
+import { MongoMemoryServer } from "mongodb-memory-server";
+import {
   getLeaveBalance,
   adjustLeaveBalance,
-  LeaveBalanceError
-} = require("../src/helpers/leaveBalance");
-const LeaveBalanceModel = require("../src/models/LeaveBalanceModel");
-const { LEAVE_BALANCE_REASON } = require("../src/constants");
-const redisMock = require("./mocks/redis");
+  InsufficientLeaveBalanceError
+} from "../src/modules/leave";
+import { ArgumentInvalidException } from "../src/core/exceptions/exceptions";
+import LeaveBalanceModel from "../src/models/LeaveBalanceModel";
+import { LEAVE_BALANCE_REASON } from "../src/constants";
+import redisMock from "./mocks/redis";
 
-let mongod;
+let mongod: MongoMemoryServer;
 
 beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
@@ -27,7 +27,7 @@ beforeEach(async () => {
   redisMock.__store.clear();
 });
 
-const newUserId = () => new mongoose.Types.ObjectId();
+const newUserId = () => new mongoose.Types.ObjectId().toString();
 
 describe("getLeaveBalance", () => {
   test("SUM đúng với nhiều dòng (+/-/refund)", async () => {
@@ -75,7 +75,7 @@ describe("adjustLeaveBalance", () => {
         amount: -5,
         reason: LEAVE_BALANCE_REASON.HR_MANUAL_ADJUSTMENT
       })
-    ).rejects.toThrow(LeaveBalanceError);
+    ).rejects.toBeInstanceOf(InsufficientLeaveBalanceError);
 
     expect(await LeaveBalanceModel.countDocuments({ user_id: userId })).toBe(1);
     expect(await getLeaveBalance(userId)).toBe(2);
@@ -104,23 +104,24 @@ describe("adjustLeaveBalance", () => {
     const userId = newUserId();
     await expect(
       adjustLeaveBalance({ userId, amount: 0, reason: LEAVE_BALANCE_REASON.HR_MANUAL_ADJUSTMENT })
-    ).rejects.toThrow(LeaveBalanceError);
+    ).rejects.toBeInstanceOf(ArgumentInvalidException);
   });
 
   test("guard reason không hợp lệ → throw", async () => {
     const userId = newUserId();
     await expect(
       adjustLeaveBalance({ userId, amount: 1, reason: "khong_ton_tai" })
-    ).rejects.toThrow(LeaveBalanceError);
+    ).rejects.toBeInstanceOf(ArgumentInvalidException);
   });
 
   test("balance_after chỉ là snapshot — sửa tay không ảnh hưởng getLeaveBalance", async () => {
     const userId = newUserId();
-    const { ledgerEntry } = await adjustLeaveBalance({
+    await adjustLeaveBalance({
       userId,
       amount: 3,
       reason: LEAVE_BALANCE_REASON.MONTHLY_ACCRUAL
     });
+    const ledgerEntry: any = await LeaveBalanceModel.findOne({ user_id: userId });
     expect(ledgerEntry.balance_after).toBe(3);
 
     await LeaveBalanceModel.updateOne({ _id: ledgerEntry._id }, { balance_after: 999 });

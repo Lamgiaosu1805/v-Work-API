@@ -11,7 +11,7 @@ const AttendanceMachineMappingModel = require("../models/AttendanceMachineMappin
 const { RequestModel } = require("../models/RequestModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 const { resolveLeaveConflictOnAttendance } = require("../helpers/leaveHandler");
-const { getLeaveBalance } = require("../helpers/leaveBalance");
+const { getLeaveBalance } = require("../modules/leave");
 const { can } = require("../helpers/rbac");
 const { PERMISSION } = require("../constants");
 const {

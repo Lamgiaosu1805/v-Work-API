@@ -14,7 +14,7 @@ const WorkSheetModel = require("../src/models/WorkSheetModel");
 const WorkDayStatusModel = require("../src/models/WorkDayStatusModel");
 const LeaveBalanceModel = require("../src/models/LeaveBalanceModel");
 const ShiftModel = require("../src/models/ShiftModel");
-const { getLeaveBalance } = require("../src/helpers/leaveBalance");
+const { getLeaveBalance } = require("../src/modules/leave");
 const { LEAVE_BALANCE_REASON } = require("../src/constants");
 
 const TZ = "Asia/Ho_Chi_Minh";

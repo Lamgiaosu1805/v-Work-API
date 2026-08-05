@@ -3,24 +3,18 @@ const moment = require("moment-timezone");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const { RequestModel } = require("../models/RequestModel");
+const { normalizeDayPunches } = require("../helpers/attendanceHelper");
 const {
+  processAttendanceDay,
   buildLatePenaltyResolver,
   buildEarlyPenaltyResolver,
   buildForgotPenaltyResolver,
   buildUnifiedForgotOccurrenceMap
-} = require("../helpers/attendancePenalty");
-const {
-  normalizeDayPunches,
-  resolveAttendanceDay,
-  saveAttendanceDay
-} = require("../helpers/attendanceHelper");
+} = require("../modules/timesheet");
 const { getPayrollPeriodRange } = require("../helpers/payrollPeriod");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
-// Build context (forgotMap, forgotOccurrenceMap, lateForgivenSet, earlyForgivenSet, leavePeriodsMap)
-// cho 1 nhân viên trong ngày hôm nay, cùng cách importExcel đang load, để resolveAttendanceDay/
-// saveAttendanceDay tính đúng status/work_unit y hệt luồng import.
 async function buildUserDayContext(
   userId,
   dateKey,
@@ -178,7 +172,9 @@ async function finalizeWorkDay(targetDate = null) {
           ? moment.tz(worksheet.check_out, TZ).format("HH:mm")
           : null;
 
-        const computed = resolveAttendanceDay({
+        const result = await processAttendanceDay({
+          userId: worksheet.user_id.toString(),
+          worksheetId: worksheet._id.toString(),
           dateKey,
           rawIn,
           rawOut,
@@ -192,10 +188,9 @@ async function finalizeWorkDay(targetDate = null) {
           resolveEarlyPenalty,
           resolveForgotPenalty
         });
-        if (computed.skip) continue;
+        if (result.skip) continue;
 
-        await saveAttendanceDay({ userId: worksheet.user_id, dateKey, worksheet, computed });
-        if (!computed.unchanged) finalized++;
+        if (!result.unchanged) finalized++;
       } catch (e) {
         console.error(`[Cron] finalizeWorkDay lỗi user ${worksheet.user_id}:`, e);
         failed++;

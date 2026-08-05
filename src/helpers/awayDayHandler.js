@@ -2,7 +2,9 @@ const moment = require("moment-timezone");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const ShiftModel = require("../models/ShiftModel");
-const { resolveLeaveConflictOnAttendance } = require("./leaveHandler");
+const { applyLeaveConflictOverride } = require("../modules/timesheet");
+const { adjustLeaveBalance } = require("../modules/leave");
+const { LEAVE_BALANCE_REASON } = require("../constants");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -84,15 +86,26 @@ function createOnApprove(status) {
         { session }
       );
 
-      await resolveLeaveConflictOnAttendance({
-        userId: request.user_id,
-        worksheetId: worksheet._id,
-        date: dateKey,
+      const { leaveRefundAmount } = await applyLeaveConflictOverride({
+        userId: request.user_id.toString(),
+        worksheetId: worksheet._id.toString(),
+        dateKey,
         checkInTime: check_in,
         checkOutTime: check_out,
         lastShiftEnd: endTime,
         session
       });
+      if (leaveRefundAmount > 0) {
+        await adjustLeaveBalance({
+          userId: request.user_id,
+          amount: leaveRefundAmount,
+          reason: LEAVE_BALANCE_REASON.ATTENDANCE_OVERRIDE_REFUND,
+          refId: worksheet._id,
+          refType: "system",
+          allowNegative: true,
+          session
+        });
+      }
 
       await WorkDayStatusModel.findOneAndUpdate(
         { user_id: request.user_id, date: dateMoment.toDate(), period: "full" },

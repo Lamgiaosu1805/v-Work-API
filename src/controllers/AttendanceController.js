@@ -10,22 +10,22 @@ const HolidayModel = require("../models/HolidayModel");
 const AttendanceMachineMappingModel = require("../models/AttendanceMachineMappingModel");
 const { RequestModel } = require("../models/RequestModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
-const { resolveLeaveConflictOnAttendance } = require("../helpers/leaveHandler");
-const { getLeaveBalance } = require("../modules/leave");
-const { can } = require("../helpers/rbac");
-const { PERMISSION } = require("../constants");
+const { getLeaveBalance, adjustLeaveBalance } = require("../modules/leave");
 const {
+  applyLeaveConflictOverride,
+  processAttendanceDay,
   buildLatePenaltyResolver,
   buildEarlyPenaltyResolver,
   buildForgotPenaltyResolver,
-  buildUnifiedForgotOccurrenceMap
-} = require("../helpers/attendancePenalty");
+  buildUnifiedForgotOccurrenceMap,
+  buildHolidayDefaultWorkUnitMap
+} = require("../modules/timesheet");
+const { can } = require("../helpers/rbac");
+const { PERMISSION, LEAVE_BALANCE_REASON } = require("../constants");
 const {
   parseExcelToBlocks,
   parseDayRows,
   normalizeDayPunches,
-  resolveAttendanceDay,
-  saveAttendanceDay,
   correctDayStatuses
 } = require("../helpers/attendanceHelper");
 const { getPayrollPeriodRange, calcStandardWorkUnits } = require("../helpers/payrollPeriod");
@@ -259,15 +259,26 @@ const AttendanceController = {
 
       await worksheet.save({ session });
 
-      await resolveLeaveConflictOnAttendance({
-        userId: userInfo._id,
-        worksheetId: worksheet._id,
-        date: today,
+      const { leaveRefundAmount } = await applyLeaveConflictOverride({
+        userId: userInfo._id.toString(),
+        worksheetId: worksheet._id.toString(),
+        dateKey: moment.tz(today, "Asia/Ho_Chi_Minh").format("YYYY-MM-DD"),
         checkInTime: worksheet.check_in,
         checkOutTime: now.toDate(),
         lastShiftEnd: lastShift.end_time,
         session
       });
+      if (leaveRefundAmount > 0) {
+        await adjustLeaveBalance({
+          userId: userInfo._id,
+          amount: leaveRefundAmount,
+          reason: LEAVE_BALANCE_REASON.ATTENDANCE_OVERRIDE_REFUND,
+          refId: worksheet._id,
+          refType: "system",
+          allowNegative: true,
+          session
+        });
+      }
 
       await WorkDayStatusModel.updateMany(
         { worksheet_id: worksheet._id, status: "pending", isDeleted: false },
@@ -639,6 +650,18 @@ const AttendanceController = {
         wsMap.set(moment.tz(ws.date, TZ).format("YYYY-MM-DD"), ws);
       }
 
+      // Gap SRS: ngày lễ (paid) mặc định hiển thị 1 công dù không ai chấm công ngày đó — chỉ điền vào
+      // ngày CHƯA có worksheet nào (không ghi đè work_unit đã tính từ luồng khác).
+      const holidayDefaultMap = buildHolidayDefaultWorkUnitMap(
+        holidays.map((h) => ({
+          date: h.date,
+          pay_policy: h.pay_policy,
+          scope_type: h.scope_type,
+          branches: (h.branches || []).map((b) => b.toString())
+        })),
+        userInfo.branch_id?.toString()
+      );
+
       const dsMap = new Map();
       for (const ds of dayStatuses) {
         const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
@@ -674,7 +697,8 @@ const AttendanceController = {
         ...wsMap.keys(),
         ...dsMap.keys(),
         ...reqMap.keys(),
-        ...forgotReqMap.keys()
+        ...forgotReqMap.keys(),
+        ...holidayDefaultMap.keys()
       ]);
 
       let work_unit_total = 0;
@@ -703,6 +727,7 @@ const AttendanceController = {
         const statuses = correctDayStatuses(dsMap.get(dateStr) || [], ws);
         const reqs = reqMap.get(dateStr) || [];
 
+        const holidayDefaultWorkUnit = holidayDefaultMap.get(dateStr);
         if (ws) {
           const wu = ws.work_unit ?? 0;
           work_unit_total += wu;
@@ -718,6 +743,11 @@ const AttendanceController = {
             early_days++;
             total_minutes_early += ws.minute_early;
           }
+        } else if (holidayDefaultWorkUnit) {
+          work_unit_total += holidayDefaultWorkUnit;
+          const isProbation = probationEnd && moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
+          if (isProbation) work_unit_probation += holidayDefaultWorkUnit;
+          else work_unit_official += holidayDefaultWorkUnit;
         }
         for (const s of statuses) {
           const w = s.period === "full" ? 1 : 0.5;
@@ -736,7 +766,7 @@ const AttendanceController = {
           worksheet_id: ws?._id ?? null,
           check_in: ws?.check_in ? moment.tz(ws.check_in, TZ).format("HH:mm") : null,
           check_out: ws?.check_out ? moment.tz(ws.check_out, TZ).format("HH:mm") : null,
-          work_unit: ws?.work_unit ?? null,
+          work_unit: ws?.work_unit ?? holidayDefaultWorkUnit ?? null,
           penalty_amount: ws?.penalty_amount ?? 0,
           minutes_late: ws?.minutes_late ?? 0,
           minute_early: ws?.minute_early ?? 0,
@@ -974,6 +1004,27 @@ const AttendanceController = {
         return standardUnitsByBranch.get(key);
       };
 
+      // Gap SRS: ngày lễ (paid) mặc định hiển thị 1 công dù không ai chấm công ngày đó — chỉ điền vào
+      // ngày CHƯA có worksheet nào (không ghi đè work_unit đã tính từ luồng khác). Khớp cách fix ở
+      // getPayrollStats (1 nhân viên).
+      const holidaySnapshots = holidays.map((h) => ({
+        date: h.date,
+        pay_policy: h.pay_policy,
+        scope_type: h.scope_type,
+        branches: (h.branches || []).map((b) => b.toString())
+      }));
+      const holidayDefaultMapByBranch = new Map();
+      const holidayDefaultMapForBranch = (branchId) => {
+        const key = branchId ? branchId.toString() : "";
+        if (!holidayDefaultMapByBranch.has(key)) {
+          holidayDefaultMapByBranch.set(
+            key,
+            buildHolidayDefaultWorkUnitMap(holidaySnapshots, branchId ? branchId.toString() : null)
+          );
+        }
+        return holidayDefaultMapByBranch.get(key);
+      };
+
       const wsByUser = new Map();
       for (const ws of worksheets) {
         const k = ws.user_id.toString();
@@ -1031,6 +1082,15 @@ const AttendanceController = {
             early_days++;
             total_minutes_early += ws.minute_early;
           }
+        }
+
+        const holidayDefaultMap = holidayDefaultMapForBranch(u.branch_id);
+        for (const [dateStr, wu] of holidayDefaultMap) {
+          if (wsByDate.has(dateStr)) continue;
+          work_unit_total += wu;
+          const isProbation = probationEnd && moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
+          if (isProbation) work_unit_probation += wu;
+          else work_unit_official += wu;
         }
 
         let present_days = 0;
@@ -1380,30 +1440,38 @@ const AttendanceController = {
             excelDateKeys.add(dateKey);
           }
           const worksheet = worksheetMap.get(dateKey);
-
-          const computed = resolveAttendanceDay({
-            dateKey,
-            rawIn,
-            rawOut,
-            worksheet,
-            forgotMap,
-            forgotOccurrenceMap,
-            lateForgivenSet,
-            earlyForgivenSet,
-            leavePeriodsMap,
-            resolveLatePenalty,
-            resolveEarlyPenalty,
-            resolveForgotPenalty
-          });
-          if (computed.skip) {
+          if (!worksheet) {
+            // Giữ đúng behavior gốc: resolveAttendanceDay(worksheet:undefined) trả skip:true —
+            // processAttendanceDay cần worksheetId tường minh nên guard sớm hơn 1 bước, không đổi
+            // kết quả (vẫn tính vào skipped).
             skipped++;
             continue;
           }
 
           try {
-            await saveAttendanceDay({ userId, dateKey, worksheet, computed });
-            if (computed.unchanged) unchanged++;
-            else imported++;
+            const result = await processAttendanceDay({
+              userId,
+              worksheetId: worksheet._id.toString(),
+              dateKey,
+              rawIn,
+              rawOut,
+              worksheet,
+              forgotMap,
+              forgotOccurrenceMap,
+              lateForgivenSet,
+              earlyForgivenSet,
+              leavePeriodsMap,
+              resolveLatePenalty,
+              resolveEarlyPenalty,
+              resolveForgotPenalty
+            });
+            if (result.skip) {
+              skipped++;
+            } else if (result.unchanged) {
+              unchanged++;
+            } else {
+              imported++;
+            }
           } catch (e) {
             console.error(`[importExcel] Lỗi ngày ${dateStr} (mã ${block.machine_code}):`, e);
             failures.push({
@@ -1425,29 +1493,30 @@ const AttendanceController = {
             ? moment.tz(worksheet.check_out, TZ).format("HH:mm")
             : null;
 
-          const computed = resolveAttendanceDay({
-            dateKey,
-            rawIn,
-            rawOut,
-            worksheet,
-            forgotMap,
-            forgotOccurrenceMap,
-            lateForgivenSet,
-            earlyForgivenSet,
-            leavePeriodsMap,
-            resolveLatePenalty,
-            resolveEarlyPenalty,
-            resolveForgotPenalty
-          });
-          if (computed.skip) {
-            skipped++;
-            continue;
-          }
-
           try {
-            await saveAttendanceDay({ userId, dateKey, worksheet, computed });
-            if (computed.unchanged) unchanged++;
-            else imported++;
+            const result = await processAttendanceDay({
+              userId,
+              worksheetId: worksheet._id.toString(),
+              dateKey,
+              rawIn,
+              rawOut,
+              worksheet,
+              forgotMap,
+              forgotOccurrenceMap,
+              lateForgivenSet,
+              earlyForgivenSet,
+              leavePeriodsMap,
+              resolveLatePenalty,
+              resolveEarlyPenalty,
+              resolveForgotPenalty
+            });
+            if (result.skip) {
+              skipped++;
+            } else if (result.unchanged) {
+              unchanged++;
+            } else {
+              imported++;
+            }
           } catch (e) {
             console.error(
               `[importExcel] Lỗi ngày ${dateKey} (mã ${block.machine_code}, dữ liệu app):`,

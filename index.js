@@ -18,7 +18,6 @@ const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
 const { serveEncryptedFile } = require("./src/middlewares/serveEncryptedFile");
 const requestContextMiddleware = require("./src/middlewares/requestContextMiddleware");
 const { errorHandlerMiddleware } = require("./src/core/http/error-handler.middleware");
-const swaggerSpec = require("./src/config/swagger");
 
 const app = express();
 const httpServer = createServer(app);

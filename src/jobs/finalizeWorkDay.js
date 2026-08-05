@@ -2,25 +2,23 @@ const cron = require("node-cron");
 const moment = require("moment-timezone");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
-const { RequestModel } = require("../models/RequestModel");
 const {
+  processAttendanceDay,
   buildLatePenaltyResolver,
   buildEarlyPenaltyResolver,
-  buildForgotPenaltyResolver,
-  buildUnifiedForgotOccurrenceMap
-} = require("../helpers/attendancePenalty");
-const {
-  normalizeDayPunches,
-  resolveAttendanceDay,
-  saveAttendanceDay
-} = require("../helpers/attendanceHelper");
+  buildForgotPenaltyResolver
+} = require("../modules/timesheet");
+const { buildAttendanceContext } = require("../workflows/import-attendance.workflow");
 const { getPayrollPeriodRange } = require("../helpers/payrollPeriod");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
-// Build context (forgotMap, forgotOccurrenceMap, lateForgivenSet, earlyForgivenSet, leavePeriodsMap)
-// cho 1 nhân viên trong ngày hôm nay, cùng cách importExcel đang load, để resolveAttendanceDay/
-// saveAttendanceDay tính đúng status/work_unit y hệt luồng import.
+// Port nguyên buildUserDayContext gốc — giữ lại tên + shape tham số cũ (positional) để 2 consumer khác
+// (helpers/forgotCheckinHandler.js, helpers/lateEarlyHandler.js) không phải đổi call site, chỉ là
+// wrapper mỏng gọi buildAttendanceContext (task 1.8.5.5, gộp về workflows/ — xem chi tiết trong plan
+// doc). Tham số `todayStart`/`todayEnd` đổi tên ý nghĩa thành `rangeStart`/`rangeEnd` bên trong
+// buildAttendanceContext (tổng quát hoá cho cả trường hợp nhiều ngày của importExcel), nhưng ở đây vẫn
+// luôn truyền đúng 1 ngày như hành vi gốc.
 async function buildUserDayContext(
   userId,
   dateKey,
@@ -30,105 +28,14 @@ async function buildUserDayContext(
   periodEnd,
   session = null
 ) {
-  const [monthWorksheets, forgotReqs, lateReqs, earlyReqs, leaveStatuses, monthLeaveStatuses] =
-    await Promise.all([
-      WorkSheetModel.find({
-        user_id: userId,
-        date: { $gte: periodStart, $lte: periodEnd },
-        isDeleted: false
-      }).session(session),
-      RequestModel.find({
-        user_id: userId,
-        request_type: "forgot_checkin",
-        status: "approved",
-        isDeleted: false,
-        date: { $gte: periodStart, $lte: periodEnd }
-      })
-        .sort({ date: 1 })
-        .session(session),
-      RequestModel.find({
-        user_id: userId,
-        request_type: "late_early",
-        type: "late",
-        status: "approved",
-        isDeleted: false,
-        date: { $gte: todayStart, $lte: todayEnd }
-      }).session(session),
-      RequestModel.find({
-        user_id: userId,
-        request_type: "late_early",
-        type: "early_out",
-        status: "approved",
-        isDeleted: false,
-        date: { $gte: todayStart, $lte: todayEnd }
-      }).session(session),
-      WorkDayStatusModel.find({
-        user_id: userId,
-        date: { $gte: todayStart, $lte: todayEnd },
-        status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
-        isDeleted: false
-      }).session(session),
-      WorkDayStatusModel.find({
-        user_id: userId,
-        date: { $gte: periodStart, $lte: periodEnd },
-        status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
-        isDeleted: false
-      }).session(session)
-    ]);
-
-  const forgotMap = new Map(forgotReqs.map((r) => [moment.tz(r.date, TZ).format("YYYY-MM-DD"), r]));
-
-  const monthLeavePeriodsMap = new Map();
-  for (const ds of monthLeaveStatuses) {
-    const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
-    if (!monthLeavePeriodsMap.has(key)) monthLeavePeriodsMap.set(key, new Set());
-    monthLeavePeriodsMap.get(key).add(ds.period);
-  }
-
-  const daySnapshots = [];
-  for (const ws of monthWorksheets) {
-    const wsDateKey = moment.tz(ws.date, TZ).format("YYYY-MM-DD");
-    const periods = monthLeavePeriodsMap.get(wsDateKey);
-    const leaveMorning = !!periods && (periods.has("morning") || periods.has("full"));
-    const leaveAfternoon = !!periods && (periods.has("afternoon") || periods.has("full"));
-    const { checkIn, checkOut } = normalizeDayPunches({
-      machineIn: null,
-      machineOut: null,
-      appIn: ws.check_in ? new Date(ws.check_in) : null,
-      appOut: ws.check_out ? new Date(ws.check_out) : null,
-      forgot: forgotMap.get(wsDateKey),
-      worksheet: ws,
-      leaveMorning,
-      leaveAfternoon
-    });
-    if (!checkIn && !checkOut) continue;
-    daySnapshots.push({
-      dateKey: wsDateKey,
-      hasIn: !!checkIn,
-      hasOut: !!checkOut,
-      leaveMorning,
-      leaveAfternoon
-    });
-  }
-
-  const forgotOccurrenceMap = buildUnifiedForgotOccurrenceMap({
-    approvedForgotRequests: forgotReqs,
-    daySnapshots
+  return buildAttendanceContext({
+    userId: userId.toString(),
+    rangeStart: todayStart,
+    rangeEnd: todayEnd,
+    periodStart,
+    periodEnd,
+    session: session ?? undefined
   });
-
-  const lateForgivenSet = new Set(lateReqs.map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD")));
-  const earlyForgivenSet = new Set(
-    earlyReqs.map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD"))
-  );
-
-  const leavePeriodsMap = new Map();
-  for (const ds of leaveStatuses) {
-    const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
-    if (!leavePeriodsMap.has(key)) leavePeriodsMap.set(key, new Set());
-    leavePeriodsMap.get(key).add(ds.period);
-  }
-
-  return { forgotMap, forgotOccurrenceMap, lateForgivenSet, earlyForgivenSet, leavePeriodsMap };
 }
 
 async function finalizeWorkDay(targetDate = null) {
@@ -178,7 +85,9 @@ async function finalizeWorkDay(targetDate = null) {
           ? moment.tz(worksheet.check_out, TZ).format("HH:mm")
           : null;
 
-        const computed = resolveAttendanceDay({
+        const result = await processAttendanceDay({
+          userId: worksheet.user_id.toString(),
+          worksheetId: worksheet._id.toString(),
           dateKey,
           rawIn,
           rawOut,
@@ -192,10 +101,9 @@ async function finalizeWorkDay(targetDate = null) {
           resolveEarlyPenalty,
           resolveForgotPenalty
         });
-        if (computed.skip) continue;
+        if (result.skip) continue;
 
-        await saveAttendanceDay({ userId: worksheet.user_id, dateKey, worksheet, computed });
-        if (!computed.unchanged) finalized++;
+        if (!result.unchanged) finalized++;
       } catch (e) {
         console.error(`[Cron] finalizeWorkDay lỗi user ${worksheet.user_id}:`, e);
         failed++;

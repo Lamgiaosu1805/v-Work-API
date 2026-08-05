@@ -1,18 +1,32 @@
+const moment = require("moment-timezone");
 const { RequestModel } = require("../models/RequestModel");
-const { calcTotalDays } = require("./requestUtils");
-const { createOnApprove } = require("./awayDayHandler");
+
+const TZ = "Asia/Ho_Chi_Minh";
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function validate(body) {
-  const { from_date, to_date } = body;
+  const { visit_date, start_time, end_time } = body;
 
-  if (!from_date || !to_date)
+  if (!visit_date || !moment.tz(visit_date, TZ).isValid())
     return { error: { status: 400, message: "Thông tin đầu vào không hợp lệ" } };
 
-  const total_days = calcTotalDays(from_date, "morning", to_date, "afternoon");
-  if (total_days === null || total_days === 0)
-    return { error: { status: 400, message: "Khoảng thời gian không hợp lệ" } };
+  if (!TIME_RE.test(start_time) || !TIME_RE.test(end_time))
+    return { error: { status: 400, message: "Vui lòng nhập giờ bắt đầu/kết thúc hợp lệ (HH:mm)" } };
 
-  return { payload: { from_date, to_date, total_days } };
+  if (start_time >= end_time)
+    return { error: { status: 400, message: "Giờ kết thúc phải sau giờ bắt đầu" } };
+
+  const dateStr = moment.tz(visit_date, TZ).format("YYYY-MM-DD");
+
+  return {
+    payload: {
+      from_date: dateStr,
+      to_date: dateStr,
+      total_days: 1,
+      start_time,
+      end_time
+    }
+  };
 }
 
 async function validateAsync(payload, userInfo, session) {
@@ -27,4 +41,4 @@ async function validateAsync(payload, userInfo, session) {
   return overlap ? { status: 409, message: "Đã có đơn gặp khách hàng cho ngày này" } : null;
 }
 
-module.exports = { validate, validateAsync, onApprove: createOnApprove("client_visit") };
+module.exports = { validate, validateAsync };

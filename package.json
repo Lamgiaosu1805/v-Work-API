@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "nodemon -r ts-node/register/transpile-only index.js",
+    "dev": "nodemon --ext js,mjs,cjs,json,ts -r ts-node/register/transpile-only index.js",
     "lint": "eslint . --ext .js,.ts",
     "lint:fix": "eslint . --ext .js,.ts --fix",
     "format": "prettier --write .",

@@ -1,7 +1,5 @@
 const { default: mongoose } = require("mongoose");
 const moment = require("moment-timezone");
-const AllowedWifiLocationModel = require("../models/AllowedWifiLocationModel");
-const ShiftModel = require("../models/ShiftModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
@@ -10,289 +8,101 @@ const HolidayModel = require("../models/HolidayModel");
 const AttendanceMachineMappingModel = require("../models/AttendanceMachineMappingModel");
 const { RequestModel } = require("../models/RequestModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
-const { resolveLeaveConflictOnAttendance } = require("../helpers/leaveHandler");
-const { getLeaveBalance } = require("../helpers/leaveBalance");
-const { can } = require("../helpers/rbac");
-const { PERMISSION } = require("../constants");
+const { getLeaveBalance } = require("../modules/leave");
 const {
+  processAttendanceDay,
   buildLatePenaltyResolver,
   buildEarlyPenaltyResolver,
   buildForgotPenaltyResolver,
-  buildUnifiedForgotOccurrenceMap
-} = require("../helpers/attendancePenalty");
+  buildHolidayDefaultWorkUnitMap
+} = require("../modules/timesheet");
 const {
+  listAllowedWifiLocations,
+  createAllowedWifiLocation,
+  deleteAllowedWifiLocation,
+  listShifts,
+  createShift,
   parseExcelToBlocks,
-  parseDayRows,
-  normalizeDayPunches,
-  resolveAttendanceDay,
-  saveAttendanceDay,
-  correctDayStatuses
-} = require("../helpers/attendanceHelper");
+  parseDayRows
+} = require("../modules/attendance");
+const { recordCheckIn } = require("../workflows/record-check-in.workflow");
+const { recordCheckOut } = require("../workflows/record-check-out.workflow");
+const { buildAttendanceContext } = require("../workflows/import-attendance.workflow");
+const { can } = require("../helpers/rbac");
+const { PERMISSION } = require("../constants");
+const { correctDayStatuses } = require("../helpers/attendanceHelper");
 const { getPayrollPeriodRange, calcStandardWorkUnits } = require("../helpers/payrollPeriod");
+const { sendExceptionResponse } = require("../core/http/handle-exception");
+const { mapWithConcurrency } = require("../core/async/map-with-concurrency");
+
+const IMPORT_EXCEL_DAY_CONCURRENCY = 10;
 
 const AttendanceController = {
   getAllowedWifiLocations: async (req, res) => {
     try {
-      const docs = await AllowedWifiLocationModel.find({
-        isDeleted: false
-      }).sort({ createdAt: -1 });
+      const docs = await listAllowedWifiLocations();
       res.json({
         message: "Lấy danh sách điểm chấm công thành công",
         data: docs
       });
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Lỗi server.", error: error.message });
+      sendExceptionResponse(res, error);
     }
   },
 
   createAllowedWifiLocation: async (req, res) => {
     try {
-      const { name = "", ssid, latitude, longitude, radius } = req.body;
-      if (!ssid || latitude == null || longitude == null) {
-        return res.status(400).json({ message: "ssid, latitude, longitude là bắt buộc" });
-      }
-
-      const existing = await AllowedWifiLocationModel.findOne({
-        ssid,
-        isDeleted: false
-      });
-      if (existing) {
-        return res.status(400).json({ message: `SSID "${ssid}" đã tồn tại` });
-      }
-
-      const payload = { name, ssid, latitude, longitude };
-      if (radius != null) payload.radius = radius;
-
-      const doc = await AllowedWifiLocationModel.create(payload);
+      const doc = await createAllowedWifiLocation(req.body);
       res.json({ message: "Tạo điểm chấm công thành công", data: doc });
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Lỗi server.", error: error.message });
+      sendExceptionResponse(res, error);
     }
   },
 
   deleteAllowedWifiLocation: async (req, res) => {
     try {
       const { id } = req.params;
-      const doc = await AllowedWifiLocationModel.findOneAndUpdate(
-        { _id: id, isDeleted: false },
-        { isDeleted: true },
-        { new: true }
-      );
-      if (!doc) return res.status(404).json({ message: "Không tìm thấy điểm chấm công" });
+      await deleteAllowedWifiLocation(id);
       res.json({ message: "Xóa điểm chấm công thành công" });
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Lỗi server.", error: error.message });
+      sendExceptionResponse(res, error);
     }
   },
 
   createShift: async (req, res) => {
     try {
-      const { name, start_time, end_time, late_allowance_minutes = 0 } = req.body;
-      if (!name || !start_time || !end_time) {
-        return res.status(400).json({ message: "name, start_time, end_time là bắt buộc" });
-      }
-
-      const existing = await ShiftModel.findOne({ name });
-      if (existing) return res.status(400).json({ message: `Shift ${name} đã tồn tại` });
-
-      const shift = await ShiftModel.create({
-        name,
-        start_time,
-        end_time,
-        late_allowance_minutes
-      });
+      const shift = await createShift(req.body);
       return res.status(201).json({ message: "Tạo ca làm việc thành công", data: shift });
     } catch (err) {
-      console.error(err);
-      return res.status(500).json({ message: "Lỗi server", error: err.message });
+      return sendExceptionResponse(res, err);
     }
   },
 
   checkIn: async (req, res) => {
     try {
       const { ssid, latitude, longitude } = req.body;
-      if (!ssid || latitude == null || longitude == null)
-        return res.status(400).json({ message: "ssid, latitude, longitude required" });
-
-      const allowed = await AllowedWifiLocationModel.findOne({
-        ssid,
-        isDeleted: false
-      });
-      if (!allowed) return res.status(400).json({ message: "SSID không hợp lệ." });
-
-      const R = 6371000;
-      const toRad = (x) => (x * Math.PI) / 180;
-      const dLat = toRad(latitude - allowed.latitude);
-      const dLon = toRad(longitude - allowed.longitude);
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(latitude)) * Math.cos(toRad(allowed.latitude)) * Math.sin(dLon / 2) ** 2;
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const distance = R * c;
-      if (distance > allowed.radius)
-        return res.status(400).json({ message: "Vị trí không hợp lệ." });
-
-      const accountId = req.account._id;
-      const userInfo = await UserInfoModel.findOne({ id_account: accountId });
-      if (!userInfo) return res.status(400).json({ message: "User info không tồn tại" });
-
-      const today = moment.tz("Asia/Ho_Chi_Minh").startOf("day").toDate();
-      const tomorrow = moment(today).add(1, "day").toDate();
-
-      const worksheet = await WorkSheetModel.findOne({
-        user_id: userInfo._id,
-        date: { $gte: today, $lt: tomorrow },
-        isDeleted: false
-      }).populate("shifts");
-
-      if (!worksheet) return res.status(400).json({ message: "Bạn chưa có ca làm việc hôm nay." });
-      if (worksheet.check_in)
-        return res.status(400).json({ message: "Bạn đã check-in hôm nay rồi." });
-
-      if (!worksheet.shifts.length)
-        return res.status(400).json({ message: "Không có ca làm việc hợp lệ." });
-
-      const now = moment.tz("Asia/Ho_Chi_Minh");
-
-      let firstShift = worksheet.shifts[0];
-      let lastShift = worksheet.shifts[worksheet.shifts.length - 1];
-
-      if (typeof firstShift === "string" || firstShift instanceof mongoose.Types.ObjectId) {
-        firstShift = await ShiftModel.findById(firstShift);
-        lastShift = await ShiftModel.findById(lastShift);
-      }
-
-      const [lastEndH, lastEndM] = lastShift.end_time.split(":").map(Number);
-      const lastShiftEnd = moment.tz(today, "Asia/Ho_Chi_Minh").hour(lastEndH).minute(lastEndM);
-      if (now.isAfter(lastShiftEnd)) {
-        return res.status(400).json({ message: "Đã quá giờ làm việc, không thể check-in." });
-      }
-
-      const [firstStartH, firstStartM] = firstShift.start_time.split(":").map(Number);
-      const firstShiftStart = moment
-        .tz(today, "Asia/Ho_Chi_Minh")
-        .hour(firstStartH)
-        .minute(firstStartM);
-      const lateMinutes = Math.max(0, Math.floor((now - firstShiftStart) / 60000));
-
-      worksheet.check_in = now.toDate();
-      worksheet.minutes_late = lateMinutes;
-      await worksheet.save();
-
+      const result = await recordCheckIn({ account: req.account, ssid, latitude, longitude });
       return res.json({
         message: "Check-in thành công",
-        check_in: worksheet.check_in,
-        minutes_late: worksheet.minutes_late
+        check_in: result.checkIn,
+        minutes_late: result.minutesLate
       });
     } catch (err) {
-      console.error(err);
-      return res.status(500).json({ message: "Lỗi server", error: err.message });
+      return sendExceptionResponse(res, err);
     }
   },
 
   checkOut: async (req, res) => {
-    let session = null;
     try {
       const { ssid, latitude, longitude } = req.body;
-      if (!ssid || latitude == null || longitude == null)
-        return res.status(400).json({ message: "ssid, latitude, longitude required" });
-
-      const allowed = await AllowedWifiLocationModel.findOne({
-        ssid,
-        isDeleted: false
-      });
-      if (!allowed) return res.status(400).json({ message: "SSID không hợp lệ." });
-
-      const R = 6371000;
-      const toRad = (x) => (x * Math.PI) / 180;
-      const dLat = toRad(latitude - allowed.latitude);
-      const dLon = toRad(longitude - allowed.longitude);
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(latitude)) * Math.cos(toRad(allowed.latitude)) * Math.sin(dLon / 2) ** 2;
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const distance = R * c;
-      if (distance > allowed.radius)
-        return res.status(400).json({ message: "Vị trí không hợp lệ." });
-
-      const accountId = req.account._id;
-      const userInfo = await UserInfoModel.findOne({ id_account: accountId });
-      if (!userInfo) return res.status(400).json({ message: "User info không tồn tại" });
-
-      const today = moment.tz("Asia/Ho_Chi_Minh").startOf("day").toDate();
-      const tomorrow = moment(today).add(1, "day").toDate();
-
-      const worksheet = await WorkSheetModel.findOne({
-        user_id: userInfo._id,
-        date: { $gte: today, $lt: tomorrow },
-        isDeleted: false
-      }).populate("shifts");
-
-      if (!worksheet)
-        return res.status(400).json({
-          message: "Bạn chưa có ca làm việc hôm nay, không thể check-out."
-        });
-      if (worksheet.check_out)
-        return res.status(400).json({ message: "Bạn đã check-out hôm nay rồi." });
-      if (!worksheet.shifts.length)
-        return res.status(400).json({ message: "Không có ca làm việc hợp lệ." });
-
-      const now = moment.tz("Asia/Ho_Chi_Minh");
-
-      let lastShift = worksheet.shifts[worksheet.shifts.length - 1];
-      if (typeof lastShift === "string" || lastShift instanceof mongoose.Types.ObjectId) {
-        lastShift = await ShiftModel.findById(lastShift);
-      }
-
-      const [lastEndH, lastEndM] = lastShift.end_time.split(":").map(Number);
-      const lastShiftEnd = moment.tz(today, "Asia/Ho_Chi_Minh").hour(lastEndH).minute(lastEndM);
-      const minuteEarly = Math.max(0, Math.floor((lastShiftEnd - now) / 60000));
-
-      worksheet.check_out = now.toDate();
-      worksheet.minute_early = minuteEarly;
-
-      session = await mongoose.startSession();
-      session.startTransaction();
-
-      await worksheet.save({ session });
-
-      await resolveLeaveConflictOnAttendance({
-        userId: userInfo._id,
-        worksheetId: worksheet._id,
-        date: today,
-        checkInTime: worksheet.check_in,
-        checkOutTime: now.toDate(),
-        lastShiftEnd: lastShift.end_time,
-        session
-      });
-
-      await WorkDayStatusModel.updateMany(
-        { worksheet_id: worksheet._id, status: "pending", isDeleted: false },
-        {
-          status: "present",
-          $addToSet: {
-            sources: { ref_id: worksheet._id, ref_type: "attendance" }
-          }
-        },
-        { session }
-      );
-
-      await session.commitTransaction();
-
+      const result = await recordCheckOut({ account: req.account, ssid, latitude, longitude });
       return res.json({
         message: "Check-out thành công",
-        check_out: worksheet.check_out,
-        minute_early: worksheet.minute_early
+        check_out: result.checkOut,
+        minute_early: result.minuteEarly
       });
     } catch (err) {
-      if (session) await session.abortTransaction().catch(() => {});
-      console.error(err);
-      return res.status(500).json({ message: "Lỗi server", error: err.message });
-    } finally {
-      if (session) session.endSession();
+      return sendExceptionResponse(res, err);
     }
   },
 
@@ -472,14 +282,13 @@ const AttendanceController = {
 
   getAllShifts: async (req, res) => {
     try {
-      const shifts = await ShiftModel.find();
+      const shifts = await listShifts();
       return res.status(200).json({
         message: "Lấy danh sách ca làm việc thành công",
         data: shifts
       });
     } catch (error) {
-      console.error(error);
-      return res.status(500).json({ message: "Lỗi server", error: error.message });
+      return sendExceptionResponse(res, error);
     }
   },
 
@@ -639,6 +448,18 @@ const AttendanceController = {
         wsMap.set(moment.tz(ws.date, TZ).format("YYYY-MM-DD"), ws);
       }
 
+      // Gap SRS: ngày lễ (paid) mặc định hiển thị 1 công dù không ai chấm công ngày đó — chỉ điền vào
+      // ngày CHƯA có worksheet nào (không ghi đè work_unit đã tính từ luồng khác).
+      const holidayDefaultMap = buildHolidayDefaultWorkUnitMap(
+        holidays.map((h) => ({
+          date: h.date,
+          pay_policy: h.pay_policy,
+          scope_type: h.scope_type,
+          branches: (h.branches || []).map((b) => b.toString())
+        })),
+        userInfo.branch_id?.toString()
+      );
+
       const dsMap = new Map();
       for (const ds of dayStatuses) {
         const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
@@ -674,7 +495,8 @@ const AttendanceController = {
         ...wsMap.keys(),
         ...dsMap.keys(),
         ...reqMap.keys(),
-        ...forgotReqMap.keys()
+        ...forgotReqMap.keys(),
+        ...holidayDefaultMap.keys()
       ]);
 
       let work_unit_total = 0;
@@ -703,6 +525,7 @@ const AttendanceController = {
         const statuses = correctDayStatuses(dsMap.get(dateStr) || [], ws);
         const reqs = reqMap.get(dateStr) || [];
 
+        const holidayDefaultWorkUnit = holidayDefaultMap.get(dateStr);
         if (ws) {
           const wu = ws.work_unit ?? 0;
           work_unit_total += wu;
@@ -718,6 +541,11 @@ const AttendanceController = {
             early_days++;
             total_minutes_early += ws.minute_early;
           }
+        } else if (holidayDefaultWorkUnit) {
+          work_unit_total += holidayDefaultWorkUnit;
+          const isProbation = probationEnd && moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
+          if (isProbation) work_unit_probation += holidayDefaultWorkUnit;
+          else work_unit_official += holidayDefaultWorkUnit;
         }
         for (const s of statuses) {
           const w = s.period === "full" ? 1 : 0.5;
@@ -736,7 +564,7 @@ const AttendanceController = {
           worksheet_id: ws?._id ?? null,
           check_in: ws?.check_in ? moment.tz(ws.check_in, TZ).format("HH:mm") : null,
           check_out: ws?.check_out ? moment.tz(ws.check_out, TZ).format("HH:mm") : null,
-          work_unit: ws?.work_unit ?? null,
+          work_unit: ws?.work_unit ?? holidayDefaultWorkUnit ?? null,
           penalty_amount: ws?.penalty_amount ?? 0,
           minutes_late: ws?.minutes_late ?? 0,
           minute_early: ws?.minute_early ?? 0,
@@ -974,6 +802,27 @@ const AttendanceController = {
         return standardUnitsByBranch.get(key);
       };
 
+      // Gap SRS: ngày lễ (paid) mặc định hiển thị 1 công dù không ai chấm công ngày đó — chỉ điền vào
+      // ngày CHƯA có worksheet nào (không ghi đè work_unit đã tính từ luồng khác). Khớp cách fix ở
+      // getPayrollStats (1 nhân viên).
+      const holidaySnapshots = holidays.map((h) => ({
+        date: h.date,
+        pay_policy: h.pay_policy,
+        scope_type: h.scope_type,
+        branches: (h.branches || []).map((b) => b.toString())
+      }));
+      const holidayDefaultMapByBranch = new Map();
+      const holidayDefaultMapForBranch = (branchId) => {
+        const key = branchId ? branchId.toString() : "";
+        if (!holidayDefaultMapByBranch.has(key)) {
+          holidayDefaultMapByBranch.set(
+            key,
+            buildHolidayDefaultWorkUnitMap(holidaySnapshots, branchId ? branchId.toString() : null)
+          );
+        }
+        return holidayDefaultMapByBranch.get(key);
+      };
+
       const wsByUser = new Map();
       for (const ws of worksheets) {
         const k = ws.user_id.toString();
@@ -1031,6 +880,15 @@ const AttendanceController = {
             early_days++;
             total_minutes_early += ws.minute_early;
           }
+        }
+
+        const holidayDefaultMap = holidayDefaultMapForBranch(u.branch_id);
+        for (const [dateStr, wu] of holidayDefaultMap) {
+          if (wsByDate.has(dateStr)) continue;
+          work_unit_total += wu;
+          const isProbation = probationEnd && moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
+          if (isProbation) work_unit_probation += wu;
+          else work_unit_official += wu;
         }
 
         let present_days = 0;
@@ -1120,7 +978,7 @@ const AttendanceController = {
         .startOf("day");
       const endOfMonth = startOfMonth.clone().endOf("month");
 
-      const [holidays, dayStatuses] = await Promise.all([
+      const [holidays, dayStatuses, worksheets] = await Promise.all([
         HolidayModel.find(
           {
             date: { $gte: startOfMonth.toDate(), $lte: endOfMonth.toDate() },
@@ -1128,14 +986,26 @@ const AttendanceController = {
           },
           "date name"
         ),
+        // Không lọc theo status nữa — 1 ngày có thể cần hiện nhiều badge cùng lúc (vd quên chấm công
+        // buổi sáng + đi làm bình thường buổi chiều), FE tự quyết định badge nào ưu tiên hiển thị.
         WorkDayStatusModel.find(
           {
             user_id: user._id,
             date: { $gte: startOfMonth.toDate(), $lte: endOfMonth.toDate() },
-            status: { $in: ["leave_paid", "leave_unpaid", "absent"] },
             isDeleted: false
           },
           "date period status"
+        ),
+        // minutes_late/minute_early sống trên WorkSheet, độc lập với WorkDayStatus.status — 1 ngày có
+        // thể vừa "present" vừa đi muộn/về sớm, FE cần cả 2 để ghép badge (xem yêu cầu nghiệp vụ: 1
+        // ngày có thể trả nhiều trạng thái cùng lúc).
+        WorkSheetModel.find(
+          {
+            user_id: user._id,
+            date: { $gte: startOfMonth.toDate(), $lte: endOfMonth.toDate() },
+            isDeleted: false
+          },
+          "date minutes_late minute_early"
         )
       ]);
 
@@ -1152,7 +1022,14 @@ const AttendanceController = {
             date: moment.tz(s.date, "Asia/Ho_Chi_Minh").format("YYYY-MM-DD"),
             period: s.period,
             status: s.status
-          }))
+          })),
+          late_early: worksheets
+            .filter((w) => w.minutes_late > 0 || w.minute_early > 0)
+            .map((w) => ({
+              date: moment.tz(w.date, "Asia/Ho_Chi_Minh").format("YYYY-MM-DD"),
+              minutes_late: w.minutes_late,
+              minute_early: w.minute_early
+            }))
         }
       });
     } catch (err) {
@@ -1163,10 +1040,13 @@ const AttendanceController = {
 
   importExcel: async (req, res) => {
     const TZ = "Asia/Ho_Chi_Minh";
+    const importStartedAt = Date.now();
+    const elapsed = (from) => `${Date.now() - from}ms`;
     try {
       if (!req.file) return res.status(400).json({ message: "Chưa upload file" });
 
       let blocks;
+      const parseStartedAt = Date.now();
       try {
         blocks = parseExcelToBlocks(req.file.buffer);
       } catch (e) {
@@ -1175,14 +1055,19 @@ const AttendanceController = {
           message: "Không đọc được file Excel. Kiểm tra lại định dạng file (.xlsx)."
         });
       }
+      console.log(
+        `[importExcel][timing] parse file: ${elapsed(parseStartedAt)}, ${blocks.length} block(s), file size ${req.file.size} bytes`
+      );
       if (!blocks.length)
         return res.status(400).json({
           message: "File không đúng định dạng bảng chấm công (không tìm thấy nhân viên nào)."
         });
 
+      const mappingStartedAt = Date.now();
       const allMappings = await AttendanceMachineMappingModel.find({
         isDeleted: false
       });
+      console.log(`[importExcel][timing] load mapping: ${elapsed(mappingStartedAt)}`);
       if (!allMappings.length)
         return res.status(400).json({
           message:
@@ -1190,17 +1075,20 @@ const AttendanceController = {
         });
       const mappingMap = new Map(allMappings.map((m) => [m.machine_code, m.user_id]));
 
+      const resolverStartedAt = Date.now();
       const resolveLatePenalty = await buildLatePenaltyResolver();
       const resolveEarlyPenalty = await buildEarlyPenaltyResolver();
       const resolveForgotPenalty = await buildForgotPenaltyResolver();
+      console.log(`[importExcel][timing] build penalty resolvers: ${elapsed(resolverStartedAt)}`);
 
       const unmatched = [];
       const failures = [];
-      let imported = 0;
-      let skipped = 0;
-      let unchanged = 0;
+      const counts = { imported: 0, skipped: 0, unchanged: 0 };
+      let blockIndex = 0;
 
       for (const block of blocks) {
+        blockIndex += 1;
+        const blockStartedAt = Date.now();
         const userId = mappingMap.get(block.machine_code);
         if (!userId) {
           unmatched.push(block.machine_code);
@@ -1216,6 +1104,7 @@ const AttendanceController = {
         let lateForgivenSet;
         let earlyForgivenSet;
         let leavePeriodsMap;
+        const contextStartedAt = Date.now();
         try {
           const rangeStart = moment
             .tz(dayRows[0].dateStr, "DD/MM/YYYY", TZ)
@@ -1229,137 +1118,37 @@ const AttendanceController = {
           const periodStart = getPayrollPeriodRange(rangeStart).start;
           const periodEnd = getPayrollPeriodRange(rangeEnd).end;
 
-          const [
-            worksheets,
-            monthWorksheets,
-            forgotReqs,
-            lateReqs,
-            earlyReqs,
-            leaveStatuses,
-            monthLeaveStatuses
-          ] = await Promise.all([
+          const excelRawByDate = new Map(
+            dayRows.map(({ dateStr, rawIn, rawOut }) => [
+              moment.tz(dateStr, "DD/MM/YYYY", TZ).format("YYYY-MM-DD"),
+              { rawIn, rawOut }
+            ])
+          );
+
+          const [worksheets, context] = await Promise.all([
             WorkSheetModel.find({
               user_id: userId,
               date: { $gte: rangeStart, $lte: rangeEnd },
               isDeleted: false
             }).populate("shifts"),
-            WorkSheetModel.find({
-              user_id: userId,
-              date: { $gte: periodStart, $lte: periodEnd },
-              isDeleted: false
-            }),
-            RequestModel.find({
-              user_id: userId,
-              request_type: "forgot_checkin",
-              status: "approved",
-              isDeleted: false,
-              date: { $gte: periodStart, $lte: periodEnd }
-            }).sort({ date: 1 }),
-            RequestModel.find({
-              user_id: userId,
-              request_type: "late_early",
-              type: "late",
-              status: "approved",
-              isDeleted: false,
-              date: { $gte: rangeStart, $lte: rangeEnd }
-            }),
-            RequestModel.find({
-              user_id: userId,
-              request_type: "late_early",
-              type: "early_out",
-              status: "approved",
-              isDeleted: false,
-              date: { $gte: rangeStart, $lte: rangeEnd }
-            }),
-            WorkDayStatusModel.find({
-              user_id: userId,
-              date: { $gte: rangeStart, $lte: rangeEnd },
-              status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
-              isDeleted: false
-            }),
-            WorkDayStatusModel.find({
-              user_id: userId,
-              date: { $gte: periodStart, $lte: periodEnd },
-              status: { $in: ["leave_paid", "leave_unpaid", "remote"] },
-              isDeleted: false
+            buildAttendanceContext({
+              userId: userId.toString(),
+              rangeStart,
+              rangeEnd,
+              periodStart,
+              periodEnd,
+              excelRawByDate
             })
           ]);
 
           worksheetMap = new Map(
             worksheets.map((ws) => [moment.tz(ws.date, TZ).format("YYYY-MM-DD"), ws])
           );
-          forgotMap = new Map(
-            forgotReqs.map((r) => [moment.tz(r.date, TZ).format("YYYY-MM-DD"), r])
+          ({ forgotMap, forgotOccurrenceMap, lateForgivenSet, earlyForgivenSet, leavePeriodsMap } =
+            context);
+          console.log(
+            `[importExcel][timing] block ${blockIndex}/${blocks.length} (mã ${block.machine_code}, ${dayRows.length} ngày) - load context: ${elapsed(contextStartedAt)}`
           );
-
-          const monthLeavePeriodsMap = new Map();
-          for (const ds of monthLeaveStatuses) {
-            const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
-            if (!monthLeavePeriodsMap.has(key)) monthLeavePeriodsMap.set(key, new Set());
-            monthLeavePeriodsMap.get(key).add(ds.period);
-          }
-
-          const monthWorksheetMap = new Map(
-            monthWorksheets.map((ws) => [moment.tz(ws.date, TZ).format("YYYY-MM-DD"), ws])
-          );
-          const excelRawMap = new Map(
-            dayRows.map(({ dateStr, rawIn, rawOut }) => [
-              moment.tz(dateStr, "DD/MM/YYYY", TZ).format("YYYY-MM-DD"),
-              { rawIn, rawOut }
-            ])
-          );
-          const daySnapshots = [];
-          const allDateKeys = new Set([...monthWorksheetMap.keys(), ...excelRawMap.keys()]);
-          for (const dateKey of allDateKeys) {
-            const ws = monthWorksheetMap.get(dateKey);
-            const excelRow = excelRawMap.get(dateKey);
-            const periods = monthLeavePeriodsMap.get(dateKey);
-            const leaveMorning = !!periods && (periods.has("morning") || periods.has("full"));
-            const leaveAfternoon = !!periods && (periods.has("afternoon") || periods.has("full"));
-
-            const { checkIn, checkOut } = normalizeDayPunches({
-              machineIn: excelRow?.rawIn
-                ? moment.tz(`${dateKey} ${excelRow.rawIn}`, "YYYY-MM-DD HH:mm", TZ).toDate()
-                : null,
-              machineOut: excelRow?.rawOut
-                ? moment.tz(`${dateKey} ${excelRow.rawOut}`, "YYYY-MM-DD HH:mm", TZ).toDate()
-                : null,
-              appIn: ws?.check_in ? new Date(ws.check_in) : null,
-              appOut: ws?.check_out ? new Date(ws.check_out) : null,
-              forgot: forgotMap.get(dateKey),
-              worksheet: ws,
-              leaveMorning,
-              leaveAfternoon
-            });
-            if (!checkIn && !checkOut) continue;
-
-            daySnapshots.push({
-              dateKey,
-              hasIn: !!checkIn,
-              hasOut: !!checkOut,
-              leaveMorning,
-              leaveAfternoon
-            });
-          }
-
-          forgotOccurrenceMap = buildUnifiedForgotOccurrenceMap({
-            approvedForgotRequests: forgotReqs,
-            daySnapshots
-          });
-
-          lateForgivenSet = new Set(
-            lateReqs.map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD"))
-          );
-          earlyForgivenSet = new Set(
-            earlyReqs.map((r) => moment.tz(r.date, TZ).format("YYYY-MM-DD"))
-          );
-
-          leavePeriodsMap = new Map();
-          for (const ds of leaveStatuses) {
-            const key = moment.tz(ds.date, TZ).format("YYYY-MM-DD");
-            if (!leavePeriodsMap.has(key)) leavePeriodsMap.set(key, new Set());
-            leavePeriodsMap.get(key).add(ds.period);
-          }
         } catch (e) {
           console.error(`[importExcel] Lỗi tải dữ liệu nhân viên (mã ${block.machine_code}):`, e);
           failures.push({
@@ -1367,116 +1156,149 @@ const AttendanceController = {
             date: null,
             reason: `Không tải được dữ liệu: ${e.message}`
           });
-          skipped += dayRows.length;
+          counts.skipped += dayRows.length;
           continue;
         }
 
         const excelDateKeys = new Set();
+        const excelLoopStartedAt = Date.now();
 
-        for (const { dateStr, rawIn, rawOut } of dayRows) {
-          const dateKey = moment.tz(dateStr, "DD/MM/YYYY", TZ).format("YYYY-MM-DD");
+        await mapWithConcurrency(
+          dayRows,
+          IMPORT_EXCEL_DAY_CONCURRENCY,
+          async ({ dateStr, rawIn, rawOut }) => {
+            const dateKey = moment.tz(dateStr, "DD/MM/YYYY", TZ).format("YYYY-MM-DD");
 
-          if (rawIn || rawOut || forgotMap.has(dateKey)) {
-            excelDateKeys.add(dateKey);
+            if (rawIn || rawOut || forgotMap.has(dateKey)) {
+              excelDateKeys.add(dateKey);
+            }
+            const worksheet = worksheetMap.get(dateKey);
+            if (!worksheet) {
+              counts.skipped++;
+              return;
+            }
+
+            try {
+              const result = await processAttendanceDay({
+                userId,
+                worksheetId: worksheet._id.toString(),
+                dateKey,
+                rawIn,
+                rawOut,
+                worksheet,
+                forgotMap,
+                forgotOccurrenceMap,
+                lateForgivenSet,
+                earlyForgivenSet,
+                leavePeriodsMap,
+                resolveLatePenalty,
+                resolveEarlyPenalty,
+                resolveForgotPenalty
+              });
+              if (result.skip) {
+                counts.skipped++;
+              } else if (result.unchanged) {
+                counts.unchanged++;
+              } else {
+                counts.imported++;
+              }
+            } catch (e) {
+              console.error(`[importExcel] Lỗi ngày ${dateStr} (mã ${block.machine_code}):`, e);
+              failures.push({
+                machine_code: block.machine_code,
+                date: dateStr,
+                reason: e.message
+              });
+              counts.skipped++;
+            }
           }
-          const worksheet = worksheetMap.get(dateKey);
+        );
 
-          const computed = resolveAttendanceDay({
-            dateKey,
-            rawIn,
-            rawOut,
-            worksheet,
-            forgotMap,
-            forgotOccurrenceMap,
-            lateForgivenSet,
-            earlyForgivenSet,
-            leavePeriodsMap,
-            resolveLatePenalty,
-            resolveEarlyPenalty,
-            resolveForgotPenalty
-          });
-          if (computed.skip) {
-            skipped++;
-            continue;
+        console.log(
+          `[importExcel][timing] block ${blockIndex}/${blocks.length} (mã ${block.machine_code}) - process ${dayRows.length} ngày (excel): ${elapsed(excelLoopStartedAt)}`
+        );
+
+        const catchupLoopStartedAt = Date.now();
+        const catchupEntries = [...worksheetMap.entries()].filter(
+          ([dateKey, worksheet]) =>
+            !excelDateKeys.has(dateKey) && (worksheet.check_in || worksheet.check_out)
+        );
+
+        await mapWithConcurrency(
+          catchupEntries,
+          IMPORT_EXCEL_DAY_CONCURRENCY,
+          async ([dateKey, worksheet]) => {
+            const rawIn = worksheet.check_in
+              ? moment.tz(worksheet.check_in, TZ).format("HH:mm")
+              : null;
+            const rawOut = worksheet.check_out
+              ? moment.tz(worksheet.check_out, TZ).format("HH:mm")
+              : null;
+
+            try {
+              const result = await processAttendanceDay({
+                userId,
+                worksheetId: worksheet._id.toString(),
+                dateKey,
+                rawIn,
+                rawOut,
+                worksheet,
+                forgotMap,
+                forgotOccurrenceMap,
+                lateForgivenSet,
+                earlyForgivenSet,
+                leavePeriodsMap,
+                resolveLatePenalty,
+                resolveEarlyPenalty,
+                resolveForgotPenalty
+              });
+              if (result.skip) {
+                counts.skipped++;
+              } else if (result.unchanged) {
+                counts.unchanged++;
+              } else {
+                counts.imported++;
+              }
+            } catch (e) {
+              console.error(
+                `[importExcel] Lỗi ngày ${dateKey} (mã ${block.machine_code}, dữ liệu app):`,
+                e
+              );
+              failures.push({
+                machine_code: block.machine_code,
+                date: moment.tz(dateKey, TZ).format("DD/MM/YYYY"),
+                reason: e.message
+              });
+              counts.skipped++;
+            }
           }
+        );
 
-          try {
-            await saveAttendanceDay({ userId, dateKey, worksheet, computed });
-            if (computed.unchanged) unchanged++;
-            else imported++;
-          } catch (e) {
-            console.error(`[importExcel] Lỗi ngày ${dateStr} (mã ${block.machine_code}):`, e);
-            failures.push({
-              machine_code: block.machine_code,
-              date: dateStr,
-              reason: e.message
-            });
-            skipped++;
-          }
-        }
+        const catchupCount = catchupEntries.length;
 
-        for (const [dateKey, worksheet] of worksheetMap) {
-          if (excelDateKeys.has(dateKey)) continue;
-          if (!worksheet.check_in && !worksheet.check_out) continue;
-          const rawIn = worksheet.check_in
-            ? moment.tz(worksheet.check_in, TZ).format("HH:mm")
-            : null;
-          const rawOut = worksheet.check_out
-            ? moment.tz(worksheet.check_out, TZ).format("HH:mm")
-            : null;
-
-          const computed = resolveAttendanceDay({
-            dateKey,
-            rawIn,
-            rawOut,
-            worksheet,
-            forgotMap,
-            forgotOccurrenceMap,
-            lateForgivenSet,
-            earlyForgivenSet,
-            leavePeriodsMap,
-            resolveLatePenalty,
-            resolveEarlyPenalty,
-            resolveForgotPenalty
-          });
-          if (computed.skip) {
-            skipped++;
-            continue;
-          }
-
-          try {
-            await saveAttendanceDay({ userId, dateKey, worksheet, computed });
-            if (computed.unchanged) unchanged++;
-            else imported++;
-          } catch (e) {
-            console.error(
-              `[importExcel] Lỗi ngày ${dateKey} (mã ${block.machine_code}, dữ liệu app):`,
-              e
-            );
-            failures.push({
-              machine_code: block.machine_code,
-              date: moment.tz(dateKey, TZ).format("DD/MM/YYYY"),
-              reason: e.message
-            });
-            skipped++;
-          }
-        }
+        console.log(
+          `[importExcel][timing] block ${blockIndex}/${blocks.length} (mã ${block.machine_code}) - process ${catchupCount} ngày (dữ liệu app, ngoài excel): ${elapsed(catchupLoopStartedAt)}, tổng block: ${elapsed(blockStartedAt)}`
+        );
       }
+
+      console.log(
+        `[importExcel][timing] TỔNG THỜI GIAN: ${elapsed(importStartedAt)} (${counts.imported} ngày cập nhật, ${counts.unchanged} không đổi, ${counts.skipped} bỏ qua, ${blocks.length} block)`
+      );
 
       const unmatchedUniq = [...new Set(unmatched)];
 
       return res.json({
-        message: `Import hoàn tất: ${imported} ngày cập nhật, ${unchanged} ngày không đổi, ${skipped} ngày bỏ qua`,
+        message: `Import hoàn tất: ${counts.imported} ngày cập nhật, ${counts.unchanged} ngày không đổi, ${counts.skipped} ngày bỏ qua`,
         data: {
-          imported,
-          unchanged,
-          skipped,
+          imported: counts.imported,
+          unchanged: counts.unchanged,
+          skipped: counts.skipped,
           unmatched_codes: unmatchedUniq,
           failures
         }
       });
     } catch (err) {
-      console.error(err);
+      console.error(`[importExcel][timing] LỖI sau ${elapsed(importStartedAt)}:`, err);
       return res.status(500).json({ message: "Lỗi server", error: err.message });
     }
   },

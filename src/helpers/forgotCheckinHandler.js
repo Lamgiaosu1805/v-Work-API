@@ -2,19 +2,9 @@ const moment = require("moment-timezone");
 const { RequestModel } = require("../models/RequestModel");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
-const {
-  normalizeDayPunches,
-  resolveAttendanceDay,
-  saveAttendanceDay
-} = require("./attendanceHelper");
-const {
-  buildLatePenaltyResolver,
-  buildEarlyPenaltyResolver,
-  buildForgotPenaltyResolver,
-  buildUnifiedForgotOccurrenceMap
-} = require("./attendancePenalty");
+const { normalizeDayPunches } = require("./attendanceHelper");
+const { buildUnifiedForgotOccurrenceMap } = require("../modules/timesheet");
 const { getPayrollPeriodRange } = require("./payrollPeriod");
-const { buildUserDayContext } = require("../jobs/finalizeWorkDay");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -73,9 +63,42 @@ async function validateAsync(payload, userInfo, session) {
   }).session(session);
   if (dup) return { status: 409, message: "Đã có đơn quên chấm công cho ngày này" };
 
+  // Chỉ chặn khi ngày đã ĐỦ CẢ 2 mốc (thật sự không thiếu gì). Nếu chỉ có 1 mốc thì vẫn cho tạo — máy
+  // chấm công khi chỉ ghi nhận 1 lần quẹt trong ngày có thể gán nhầm vào field check_in dù thực chất
+  // đó là giờ ra (vd quên chấm công buổi sáng, chiều quẹt ra 17h lại bị ghi vào check_in, check_out
+  // trống) — lúc duyệt, onApprove (forgot-checkin.ts) tự "cứu" giá trị cũ sang field đối diện dựa trên
+  // so sánh thời gian. Riêng type "both" thì chặn ngay khi 1 trong 2 mốc đã có dữ liệu, vì "quên cả 2"
+  // chỉ đúng khi cả 2 đều thực sự trống — nếu 1 vế đã có dữ liệu thì phải chọn đúng loại "quên
+  // check-in"/"quên check-out" cho vế còn thiếu, tránh mất dữ liệu thật (không có logic cứu cho "both").
+  const dayStart = moment.tz(payload.date, TZ).startOf("day").toDate();
+  const dayEnd = moment.tz(payload.date, TZ).endOf("day").toDate();
+  const worksheet = await WorkSheetModel.findOne({
+    user_id: userInfo._id,
+    date: { $gte: dayStart, $lte: dayEnd },
+    isDeleted: false
+  }).session(session);
+
+  if (payload.type === "both") {
+    if (worksheet?.check_in)
+      return {
+        status: 409,
+        message: "Ngày này đã có dữ liệu check-in, vui lòng tạo đơn quên check-out"
+      };
+    if (worksheet?.check_out)
+      return {
+        status: 409,
+        message: "Ngày này đã có dữ liệu check-out, vui lòng tạo đơn quên check-in"
+      };
+  } else if (worksheet?.check_in && worksheet?.check_out) {
+    return {
+      status: 409,
+      message: "Ngày này đã có đủ dữ liệu chấm công, không cần tạo đơn quên chấm công"
+    };
+  }
+
   // Tính occurrence TRƯỚC khi tạo đơn — trả về để service merge vào entity lúc tạo,
   // không tự ghi DB ở đây (đơn chưa tồn tại nên computeForgotOccurrence không cần biết
-  // gì về đơn đang tạo, chỉ đếm đơn "approved" đã có sẵn).
+  // gì về đơn đang tạo, chỉ đếm đơn "pending"/"approved" đã có sẵn).
   const occurrence = await computeForgotOccurrence(userInfo._id, payload.date, session);
   return { occurrence };
 }
@@ -83,11 +106,21 @@ async function validateAsync(payload, userInfo, session) {
 async function computeForgotOccurrence(userId, date, session) {
   const { start: periodStart, end: periodEnd } = getPayrollPeriodRange(date);
 
+  // Bug thật phát hiện (user báo "quên cả check-in lẫn check-out" luôn ra occurrence=1): ngày thiếu
+  // CẢ 2 log không được buildUnifiedForgotOccurrenceMap tự nhận diện qua daySnapshots (chỉ nhận ngày
+  // thiếu ĐÚNG 1 vế — đúng chủ ý, khớp SRS "thiếu cả 2 log = nghỉ, không phải quên chấm công" cho
+  // ngày KHÔNG có đơn). Nhưng khi nhân viên đã CHỦ ĐỘNG tạo đơn "quên cả 2" (type=both) cho ngày đó,
+  // occMap không có entry cho ngày này TRỪ KHI đơn đã được duyệt — nên nhiều đơn tạo liên tiếp trong
+  // cùng kỳ công (chưa ai kịp duyệt cái nào) đều rơi vào fallback `monthRequests.length + 1` với
+  // `monthRequests` cũ CHỈ đếm đơn approved (luôn = 0 lúc chưa duyệt gì) -> occurrence luôn = 1. Sửa:
+  // đếm cả đơn "pending" lẫn "approved" khi tính occurrence lúc TẠO đơn mới (không đụng
+  // buildUnifiedForgotOccurrenceMap dùng chung ở luồng finalize/import — nơi đó vẫn phải chỉ tính đơn
+  // đã duyệt để không ảnh hưởng mức phạt trước khi đơn được xử lý xong).
   const [monthRequests, monthWorksheets, monthLeaveStatuses] = await Promise.all([
     RequestModel.find({
       user_id: userId,
       request_type: "forgot_checkin",
-      status: "approved",
+      status: { $in: ["pending", "approved"] },
       isDeleted: false,
       date: { $gte: periodStart, $lte: periodEnd }
     })
@@ -150,124 +183,4 @@ async function computeForgotOccurrence(userId, date, session) {
   return occMap.get(dateKey)?.occurrence || monthRequests.length + 1;
 }
 
-async function onCreate(request, _userInfo, session) {
-  const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
-  const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
-  await WorkDayStatusModel.updateMany(
-    {
-      user_id: request.user_id,
-      date: { $gte: dateStart, $lte: dateEnd },
-      isDeleted: false
-    },
-    { $addToSet: { sources: { ref_id: request._id, ref_type: "request" } } },
-    { session }
-  );
-}
-
-async function onReject(request, session) {
-  const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
-  const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
-  await WorkDayStatusModel.updateMany(
-    {
-      user_id: request.user_id,
-      date: { $gte: dateStart, $lte: dateEnd },
-      isDeleted: false
-    },
-    { $pull: { sources: { ref_id: request._id, ref_type: "request" } } },
-    { session }
-  );
-}
-
-async function onApprove(request, session) {
-  const dateStart = moment.tz(request.date, TZ).startOf("day").toDate();
-  const dateEnd = moment.tz(request.date, TZ).endOf("day").toDate();
-
-  const existing = await WorkSheetModel.findOne({
-    user_id: request.user_id,
-    date: { $gte: dateStart, $lte: dateEnd },
-    isDeleted: false
-  }).session(session);
-
-  const clockUpdate = {};
-  if (request.expected_check_in) {
-    if (
-      request.type === "check_in" &&
-      existing?.check_in &&
-      !existing?.check_out &&
-      new Date(existing.check_in) > new Date(request.expected_check_in)
-    ) {
-      clockUpdate.check_out = existing.check_in;
-    }
-    clockUpdate.check_in = new Date(request.expected_check_in);
-  }
-  if (request.expected_check_out) {
-    if (
-      request.type === "check_out" &&
-      existing?.check_out &&
-      !existing?.check_in &&
-      new Date(existing.check_out) < new Date(request.expected_check_out)
-    ) {
-      clockUpdate.check_in = existing.check_out;
-    }
-    clockUpdate.check_out = new Date(request.expected_check_out);
-  }
-
-  const updated = await WorkSheetModel.findOneAndUpdate(
-    {
-      user_id: request.user_id,
-      date: { $gte: dateStart, $lte: dateEnd },
-      isDeleted: false
-    },
-    clockUpdate,
-    { session, new: true }
-  );
-
-  if (!updated) {
-    await WorkSheetModel.create(
-      [{ user_id: request.user_id, date: dateStart, shifts: [], ...clockUpdate }],
-      { session }
-    );
-  }
-
-  const worksheet = await WorkSheetModel.findOne({
-    user_id: request.user_id,
-    date: { $gte: dateStart, $lte: dateEnd },
-    isDeleted: false
-  })
-    .populate("shifts")
-    .session(session);
-
-  const dateKey = moment.tz(request.date, TZ).format("YYYY-MM-DD");
-  const { start: periodStart, end: periodEnd } = getPayrollPeriodRange(request.date);
-  const [context, resolveLatePenalty, resolveEarlyPenalty, resolveForgotPenalty] =
-    await Promise.all([
-      buildUserDayContext(
-        request.user_id,
-        dateKey,
-        dateStart,
-        dateEnd,
-        periodStart,
-        periodEnd,
-        session
-      ),
-      buildLatePenaltyResolver(),
-      buildEarlyPenaltyResolver(),
-      buildForgotPenaltyResolver()
-    ]);
-
-  const computed = resolveAttendanceDay({
-    dateKey,
-    rawIn: worksheet.check_in ? moment.tz(worksheet.check_in, TZ).format("HH:mm") : null,
-    rawOut: worksheet.check_out ? moment.tz(worksheet.check_out, TZ).format("HH:mm") : null,
-    worksheet,
-    ...context,
-    resolveLatePenalty,
-    resolveEarlyPenalty,
-    resolveForgotPenalty
-  });
-  if (computed.skip) return;
-
-  await saveAttendanceDay({ userId: request.user_id, dateKey, worksheet, computed, session });
-}
-
-module.exports = { validate, validateAsync, onCreate, onReject, onApprove };
+module.exports = { validate, validateAsync };

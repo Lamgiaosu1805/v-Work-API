@@ -1,8 +1,8 @@
+const { default: mongoose } = require("mongoose");
 const PostModel = require("../models/PostModel");
 const CommentModel = require("../models/CommentModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
-const DepartmentModel = require("../models/DepartmentModel");
 const pushNotification = require("../helpers/pushNotification");
 const { serializePost, serializeComment, signReactions } = require("../helpers/staticUrl");
 const cleanupUploadedFiles = require("../utils/cleanupUploadedFiles");
@@ -15,7 +15,7 @@ async function getAuthorInfo(accountId) {
   let author_dept = null;
   const membership = await UserDepartmentPositionModel.findOne({
     user: userInfo._id,
-    isDeleted: false,
+    isDeleted: false
   }).populate("department", "department_name");
   if (membership?.department?.department_name) {
     author_dept = membership.department.department_name;
@@ -24,7 +24,7 @@ async function getAuthorInfo(accountId) {
   return {
     author_name: userInfo.full_name,
     author_avatar: userInfo.avatar ?? null,
-    author_dept,
+    author_dept
   };
 }
 
@@ -60,10 +60,14 @@ const PostController = {
         .lean();
 
       // Thu thập tất cả user_id: tác giả bài + người dùng đã react
-      const allIds = [...new Set([
-        ...posts.map((p) => String(p.author_id)),
-        ...posts.flatMap((p) => (p.reactions ?? []).map((r) => String(r.user_id))),
-      ].filter(Boolean))];
+      const allIds = [
+        ...new Set(
+          [
+            ...posts.map((p) => String(p.author_id)),
+            ...posts.flatMap((p) => (p.reactions ?? []).map((r) => String(r.user_id)))
+          ].filter(Boolean)
+        )
+      ];
       let avatarMap = {};
       if (allIds.length) {
         const infos = await UserInfoModel.find(
@@ -87,8 +91,8 @@ const PostController = {
           total,
           page,
           limit,
-          total_pages: Math.ceil(total / limit),
-        },
+          total_pages: Math.ceil(total / limit)
+        }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -126,7 +130,7 @@ const PostController = {
         images,
         type,
         visibility,
-        dept_id: dept_id || null,
+        dept_id: dept_id || null
       });
 
       const signedPost = serializePost(post);
@@ -177,7 +181,7 @@ const PostController = {
 
       return res.status(200).json({
         message: "Thành công",
-        data: { reactions: signedReactions },
+        data: { reactions: signedReactions }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -332,7 +336,7 @@ const PostController = {
 
       return res.status(200).json({
         message: post.pinned ? "Đã ghim bài viết" : "Đã bỏ ghim bài viết",
-        data: { pinned: post.pinned },
+        data: { pinned: post.pinned }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -356,7 +360,9 @@ const PostController = {
         .lean();
 
       const avatarMap = await buildAvatarMap(comments);
-      comments.forEach((c) => { c.author_avatar = avatarMap[String(c.author_id)] ?? c.author_avatar; });
+      comments.forEach((c) => {
+        c.author_avatar = avatarMap[String(c.author_id)] ?? c.author_avatar;
+      });
 
       return res.status(200).json({
         message: "Thành công",
@@ -365,8 +371,8 @@ const PostController = {
           total,
           page,
           limit,
-          total_pages: Math.ceil(total / limit),
-        },
+          total_pages: Math.ceil(total / limit)
+        }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -508,7 +514,11 @@ const PostController = {
       const { id: postId, commentId } = req.params;
       const { _id: accountId, role } = req.account;
 
-      const comment = await CommentModel.findOne({ _id: commentId, post_id: postId, isDeleted: false });
+      const comment = await CommentModel.findOne({
+        _id: commentId,
+        post_id: postId,
+        isDeleted: false
+      });
       if (!comment) return res.status(404).json({ message: "Không tìm thấy bình luận" });
 
       const isAuthor = comment.author_id.toString() === accountId;
@@ -528,7 +538,7 @@ const PostController = {
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
-  },
+  }
 };
 
 module.exports = PostController;

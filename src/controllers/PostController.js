@@ -1,10 +1,12 @@
+const { default: mongoose } = require("mongoose");
 const PostModel = require("../models/PostModel");
 const CommentModel = require("../models/CommentModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
-const DepartmentModel = require("../models/DepartmentModel");
 const pushNotification = require("../helpers/pushNotification");
 const { serializePost, serializeComment, signReactions } = require("../helpers/staticUrl");
+const cleanupUploadedFiles = require("../utils/cleanupUploadedFiles");
+const deletePhysicalFile = require("../utils/deletePhysicalFile");
 
 async function getAuthorInfo(accountId) {
   const userInfo = await UserInfoModel.findOne({ id_account: accountId });
@@ -13,7 +15,7 @@ async function getAuthorInfo(accountId) {
   let author_dept = null;
   const membership = await UserDepartmentPositionModel.findOne({
     user: userInfo._id,
-    isDeleted: false,
+    isDeleted: false
   }).populate("department", "department_name");
   if (membership?.department?.department_name) {
     author_dept = membership.department.department_name;
@@ -22,7 +24,7 @@ async function getAuthorInfo(accountId) {
   return {
     author_name: userInfo.full_name,
     author_avatar: userInfo.avatar ?? null,
-    author_dept,
+    author_dept
   };
 }
 
@@ -58,10 +60,14 @@ const PostController = {
         .lean();
 
       // Thu thập tất cả user_id: tác giả bài + người dùng đã react
-      const allIds = [...new Set([
-        ...posts.map((p) => String(p.author_id)),
-        ...posts.flatMap((p) => (p.reactions ?? []).map((r) => String(r.user_id))),
-      ].filter(Boolean))];
+      const allIds = [
+        ...new Set(
+          [
+            ...posts.map((p) => String(p.author_id)),
+            ...posts.flatMap((p) => (p.reactions ?? []).map((r) => String(r.user_id)))
+          ].filter(Boolean)
+        )
+      ];
       let avatarMap = {};
       if (allIds.length) {
         const infos = await UserInfoModel.find(
@@ -85,8 +91,8 @@ const PostController = {
           total,
           page,
           limit,
-          total_pages: Math.ceil(total / limit),
-        },
+          total_pages: Math.ceil(total / limit)
+        }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -124,7 +130,7 @@ const PostController = {
         images,
         type,
         visibility,
-        dept_id: dept_id || null,
+        dept_id: dept_id || null
       });
 
       const signedPost = serializePost(post);
@@ -175,9 +181,115 @@ const PostController = {
 
       return res.status(200).json({
         message: "Thành công",
-        data: { reactions: signedReactions },
+        data: { reactions: signedReactions }
       });
     } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
+
+  // PATCH /posts/:id/edit
+  editPost: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { content, visibility, dept_id, keep_images } = req.body;
+      const accountId = req.account._id.toString();
+
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        if (req.files && req.files.length > 0) {
+          req.files.forEach((f) => cleanupUploadedFiles(f, "invalid-id"));
+        }
+        return res.status(400).json({ message: "ID bài viết không hợp lệ" });
+      }
+
+      const post = await PostModel.findOne({ _id: id, isDeleted: false });
+      if (!post) {
+        if (req.files && req.files.length > 0) {
+          req.files.forEach((f) => cleanupUploadedFiles(f, "post-not-found"));
+        }
+        return res.status(404).json({ message: "Không tìm thấy bài viết" });
+      }
+
+      if (post.author_id.toString() !== accountId) {
+        if (req.files && req.files.length > 0) {
+          req.files.forEach((f) => cleanupUploadedFiles(f, "permission-denied"));
+        }
+        return res.status(403).json({ message: "Bạn không có quyền chỉnh sửa bài viết này" });
+      }
+
+      if (content !== undefined && (!content || !content.trim())) {
+        if (req.files && req.files.length > 0) {
+          req.files.forEach((f) => cleanupUploadedFiles(f, "empty-content"));
+        }
+        return res.status(400).json({ message: "Nội dung bài viết không được để trống" });
+      }
+
+      if (content !== undefined) post.content = content.trim();
+      if (visibility !== undefined) post.visibility = visibility;
+      if (dept_id !== undefined) post.dept_id = dept_id || null;
+
+      const newImages = (req.files || []).map((f) => `feed/${f.filename}`);
+      let deletedImages = [];
+
+      if ((req.files && req.files.length > 0) || keep_images !== undefined) {
+        let finalImages = [];
+
+        if (keep_images) {
+          try {
+            const parsedKeepImages =
+              typeof keep_images === "string" ? JSON.parse(keep_images) : keep_images;
+
+            if (Array.isArray(parsedKeepImages)) {
+              finalImages = post.images.filter((img) => parsedKeepImages.includes(img));
+            }
+          } catch (e) {
+            finalImages = post.images;
+          }
+        } else if (req.files && req.files.length > 0) {
+          finalImages = [];
+        } else {
+          finalImages = post.images;
+        }
+
+        deletedImages = post.images.filter((img) => !finalImages.includes(img));
+        post.images = [...finalImages, ...newImages];
+      }
+
+      await post.save();
+
+      deletedImages.forEach((img) => {
+        deletePhysicalFile(img);
+      });
+
+      let signedPost;
+      try {
+        const { author_avatar } = await getAuthorInfo(accountId);
+        post.author_avatar = author_avatar ?? post.author_avatar;
+
+        signedPost = serializePost(post);
+
+        const io = req.app.get("io");
+        if (io) {
+          io.to("feed").emit("post_updated", { post: signedPost });
+          io.to(`post:${id}`).emit("post_updated", { post: signedPost });
+        }
+      } catch (postProcessError) {
+        console.error("Lỗi xử lý phụ sau khi lưu bài viết:", postProcessError);
+        return res.status(200).json({
+          message: "Cập nhật bài viết thành công (lỗi xử lý phụ)",
+          data: serializePost(post),
+          error: postProcessError.message
+        });
+      }
+
+      return res.status(200).json({
+        message: "Cập nhật bài viết thành công",
+        data: signedPost
+      });
+    } catch (error) {
+      if (req.files && req.files.length > 0) {
+        req.files.forEach((f) => cleanupUploadedFiles(f, "server-error"));
+      }
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
   },
@@ -224,7 +336,7 @@ const PostController = {
 
       return res.status(200).json({
         message: post.pinned ? "Đã ghim bài viết" : "Đã bỏ ghim bài viết",
-        data: { pinned: post.pinned },
+        data: { pinned: post.pinned }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -248,7 +360,9 @@ const PostController = {
         .lean();
 
       const avatarMap = await buildAvatarMap(comments);
-      comments.forEach((c) => { c.author_avatar = avatarMap[String(c.author_id)] ?? c.author_avatar; });
+      comments.forEach((c) => {
+        c.author_avatar = avatarMap[String(c.author_id)] ?? c.author_avatar;
+      });
 
       return res.status(200).json({
         message: "Thành công",
@@ -257,8 +371,8 @@ const PostController = {
           total,
           page,
           limit,
-          total_pages: Math.ceil(total / limit),
-        },
+          total_pages: Math.ceil(total / limit)
+        }
       });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -266,54 +380,132 @@ const PostController = {
   },
 
   // POST /posts/:id/comments
-  createComment: async (req, res) => {
-    try {
-      const { id: postId } = req.params;
-      const { content } = req.body;
+  createCommentWithImages: async (req, res) => {
+    const uploadedFile = req.file || null;
+    const { id: postId } = req.params;
+    const { content } = req.body;
 
-      if (!content || !content.trim()) {
-        return res.status(400).json({ message: "Nội dung bình luận không được để trống" });
+    const hasContent = content && content.trim();
+    const hasImage = !!uploadedFile;
+
+    if (!hasContent && !hasImage) {
+      cleanupUploadedFiles(uploadedFile, "empty-content");
+      return res
+        .status(400)
+        .json({ message: "Nội dung bình luận hoặc hình ảnh không được để trống" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+      cleanupUploadedFiles(uploadedFile, "invalid-id");
+      return res.status(400).json({ message: "ID bài viết không hợp lệ" });
+    }
+
+    let session;
+    let isCommitted = false;
+    let signedComment;
+    let updatedPost;
+    let post;
+    let commenter_name;
+
+    try {
+      const authorInfo = await getAuthorInfo(req.account._id);
+      commenter_name = authorInfo.author_name;
+      const { author_avatar } = authorInfo;
+
+      session = await mongoose.startSession();
+      session.startTransaction();
+
+      post = await PostModel.findOne({ _id: postId, isDeleted: false }).session(session);
+      if (!post) {
+        await session.abortTransaction();
+        await session.endSession();
+        cleanupUploadedFiles(uploadedFile, "post-not-found");
+        return res.status(404).json({ message: "Không tìm thấy bài viết" });
       }
 
-      const post = await PostModel.findOne({ _id: postId, isDeleted: false });
-      if (!post) return res.status(404).json({ message: "Không tìm thấy bài viết" });
+      const image = uploadedFile ? `feed/${uploadedFile.filename}` : null;
 
-      const { author_name, author_avatar } = await getAuthorInfo(req.account._id);
+      const [comment] = await CommentModel.create(
+        [
+          {
+            post_id: postId,
+            author_id: req.account._id,
+            author_name: commenter_name,
+            author_avatar,
+            content: content ? content.trim() : "",
+            image
+          }
+        ],
+        { session }
+      );
 
-      const comment = await CommentModel.create({
-        post_id: postId,
-        author_id: req.account._id,
-        author_name,
-        author_avatar,
-        content: content.trim(),
-      });
+      updatedPost = await PostModel.findOneAndUpdate(
+        { _id: postId, isDeleted: false },
+        { $inc: { comments_count: 1 } },
+        { session, new: true }
+      );
 
-      post.comments_count = (post.comments_count || 0) + 1;
-      await post.save();
+      if (!updatedPost) {
+        await session.abortTransaction();
+        await session.endSession();
+        cleanupUploadedFiles(uploadedFile, "post-not-found-2");
+        return res.status(404).json({ message: "Không tìm thấy bài viết" });
+      }
 
-      const signedComment = serializeComment(comment);
+      await session.commitTransaction();
+      await session.endSession();
+      isCommitted = true;
+
+      signedComment = serializeComment(comment);
+    } catch (error) {
+      console.error("Đã xảy ra lỗi khi tạo bình luận:", error);
+
+      if (session && !isCommitted) {
+        try {
+          await session.abortTransaction();
+          await session.endSession();
+        } catch (abortError) {
+          console.error("Không thể abort transaction:", abortError);
+        }
+      }
+
+      cleanupUploadedFiles(uploadedFile, "create-comment-failed");
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+
+    try {
       const io = req.app.get("io");
       if (io) {
         io.to(`post:${postId}`).emit("new_comment", { comment: signedComment });
-        io.to("feed").emit("comment_count_updated", { post_id: postId, comments_count: post.comments_count });
+        io.to("feed").emit("comment_count_updated", {
+          post_id: postId,
+          comments_count: updatedPost.comments_count
+        });
       }
 
-      const isNotSameUser = post.author_id.toString() !== req.account._id;
+      const isNotSameUser = post.author_id.toString() !== req.account._id.toString();
       if (isNotSameUser) {
         pushNotification
           .sendToAccount({
             account_id: post.author_id,
             title: "Bình luận mới",
-            body: `${author_name} đã bình luận bài viết của bạn`,
-            data: { type: "new_comment", post_id: postId },
+            body: `${commenter_name} đã bình luận bài viết của bạn`,
+            data: { type: "new_comment", post_id: postId }
           })
-          .catch(() => {});
+          .catch((err) => {
+            console.error("[Notification] Gửi thất bại:", err);
+          });
       }
-
-      return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
-    } catch (error) {
-      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    } catch (realtimeError) {
+      console.error("Lỗi đồng bộ realtime:", realtimeError);
+      return res.status(200).json({
+        message: "Bình luận thành công (lỗi đồng bộ realtime)",
+        data: signedComment,
+        error: realtimeError.message
+      });
     }
+
+    return res.status(200).json({ message: "Bình luận thành công", data: signedComment });
   },
 
   // DELETE /posts/:id/comments/:commentId
@@ -322,7 +514,11 @@ const PostController = {
       const { id: postId, commentId } = req.params;
       const { _id: accountId, role } = req.account;
 
-      const comment = await CommentModel.findOne({ _id: commentId, post_id: postId, isDeleted: false });
+      const comment = await CommentModel.findOne({
+        _id: commentId,
+        post_id: postId,
+        isDeleted: false
+      });
       if (!comment) return res.status(404).json({ message: "Không tìm thấy bình luận" });
 
       const isAuthor = comment.author_id.toString() === accountId;
@@ -342,7 +538,7 @@ const PostController = {
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }
-  },
+  }
 };
 
 module.exports = PostController;

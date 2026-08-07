@@ -75,7 +75,8 @@ const PERMISSIONS = [
   {
     code: PERMISSION.FOLDER_SHARED_MANAGE,
     description: "Quản lý thư mục dùng chung (sửa/xóa/phân quyền)"
-  }
+  },
+  { code: PERMISSION.HRM_MENU_PERMISSIONS_RBAC, description: "Xem menu Phân quyền chi tiết" }
 ];
 
 const DEPRECATED_PERMISSION_CODES = [
@@ -87,7 +88,15 @@ const DEPRECATED_PERMISSION_CODES = [
   "hrm.menu.reports",
   "hrm.menu.settings",
   "hrm.menu.logs",
-  "hrm.menu.help"
+  "hrm.menu.help",
+  PERMISSION.FOLDER_MENU_DOCUMENTS,
+  PERMISSION.FOLDER_SHARED_VIEW,
+  PERMISSION.FOLDER_SHARED_DOWNLOAD,
+  PERMISSION.FOLDER_SHARED_UPLOAD,
+  PERMISSION.FOLDER_SHARED_PUSH,
+  PERMISSION.FOLDER_SHARED_DELETE_FILE,
+  PERMISSION.FOLDER_SHARED_CREATE,
+  PERMISSION.FOLDER_SHARED_MANAGE
 ];
 
 const ROLES = [
@@ -108,28 +117,6 @@ const ROLES = [
     description:
       "Duyệt đơn của nhân viên trong phạm vi phòng ban mình quản lý (xem docs/REQUEST-APPROVAL-CHAIN-PLAN.md)",
     permissions: [PERMISSION.HRM_REQUEST_REVIEW]
-  },
-  {
-    code: "shared_folder_viewer",
-    name: "Xem tài liệu dùng chung",
-    description:
-      "Mặc định toàn thể CBNV VNFITE 3 miền — chỉ xem tài liệu trong thư mục dùng chung, không được tải",
-    permissions: [PERMISSION.FOLDER_MENU_DOCUMENTS, PERMISSION.FOLDER_SHARED_VIEW]
-  },
-  {
-    code: "shared_folder_manager",
-    name: "Quản lý tài liệu dùng chung",
-    description: "Toàn quyền tạo, sửa, xóa, phân quyền thư mục dùng chung",
-    permissions: [
-      PERMISSION.FOLDER_MENU_DOCUMENTS,
-      PERMISSION.FOLDER_SHARED_VIEW,
-      PERMISSION.FOLDER_SHARED_DOWNLOAD,
-      PERMISSION.FOLDER_SHARED_UPLOAD,
-      PERMISSION.FOLDER_SHARED_PUSH,
-      PERMISSION.FOLDER_SHARED_DELETE_FILE,
-      PERMISSION.FOLDER_SHARED_CREATE,
-      PERMISSION.FOLDER_SHARED_MANAGE
-    ]
   }
 ];
 

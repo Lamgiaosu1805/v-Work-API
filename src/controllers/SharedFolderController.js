@@ -5,10 +5,10 @@ const SharedFolderController = {
   // GET /shared-folders/folders?parent_id=xxx
   getFolders: async (req, res) => {
     try {
-      const { parent_id } = req.query;
+      const { parent_id, search } = req.query;
       const parentId = parent_id && parent_id !== "null" ? parent_id : null;
 
-      const data = await SharedFolderService.getFolders(req.account._id, parentId);
+      const data = await SharedFolderService.getFolders(req.account._id, parentId, search);
       return res.status(200).json({ message: "Thành công", data });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -88,7 +88,8 @@ const SharedFolderController = {
   // GET /shared-folders/files?folder_id=xxx
   getFilesByFolder: async (req, res) => {
     try {
-      const result = await SharedFileService.getFilesByFolder(req.account._id, req.query.folder_id);
+      const { folder_id, search } = req.query;
+      const result = await SharedFileService.getFilesByFolder(req.account._id, folder_id, search);
       if (result.error)
         return res.status(result.error.status).json({ message: result.error.message });
 
@@ -162,16 +163,24 @@ const SharedFolderController = {
     }
   },
 
-  // DELETE /shared-folders/file/:fileId
+  // DELETE /shared-folders/file
   deleteFile: async (req, res) => {
     try {
-      const result = await SharedFileService.deleteFile(req.account._id, req.params.fileId);
-      if (result.error)
-        return res.status(result.error.status).json({ message: result.error.message });
+      const result = await SharedFileService.deleteFile(req.account._id, req.body.fileIds);
 
-      return res.status(200).json({ message: "Xóa file thành công" });
+      if (result.error) {
+        return res.status(result.error.status).json({ message: result.error.message });
+      }
+
+      return res.status(200).json({
+        message: "Xóa file thành công",
+        data: result.data
+      });
     } catch (error) {
-      return res.status(500).json({ message: "Lỗi server", error: error.message });
+      return res.status(500).json({
+        message: "Lỗi server",
+        error: error.message
+      });
     }
   },
 
@@ -226,6 +235,7 @@ const SharedFolderController = {
   updatePermissions: async (req, res) => {
     try {
       const result = await SharedFolderService.updatePermissions(
+        req.account._id,
         req.params.folderId,
         req.body.permissions,
         req.body.defaultActions
@@ -234,6 +244,88 @@ const SharedFolderController = {
         return res.status(result.error.status).json({ message: result.error.message });
 
       return res.status(200).json({ message: "Cập nhật quyền thành công", data: result.data });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
+
+  updateDefaultActions: async (req, res) => {
+    try {
+      const result = await SharedFolderService.updateDefaultActions(
+        req.account._id,
+        req.params.folderId,
+        req.body.defaultActions
+      );
+      if (result.error)
+        return res.status(result.error.status).json({ message: result.error.message });
+
+      return res
+        .status(200)
+        .json({ message: "Cập nhật quyền mặc định thành công", data: result.data });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
+  updateAutoCleanup: async (req, res) => {
+    const accountId = req.account._id;
+    const { folderId } = req.params;
+    const { autoCleanup, autoCleanupDays } = req.body;
+
+    const { data, error } = await SharedFolderService.updateAutoCleanup(accountId, folderId, {
+      autoCleanup,
+      autoCleanupDays
+    });
+
+    if (error) return res.status(error.status).json({ message: error.message });
+    return res.status(200).json({ data });
+  },
+
+  // GET /shared-folders/:rootFolderId/audit-logs
+  getAuditLogs: async (req, res) => {
+    try {
+      const { folderId, action, targetType, page, limit } = req.query;
+      const result = await SharedFolderService.getAuditLogs(req.params.rootFolderId, {
+        folderId,
+        action,
+        targetType,
+        page,
+        limit
+      });
+      return res.status(200).json({ message: "Thành công", ...result });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
+
+  // GET /shared-folders/file/:fileId/audit-logs
+  getFileAuditLogs: async (req, res) => {
+    try {
+      const { page, limit } = req.query;
+      const result = await SharedFolderService.getFileAuditLogs(req.params.fileId, { page, limit });
+      return res.status(200).json({ message: "Thành công", ...result });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
+
+  clearAuditLogs: async (req, res) => {
+    try {
+      const { rootFolderId } = req.params;
+      const result = await SharedFolderService.clearAuditLogs(rootFolderId);
+      return res.status(200).json({ message: "Đã xóa các bản ghi audit log", data: result.data });
+    } catch (error) {
+      return res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+  },
+
+  // DELETE /shared-folders/delete-multiple
+  deleteMultiple: async (req, res) => {
+    try {
+      const result = await SharedFolderService.deleteMultiple(req.account._id, req.body);
+      if (result.error)
+        return res.status(result.error.status).json({ message: result.error.message });
+
+      return res.status(200).json({ message: "Đã xóa các mục đã chọn", data: result.data });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });
     }

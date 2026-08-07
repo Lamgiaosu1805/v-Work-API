@@ -1,46 +1,57 @@
-const { PERMISSION } = require("../constants");
-const { getUserDeptIds } = require("../controllers/InternalFileController");
 const AccountModel = require("../models/AccountModel");
 const SharedFolderModel = require("../models/SharedFolderModel");
+const { getUserDeptIds } = require("../controllers/InternalFileController");
 const { FOLDER_ACTION } = require("../models/SharedFolderModel");
-const { can } = require("./rbac");
 
-const ROOT_ACTION_PERMISSION_MAP = {
-  [FOLDER_ACTION.DOWNLOAD]: PERMISSION.FOLDER_SHARED_DOWNLOAD,
-  [FOLDER_ACTION.UPLOAD]: PERMISSION.FOLDER_SHARED_UPLOAD,
-  [FOLDER_ACTION.DELETE_FILE]: PERMISSION.FOLDER_SHARED_DELETE_FILE,
-  [FOLDER_ACTION.MANAGE]: PERMISSION.FOLDER_SHARED_MANAGE
-};
+function isSuperAdminAccount(account) {
+  return account?.username === "admin";
+}
 
 async function canDoRootAction(accountId, action) {
   if (action === FOLDER_ACTION.VIEW) return true;
-
   const account = await AccountModel.findById(accountId);
-  const permissionCode = ROOT_ACTION_PERMISSION_MAP[action];
-
-  if (!permissionCode) return false;
-
-  return can(account, permissionCode);
+  return isSuperAdminAccount(account);
 }
 
-// Trả về danh sách actions user được phép làm trên 1 shared_folder cụ thể
+async function getAncestorChain(folder) {
+  const chain = [folder];
+  let current = folder;
+  let guard = 0;
+
+  while (current.parent_id && guard < 50) {
+    const parent = await SharedFolderModel.findOne({ _id: current.parent_id, isDeleted: false });
+    if (!parent) break;
+    chain.push(parent);
+    current = parent;
+    guard++;
+  }
+  return chain;
+}
+
 async function getSharedFolderActions(accountId, folder) {
   const account = await AccountModel.findById(accountId);
-  if (account?.username === "admin") return Object.values(FOLDER_ACTION);
-
-  if (await can(account, PERMISSION.FOLDER_SHARED_MANAGE)) {
-    return Object.values(FOLDER_ACTION);
-  }
+  if (isSuperAdminAccount(account)) return Object.values(FOLDER_ACTION);
 
   const userDeptIds = await getUserDeptIds(accountId);
+  const chain = await getAncestorChain(folder);
 
-  const entry = folder.permissions.find((p) => {
-    if (p.subjectType === "user") return p.subjectId.toString() === accountId.toString();
-    if (p.subjectType === "department") return userDeptIds.includes(p.subjectId.toString());
-    return false;
-  });
+  const matchedActions = new Set();
 
-  return entry ? entry.actions : folder.defaultActions;
+  for (const node of chain) {
+    const entry = node.permissions.find((p) => {
+      if (p.subjectType === "user") return p.subjectId.toString() === accountId.toString();
+      if (p.subjectType === "department") return userDeptIds.includes(p.subjectId.toString());
+      return false;
+    });
+    if (entry) {
+      entry.actions.forEach((a) => matchedActions.add(a));
+    }
+  }
+
+  const rootFolder = chain[chain.length - 1];
+  (rootFolder.defaultActions ?? []).forEach((a) => matchedActions.add(a));
+
+  return Array.from(matchedActions);
 }
 
 async function canDoFolderAction(accountId, folder, action) {
@@ -48,11 +59,10 @@ async function canDoFolderAction(accountId, folder, action) {
   return actions.includes(action);
 }
 
-// User có thấy folder này tồn tại không (dựa trên scope, tách biệt với action cụ thể)
+// User có thấy folder này tồn tại không
 async function canSeeFolder(accountId, folder) {
   const account = await AccountModel.findById(accountId);
-  if (account?.username === "admin") return true;
-  if (await can(account, PERMISSION.FOLDER_SHARED_MANAGE)) return true;
+  if (isSuperAdminAccount(account)) return true;
   if (folder.scope === "all_departments") return true;
 
   const userDeptIds = await getUserDeptIds(accountId);
@@ -62,8 +72,7 @@ async function canSeeFolder(accountId, folder) {
 // Query filter tương ứng với canSeeFolder — dùng trong list để lọc ngay ở DB
 async function buildVisibilityFilter(accountId) {
   const account = await AccountModel.findById(accountId);
-  if (account?.username === "admin") return {};
-  if (await can(account, PERMISSION.FOLDER_SHARED_MANAGE)) return {};
+  if (isSuperAdminAccount(account)) return {};
 
   const userDeptIds = await getUserDeptIds(accountId);
   return {
@@ -101,6 +110,7 @@ async function canDoFileAction(accountId, file, action) {
 }
 
 module.exports = {
+  isSuperAdminAccount,
   getSharedFolderActions,
   canDoFolderAction,
   canSeeFolder,

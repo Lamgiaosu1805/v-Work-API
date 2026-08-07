@@ -20,3 +20,4 @@ const InternalFolderSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model("internal_folder", InternalFolderSchema);
+  

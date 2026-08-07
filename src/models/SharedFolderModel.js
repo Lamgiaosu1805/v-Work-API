@@ -52,6 +52,9 @@ const SharedFolderSchema = new mongoose.Schema(
       default: [FOLDER_ACTION.VIEW]
     },
 
+    autoCleanup: { type: Boolean, default: false },
+    autoCleanupDays: { type: Number, default: 3, min: 1 },
+
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "account", required: true },
     deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "account", default: null },
     deletedAt: { type: Date, default: null },

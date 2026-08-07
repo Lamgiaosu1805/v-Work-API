@@ -16,6 +16,18 @@ function getSharedFilePath(folderId, filename) {
   return path.join(getBaseDir(), filename);
 }
 
+const uploadError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({
+        message: "Kích thước mỗi file không được vượt quá 50MB"
+      });
+    }
+  }
+
+  next(err);
+};
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const { folder_id } = req.body;
@@ -50,4 +62,4 @@ const uploadShared = multer({
   limits: { fileSize: 50 * 1024 * 1024 }
 });
 
-module.exports = { uploadShared, getSharedFilePath };
+module.exports = { uploadShared, getSharedFilePath, uploadError };

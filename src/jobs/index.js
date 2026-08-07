@@ -7,6 +7,7 @@ const { registerAutoRejectLeaveRequestsJob } = require("./autoRejectLeaveRequest
 const { registerChurnDetectionJob } = require("./churnDetectionJob");
 const { registerKpiSyncJob } = require("./kpiSyncJob");
 const { registerKpiRolloverJob } = require("./kpiRolloverJob");
+const { registerSharedFolderCleanupJob } = require("./sharedFolderCleanupJob");
 
 function startCronJobs() {
   registerGenWorkSheetJob();
@@ -18,6 +19,7 @@ function startCronJobs() {
   registerChurnDetectionJob();
   registerKpiSyncJob();
   registerKpiRolloverJob();
+  registerSharedFolderCleanupJob();
 }
 
 module.exports = { startCronJobs };

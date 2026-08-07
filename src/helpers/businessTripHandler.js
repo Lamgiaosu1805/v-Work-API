@@ -2,12 +2,11 @@ const { RequestModel } = require("../models/RequestModel");
 const { calcTotalDays } = require("./requestUtils");
 
 function validate(body) {
-  const { from_date, to_date, origin_location, destination_location } = body;
+  const { from_date, to_date, destination_location } = body;
 
   if (!from_date || !to_date)
     return { error: { status: 400, message: "Thông tin đầu vào không hợp lệ" } };
 
-  const trimmedOrigin = typeof origin_location === "string" ? origin_location.trim() : "";
   const trimmedDestination =
     typeof destination_location === "string" ? destination_location.trim() : "";
   if (!trimmedDestination)
@@ -22,7 +21,6 @@ function validate(body) {
       from_date,
       to_date,
       total_days,
-      origin_location: trimmedOrigin,
       destination_location: trimmedDestination
     }
   };

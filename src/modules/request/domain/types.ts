@@ -43,7 +43,7 @@ export interface RequestProps {
   to_date?: Date;
   to_period?: "morning" | "afternoon";
   total_days?: number;
-  origin_location?: string;
+  // origin_location?: string;
   destination_location?: string;
   start_time?: string;
   end_time?: string;

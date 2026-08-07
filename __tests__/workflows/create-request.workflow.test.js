@@ -448,3 +448,170 @@ describe("createRequest() forgot_checkin — chặn/không chặn theo dữ li�
     expect(entity.getProps().type).toBe("both");
   });
 });
+
+// Giờ dự kiến phải hợp lý so với mốc THẬT còn lại đã có trong hệ thống (vế đối diện với vế đang xin
+// sửa) — tránh tạo đơn với giờ vô lý (vd xin check-in sau cả giờ check-out thật đã ghi nhận).
+describe("createRequest() forgot_checkin — giờ dự kiến phải hợp lý so với mốc còn lại đã có", () => {
+  async function seedWorksheet(userId, dateKey, overrides = {}) {
+    await WorkSheetModel.create({
+      user_id: userId,
+      date: moment.tz(dateKey, TZ).startOf("day").toDate(),
+      shifts: [],
+      check_in: null,
+      check_out: null,
+      ...overrides
+    });
+  }
+
+  const dt = (dateKey, hhmm) => moment.tz(`${dateKey} ${hhmm}`, "YYYY-MM-DD HH:mm", TZ).toDate();
+  const iso = (dateKey, hhmm) => dt(dateKey, hhmm).toISOString();
+
+  it("quên check-in nhưng giờ xin lại SAU giờ check-out thật đã có: bị chặn 400", async () => {
+    const { account, userInfo } = await createUserInfo(1);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d, { check_out: dt(d, "17:00") });
+
+    await expect(
+      createRequest(account, {
+        request_type: "forgot_checkin",
+        reason: "quên chấm công vào",
+        date: d,
+        type: "check_in",
+        expected_check_in: iso(d, "18:00")
+      })
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it("quên check-in, giờ xin BẰNG giờ check-out thật đã có: bị chặn 400 (isSameOrAfter)", async () => {
+    const { account, userInfo } = await createUserInfo(2);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d, { check_out: dt(d, "17:00") });
+
+    await expect(
+      createRequest(account, {
+        request_type: "forgot_checkin",
+        reason: "quên chấm công vào",
+        date: d,
+        type: "check_in",
+        expected_check_in: iso(d, "17:00")
+      })
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it("quên check-in, giờ xin TRƯỚC giờ check-out thật đã có: tạo được bình thường", async () => {
+    const { account, userInfo } = await createUserInfo(3);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d, { check_out: dt(d, "17:00") });
+
+    const entity = await createRequest(account, {
+      request_type: "forgot_checkin",
+      reason: "quên chấm công vào",
+      date: d,
+      type: "check_in",
+      expected_check_in: iso(d, "08:00")
+    });
+    expect(entity.getProps().type).toBe("check_in");
+  });
+
+  it("quên check-out nhưng giờ xin lại TRƯỚC giờ check-in thật đã có: bị chặn 400", async () => {
+    const { account, userInfo } = await createUserInfo(4);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d, { check_in: dt(d, "08:00") });
+
+    await expect(
+      createRequest(account, {
+        request_type: "forgot_checkin",
+        reason: "quên chấm công ra",
+        date: d,
+        type: "check_out",
+        expected_check_out: iso(d, "07:00")
+      })
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it("quên check-out, giờ xin sau giờ check-in thật đã có: tạo được bình thường", async () => {
+    const { account, userInfo } = await createUserInfo(5);
+    const d = "2026-07-01";
+    await seedWorksheet(userInfo._id, d, { check_in: dt(d, "08:00") });
+
+    const entity = await createRequest(account, {
+      request_type: "forgot_checkin",
+      reason: "quên chấm công ra",
+      date: d,
+      type: "check_out",
+      expected_check_out: iso(d, "17:00")
+    });
+    expect(entity.getProps().type).toBe("check_out");
+  });
+});
+
+// Conflict check của client_visit đổi từ "trùng ngày" sang "trùng khung giờ" — nhiều đơn gặp khách
+// khác giờ trong cùng 1 ngày phải tạo được, chỉ chặn khi 2 khung giờ thực sự chồng nhau.
+describe("createRequest() client_visit — conflict theo khung giờ, không phải theo ngày", () => {
+  it("2 đơn cùng ngày, KHÔNG trùng giờ (08:00-10:00 và 14:00-16:00): tạo được cả 2", async () => {
+    const { account } = await createUserInfo(1);
+    const d = "2026-07-01";
+
+    await createRequest(account, {
+      request_type: "client_visit",
+      reason: "gặp khách A",
+      visit_date: d,
+      start_time: "08:00",
+      end_time: "10:00"
+    });
+
+    const second = await createRequest(account, {
+      request_type: "client_visit",
+      reason: "gặp khách B",
+      visit_date: d,
+      start_time: "14:00",
+      end_time: "16:00"
+    });
+    expect(second.getProps().start_time).toBe("14:00");
+  });
+
+  it("2 đơn cùng ngày, giờ nối tiếp sát nhau (08:00-10:00 và 10:00-12:00): KHÔNG coi là trùng", async () => {
+    const { account } = await createUserInfo(2);
+    const d = "2026-07-01";
+
+    await createRequest(account, {
+      request_type: "client_visit",
+      reason: "gặp khách A",
+      visit_date: d,
+      start_time: "08:00",
+      end_time: "10:00"
+    });
+
+    const second = await createRequest(account, {
+      request_type: "client_visit",
+      reason: "gặp khách B",
+      visit_date: d,
+      start_time: "10:00",
+      end_time: "12:00"
+    });
+    expect(second.getProps().start_time).toBe("10:00");
+  });
+
+  it("2 đơn cùng ngày, TRÙNG khung giờ (08:00-10:00 và 09:00-11:00): đơn thứ 2 bị chặn 409", async () => {
+    const { account } = await createUserInfo(3);
+    const d = "2026-07-01";
+
+    await createRequest(account, {
+      request_type: "client_visit",
+      reason: "gặp khách A",
+      visit_date: d,
+      start_time: "08:00",
+      end_time: "10:00"
+    });
+
+    await expect(
+      createRequest(account, {
+        request_type: "client_visit",
+        reason: "gặp khách B",
+        visit_date: d,
+        start_time: "09:00",
+        end_time: "11:00"
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
+});

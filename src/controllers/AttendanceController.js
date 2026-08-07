@@ -423,7 +423,7 @@ const AttendanceController = {
         RequestModel.find({
           user_id: userInfo._id,
           isDeleted: false,
-          status: "approved",
+          status: { $in: ["pending", "approved"] },
           $or: [
             {
               from_date: { $lte: periodEnd.toDate() },
@@ -593,6 +593,7 @@ const AttendanceController = {
             const base = {
               _id: r._id,
               request_type: r.request_type,
+              status: r.status,
               reason: r.reason || ""
             };
             switch (r.request_type) {

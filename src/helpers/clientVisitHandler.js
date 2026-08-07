@@ -30,15 +30,18 @@ function validate(body) {
 }
 
 async function validateAsync(payload, userInfo, session) {
-  const overlap = await RequestModel.findOne({
+  const sameDay = await RequestModel.find({
     user_id: userInfo._id,
     request_type: "client_visit",
     status: { $in: ["pending", "approved"] },
-    from_date: { $lte: new Date(payload.to_date) },
-    to_date: { $gte: new Date(payload.from_date) },
+    from_date: new Date(payload.from_date),
     isDeleted: false
   }).session(session);
-  return overlap ? { status: 409, message: "Đã có đơn gặp khách hàng cho ngày này" } : null;
+
+  const overlap = sameDay.some(
+    (r) => payload.start_time < r.end_time && r.start_time < payload.end_time
+  );
+  return overlap ? { status: 409, message: "Đã có đơn gặp khách hàng trùng khung giờ này" } : null;
 }
 
 module.exports = { validate, validateAsync };

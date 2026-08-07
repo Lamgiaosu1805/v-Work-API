@@ -7,9 +7,15 @@ const { getSharedFilePath } = require("../middlewares/uploadShared");
 const { getFullNameMap } = require("../controllers/InternalFileController");
 const { canDoFolderAction, canDoFileAction } = require("../helpers/shareFolderHelper");
 const { safeUnlink } = require("./sharedFolderService");
+const {
+  getRootFolderId,
+  createAuditLog,
+  mappingMessageAuditLog
+} = require("../helpers/sharedFolderAuditLogHelper");
+const { TARGET_TYPES, AUDIT_ACTION } = require("../models/SharedFolderAuditLogModel");
 
 const SharedFileService = {
-  async getFilesByFolder(accountId, folderId) {
+  async getFilesByFolder(accountId, folderId, search = "") {
     const hasFolderId = folderId && folderId !== "null";
     const folderFilter = hasFolderId ? { folder_id: folderId } : { folder_id: { $in: [null] } };
 
@@ -21,9 +27,18 @@ const SharedFileService = {
       }
     }
 
-    const files = await SharedFileModel.find({ isDeleted: false, ...folderFilter })
+    let files = await SharedFileModel.find({
+      isDeleted: false,
+      ...folderFilter
+    })
       .populate("uploadedBy", "username")
       .sort({ createdAt: -1 });
+
+    const keyword = search?.trim();
+    if (keyword) {
+      const regex = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      files = files.filter((f) => regex.test(f.originalName.replace(/\.[^./\\]+$/, "")));
+    }
 
     const fullNameMap = await getFullNameMap(files.map((f) => f.uploadedBy?._id));
     const data = files.map((f) => {
@@ -37,7 +52,15 @@ const SharedFileService = {
   },
 
   async uploadFiles(accountId, folderId, files) {
+    const rootFolderId = await getRootFolderId(folderId);
     const cleanup = () => files.forEach((f) => safeUnlink(f.path));
+
+    if (!rootFolderId) {
+      cleanup();
+      return {
+        error: { status: 400, message: "Thư mục gốc không tồn tại. Không thể upload file" }
+      };
+    }
 
     if (!files || files.length === 0) {
       return { error: { status: 400, message: "Không có file được gửi lên" } };
@@ -68,6 +91,19 @@ const SharedFileService = {
       )
     );
 
+    await savedFiles.map((file) =>
+      createAuditLog({
+        rootFolderId,
+        folderId: file.folder_id,
+        targetType: TARGET_TYPES.FILE,
+        targetId: file._id,
+        action: AUDIT_ACTION.UPLOAD_FILE,
+        performedBy: accountId,
+        targetName: file.originalName,
+        message: mappingMessageAuditLog.UPLOAD_FILE(file.originalName)
+      })
+    );
+
     return { data: savedFiles };
   },
 
@@ -84,6 +120,19 @@ const SharedFileService = {
     if (!fs.existsSync(filePath)) {
       return { error: { status: 404, message: "File không tồn tại trên server" } };
     }
+
+    // const rootFolderId = await getRootFolderId(file.folder_id);
+
+    // await createAuditLog({
+    //   rootFolderId,
+    //   folderId: file.folder_id,
+    //   targetType: TARGET_TYPES.FILE,
+    //   targetId: file._id,
+    //   action: AUDIT_ACTION.VIEW_FILE,
+    //   performedBy: accountId,
+    //   targetName: file.originalName,
+    //   message: mappingMessageAuditLog.VIEW_FILE(file.originalName)
+    // });
 
     return { file, filePath };
   },
@@ -111,25 +160,95 @@ const SharedFileService = {
       return { error: { status: 404, message: "File không tồn tại trên server" } };
     }
 
+    const rootFolderId = await getRootFolderId(file.folder_id);
+
+    await createAuditLog({
+      rootFolderId,
+      folderId: file.folder_id,
+      targetType: TARGET_TYPES.FILE,
+      targetId: file._id,
+      action: AUDIT_ACTION.DOWNLOAD_FILE,
+      performedBy: accountId,
+      targetName: file.originalName,
+      message: mappingMessageAuditLog.DOWNLOAD_FILE(file.originalName)
+    });
+
     return { file, filePath };
   },
 
-  async deleteFile(accountId, fileId) {
-    const file = await SharedFileModel.findOne({ _id: fileId, isDeleted: false });
-    if (!file) return { error: { status: 404, message: "Không tìm thấy file" } };
-
-    if (!(await canDoFileAction(accountId, file, "delete_file"))) {
-      return { error: { status: 403, message: "Bạn không có quyền xóa file này" } };
+  async deleteFile(accountId, fileIds) {
+    if (!Array.isArray(fileIds) || fileIds.length === 0) {
+      return {
+        error: {
+          status: 400,
+          message: "Danh sách file cần xóa không được để trống"
+        }
+      };
     }
 
-    file.isDeleted = true;
-    file.deletedBy = accountId;
-    file.deletedAt = new Date();
-    await file.save();
+    const success = [];
+    const failed = [];
 
-    safeUnlink(getSharedFilePath(file.folder_id, file.filename));
+    for (const fileId of fileIds) {
+      const file = await SharedFileModel.findOne({
+        _id: fileId,
+        isDeleted: false
+      });
 
-    return { data: true };
+      if (!file) {
+        failed.push({
+          fileId,
+          status: 404,
+          message: "Không tìm thấy file"
+        });
+        continue;
+      }
+
+      if (!(await canDoFileAction(accountId, file, "delete_file"))) {
+        failed.push({
+          fileId,
+          status: 403,
+          message: "Bạn không có quyền xóa file này"
+        });
+        continue;
+      }
+
+      const rootFolderId = await getRootFolderId(file.folder_id);
+
+      file.isDeleted = true;
+      file.deletedBy = accountId;
+      file.deletedAt = new Date();
+
+      await file.save();
+
+      safeUnlink(getSharedFilePath(file.folder_id, file.filename));
+
+      await createAuditLog({
+        rootFolderId,
+        folderId: file.folder_id,
+        targetType: TARGET_TYPES.FILE,
+        targetId: file._id,
+        action: AUDIT_ACTION.DELETE_FILE,
+        performedBy: accountId,
+        targetName: file.originalName,
+        message: mappingMessageAuditLog.DELETE_FILE(file.originalName)
+      });
+
+      success.push({
+        fileId: file._id,
+        originalName: file.originalName
+      });
+    }
+
+    return {
+      data: {
+        success,
+        failed,
+        total: fileIds.length,
+        deleted: success.length,
+        failedCount: failed.length
+      }
+    };
   },
 
   async renameFile(accountId, fileId, name) {
@@ -142,37 +261,80 @@ const SharedFileService = {
       return { error: { status: 403, message: "Bạn không có quyền đổi tên file này" } };
     }
 
+    const oldName = file.originalName;
+    const newName = name.trim();
+
+    const rootFolderId = await getRootFolderId(file.folder_id);
+
     file.originalName = name.trim();
     await file.save();
+
+    await createAuditLog({
+      rootFolderId,
+      folderId: file.folder_id,
+      targetType: TARGET_TYPES.FILE,
+      targetId: file._id,
+      action: AUDIT_ACTION.RENAME_FILE,
+      performedBy: accountId,
+      targetName: newName,
+      message: mappingMessageAuditLog.RENAME_FILE(oldName, newName)
+    });
 
     return { data: file };
   },
 
   async moveFile(accountId, fileId, folderId) {
-    const file = await SharedFileModel.findOne({ _id: fileId, isDeleted: false });
-    if (!file) return { error: { status: 404, message: "Không tìm thấy file" } };
+    const file = await SharedFileModel.findOne({
+      _id: fileId,
+      isDeleted: false
+    });
+
+    if (!file) {
+      return {
+        error: {
+          status: 404,
+          message: "Không tìm thấy file"
+        }
+      };
+    }
 
     if (folderId) {
-      const targetFolder = await SharedFolderModel.findOne({ _id: folderId, isDeleted: false });
-      if (!targetFolder) return { error: { status: 404, message: "Thư mục đích không tồn tại" } };
-      if (!(await canDoFolderAction(accountId, targetFolder, "upload"))) {
+      const targetFolder = await SharedFolderModel.findOne({
+        _id: folderId,
+        isDeleted: false
+      });
+
+      if (!targetFolder) {
         return {
-          error: { status: 403, message: "Bạn không có quyền di chuyển file vào thư mục đích" }
+          error: {
+            status: 404,
+            message: "Thư mục đích không tồn tại"
+          }
+        };
+      }
+
+      if (!(await canDoFolderAction(accountId, targetFolder, "manage"))) {
+        return {
+          error: {
+            status: 403,
+            message: "Bạn không có quyền di chuyển file vào thư mục đích"
+          }
         };
       }
     }
 
-    const oldPath = getSharedFilePath(file.folder_id, file.filename);
+    const oldFolderId = file.folder_id;
     const newFolderId = folderId || null;
+
+    const oldPath = getSharedFilePath(oldFolderId, file.filename);
+
     const newPath = getSharedFilePath(newFolderId, file.filename);
 
     if (oldPath !== newPath) {
       const newDir = path.dirname(newPath);
       fs.mkdirSync(newDir, { recursive: true });
 
-      if (fs.existsSync(oldPath)) {
-        fs.renameSync(oldPath, newPath);
-      } else {
+      if (!fs.existsSync(oldPath)) {
         return {
           error: {
             status: 404,
@@ -180,10 +342,25 @@ const SharedFileService = {
           }
         };
       }
+
+      fs.renameSync(oldPath, newPath);
     }
 
-    file.folder_id = folderId || null;
+    const rootFolderId = await getRootFolderId(newFolderId || oldFolderId);
+
+    file.folder_id = newFolderId;
     await file.save();
+
+    await createAuditLog({
+      rootFolderId,
+      folderId: newFolderId,
+      targetType: TARGET_TYPES.FILE,
+      targetId: file._id,
+      action: AUDIT_ACTION.MOVE_FILE,
+      performedBy: accountId,
+      targetName: file.originalName,
+      message: mappingMessageAuditLog.MOVE_FILE(file.originalName, oldPath, newPath)
+    });
 
     return { data: file };
   }

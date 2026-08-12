@@ -23,7 +23,7 @@ router.get(
 router.get(
   "/getAllWorkSheets",
   authenticate,
-  hasModuleAccess("hrm"),
+  requirePermission(PERMISSION.HRM_MENU_WORK_UNIT),
   AttendanceController.getAllWorkSheets
 );
 router.get(

@@ -38,24 +38,6 @@ export interface AttendanceContext {
   earlyForgivenSet: Set<string>;
   leavePeriodsMap: Map<string, Set<string>>;
 }
-
-// Gộp 2 bản gần như giống hệt nhau của "day context builder" — jobs/finalizeWorkDay.js's
-// buildUserDayContext (phạm vi đúng 1 ngày, gọi 1 lần/worksheet mỗi đêm) và
-// AttendanceController.importExcel's context xây inline (phạm vi nhiều ngày trong 1 block Excel của 1
-// nhân viên) — verify kỹ (đọc từng field) xác nhận 2 bản CHỈ khác nhau đúng 1 chỗ: `excelRawByDate`
-// (importExcel merge thêm dữ liệu máy chấm công thô vào daySnapshots để tính forgotOccurrenceMap,
-// finalizeWorkDay không có nguồn này). Khi `excelRawByDate` rỗng (mặc định), `allDateKeys` chỉ còn
-// `monthWorksheetMap.keys()` — giống hệt vòng lặp gốc của buildUserDayContext (`for (const ws of
-// monthWorksheets)`), đã verify bằng differential test so 2 bản trên cùng input (xem
-// __tests__/workflows/import-attendance.workflow.test.ts).
-//
-// Cố tình CHƯA đi qua repository của Timesheet/Request cho các query này (rule #3 mục 13 lý tưởng đòi
-// mỗi model có đúng 1 owner-repository) — đây là hàm tổng hợp cho BÁO CÁO/BATCH-CONTEXT (đọc thuần,
-// không ghi), đã sống trực tiếp ở tầng composition-root (jobs/, controllers/) từ trước khi có
-// workflows/, KHÔNG phải regression mới khi gộp vào đây (cùng mức "truy cập trực tiếp" như hiện trạng,
-// chỉ gộp 2 bản trùng lặp thành 1). Thêm repository read-method riêng cho các query báo cáo này (vd
-// WorkSheetRepository.findManyInRange, RequestRepository tương ứng) là cải thiện tách biệt, ngoài phạm
-// vi "gộp trùng lặp" của task 1.8.5.5 — ghi backlog, không làm ở đây.
 export async function buildAttendanceContext({
   userId,
   rangeStart,

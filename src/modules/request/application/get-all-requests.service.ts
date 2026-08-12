@@ -17,14 +17,15 @@ interface GetAllRequestsQuery {
   search?: string;
   page?: unknown;
   limit?: unknown;
+  intent?: string;
 }
 
 export async function getAllRequests(account: any, query: GetAllRequestsQuery) {
-  const { request_type, status, from, to, search } = query;
+  const { request_type, status, from, to, search, intent } = query;
   const { page, limit, skip } = parsePagination(query);
   const filter: RequestFilter = { isDeleted: false };
 
-  const scope = await resolveRequestViewScope(account);
+  const scope = await resolveRequestViewScope(account, intent === "review" ? "review" : "overview");
   const { myUserInfo } = scope;
   let scopedUserIds: unknown[] | null = scope.type === "managed" ? (scope.userIds ?? null) : null;
 

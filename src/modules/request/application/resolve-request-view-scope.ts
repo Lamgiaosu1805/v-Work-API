@@ -10,11 +10,20 @@ export interface RequestViewScope {
   userIds?: unknown[];
 }
 
-export async function resolveRequestViewScope(account: any): Promise<RequestViewScope> {
+export async function resolveRequestViewScope(
+  account: any,
+  intent: "review" | "overview" = "overview"
+): Promise<RequestViewScope> {
   const myUserInfo = await UserInfoModel.findOne({ id_account: account._id, isDeleted: false });
 
-  const hasViewAll = await can(account, PERMISSION.HRM_REQUEST_VIEW_ALL);
-  if (hasViewAll) return { type: "all", myUserInfo };
+  const hasReviewAll = await can(account, PERMISSION.HRM_REQUEST_REVIEW_ALL);
+  if (hasReviewAll) return { type: "all", myUserInfo };
+
+  if (intent === "overview") {
+    const hasViewAll = await can(account, PERMISSION.HRM_REQUEST_VIEW_ALL);
+    if (hasViewAll) return { type: "all", myUserInfo };
+    throw new ForbiddenException("Bạn không có quyền quản lý tính năng này");
+  }
 
   const hasReview = await can(account, PERMISSION.HRM_REQUEST_REVIEW);
   if (!hasReview) throw new ForbiddenException("Bạn không có quyền quản lý tính năng này");

@@ -3,6 +3,7 @@ const InvestmentModel = require("../models/InvestmentModel");
 const CustomerInteractionModel = require("../models/CustomerInteractionModel");
 const SaleKpiModel = require("../models/SaleKpiModel");
 const AgentModel = require("../models/AgentModel");
+const AppModel = require("../models/AppModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 
@@ -37,6 +38,34 @@ const KPI_SEGMENTS = [
   { key: "upsale", label: "Up-sale", target: 1800 },
   { key: "cross_sale", label: "Cross-sale", target: 1200 }
 ];
+
+const CRM_COMPANY_CODES = new Set(["vnfite", "tikluy"]);
+
+const resolveCompany = async (query) => {
+  const appCode = String(query.app_code || "")
+    .trim()
+    .toLowerCase();
+  if (!appCode) {
+    const error = new Error("Vui lòng chọn công ty VNFITE hoặc TIKLUY");
+    error.status = 400;
+    throw error;
+  }
+  if (!CRM_COMPANY_CODES.has(appCode)) {
+    const error = new Error("Công ty không hợp lệ");
+    error.status = 400;
+    throw error;
+  }
+
+  const app = await AppModel.findOne({ code: appCode, is_active: true })
+    .select("_id code name")
+    .lean();
+  if (!app) {
+    const error = new Error("Công ty không tồn tại hoặc đã bị khóa");
+    error.status = 404;
+    throw error;
+  }
+  return app;
+};
 
 const parseDateRange = (query) => {
   const from = query.from_date ? new Date(query.from_date) : null;
@@ -84,7 +113,7 @@ const metricTrend = (current, previous) => {
   return { percent, label: `${percent >= 0 ? "+" : ""}${percent}%` };
 };
 
-const resolveScopedCustomerIds = async (account) => {
+const resolveScopedCustomerIds = async (account, appId) => {
   if (account.role === "admin" || account.dept_scope === "all") return null;
   const manager = await UserInfoModel.findOne({
     id_account: account._id,
@@ -102,6 +131,7 @@ const resolveScopedCustomerIds = async (account) => {
     isDeleted: false
   });
   return CustomerModel.distinct("_id", {
+    app_id: appId,
     referred_by: { $in: saleIds },
     isDeleted: false
   });
@@ -110,8 +140,9 @@ const resolveScopedCustomerIds = async (account) => {
 const scopedMatch = (field, customerIds) =>
   customerIds === null ? {} : { [field]: { $in: customerIds } };
 
-const calculateKeyMetrics = async (range, customerIds) => {
+const calculateKeyMetrics = async (range, customerIds, appId) => {
   const investmentFilter = {
+    app_id: appId,
     isDeleted: false,
     status: "active",
     ...scopedMatch("customer_id", customerIds),
@@ -119,6 +150,7 @@ const calculateKeyMetrics = async (range, customerIds) => {
   };
   const [kycVerified, activeCustomerIds, aumRows] = await Promise.all([
     CustomerModel.countDocuments({
+      app_id: appId,
       isDeleted: false,
       ...scopedMatch("_id", customerIds),
       "identity.verified_at": {
@@ -141,8 +173,9 @@ const calculateKeyMetrics = async (range, customerIds) => {
   };
 };
 
-const buildFunnelSnapshot = async (range, customerIds) => {
+const buildFunnelSnapshot = async (range, customerIds, appId) => {
   const baseCustomers = await CustomerModel.find({
+    app_id: appId,
     isDeleted: false,
     ...scopedMatch("_id", customerIds),
     ...dateMatch("createdAt", range)
@@ -157,6 +190,7 @@ const buildFunnelSnapshot = async (range, customerIds) => {
   }
 
   const investments = await InvestmentModel.find({
+    app_id: appId,
     customer_id: { $in: baseIds },
     isDeleted: false,
     ...dateMatch("invested_at", range)
@@ -168,12 +202,14 @@ const buildFunnelSnapshot = async (range, customerIds) => {
   // "đã tất toán" phải nhìn toàn bộ hợp đồng active để không đánh dấu nhầm
   // khách vẫn còn vốn đang đầu tư từ một kỳ trước.
   const activeCustomerIds = await InvestmentModel.distinct("customer_id", {
+    app_id: appId,
     customer_id: { $in: baseIds },
     isDeleted: false,
     status: "active"
   });
   const activeCustomerIdSet = new Set(activeCustomerIds.map(String));
   const agentPhones = await AgentModel.distinct("phone_number", {
+    app_id: appId,
     isDeleted: false,
     is_active: true,
     phone_number: { $in: baseCustomers.map((customer) => customer.phone_number).filter(Boolean) }
@@ -249,18 +285,23 @@ const handleError = (res, error, scope) => {
 const DashboardController = {
   getKeyMetrics: async (req, res) => {
     try {
+      const company = await resolveCompany(req.query);
       const range = parseDateRange(req.query);
       const priorRange = previousRange(range);
-      const customerIds = await resolveScopedCustomerIds(req.account);
+      const customerIds = await resolveScopedCustomerIds(req.account, company._id);
       const [current, previous, filteredCustomers, totalCustomers] = await Promise.all([
-        calculateKeyMetrics(range, customerIds),
-        priorRange ? calculateKeyMetrics(priorRange, customerIds) : Promise.resolve(null),
+        calculateKeyMetrics(range, customerIds, company._id),
+        priorRange
+          ? calculateKeyMetrics(priorRange, customerIds, company._id)
+          : Promise.resolve(null),
         CustomerModel.countDocuments({
+          app_id: company._id,
           isDeleted: false,
           ...scopedMatch("_id", customerIds),
           ...dateMatch("createdAt", range)
         }),
         CustomerModel.countDocuments({
+          app_id: company._id,
           isDeleted: false,
           ...scopedMatch("_id", customerIds)
         })
@@ -280,7 +321,9 @@ const DashboardController = {
             aum: { value: current.aum, trend: metricTrend(current.aum, previous?.aum) }
           },
           filtered_customers: filteredCustomers,
-          total_customers: totalCustomers
+          total_customers: totalCustomers,
+          app_code: company.code,
+          company_name: company.name
         }
       });
     } catch (error) {
@@ -290,8 +333,13 @@ const DashboardController = {
 
   getFunnel: async (req, res) => {
     try {
-      const customerIds = await resolveScopedCustomerIds(req.account);
-      const snapshot = await buildFunnelSnapshot(parseDateRange(req.query), customerIds);
+      const company = await resolveCompany(req.query);
+      const customerIds = await resolveScopedCustomerIds(req.account, company._id);
+      const snapshot = await buildFunnelSnapshot(
+        parseDateRange(req.query),
+        customerIds,
+        company._id
+      );
       const base = snapshot.cif.length;
       const stages = FUNNEL_STAGES.map((stage, index) => ({
         key: stage.key,
@@ -301,7 +349,9 @@ const DashboardController = {
         count: snapshot[stage.key].length,
         percentage: base ? Math.round((snapshot[stage.key].length / base) * 100) : 0
       }));
-      return res.status(200).json({ data: { stages, total: base } });
+      return res.status(200).json({
+        data: { stages, total: base, app_code: company.code, company_name: company.name }
+      });
     } catch (error) {
       return handleError(res, error, "getFunnel");
     }
@@ -315,10 +365,19 @@ const DashboardController = {
       }
       const page = Math.max(Number(req.query.page) || 1, 1);
       const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
-      const customerIds = await resolveScopedCustomerIds(req.account);
-      const snapshot = await buildFunnelSnapshot(parseDateRange(req.query), customerIds);
+      const company = await resolveCompany(req.query);
+      const customerIds = await resolveScopedCustomerIds(req.account, company._id);
+      const snapshot = await buildFunnelSnapshot(
+        parseDateRange(req.query),
+        customerIds,
+        company._id
+      );
       const ids = snapshot[stage];
-      const customers = await CustomerModel.find({ _id: { $in: ids }, isDeleted: false })
+      const customers = await CustomerModel.find({
+        _id: { $in: ids },
+        app_id: company._id,
+        isDeleted: false
+      })
         .populate("referred_by", "full_name ma_nv phone_number")
         .select("phone_number external_id identity status source_type referred_by createdAt")
         .sort({ createdAt: -1 })
@@ -337,9 +396,11 @@ const DashboardController = {
 
   getAumQuality: async (req, res) => {
     try {
+      const company = await resolveCompany(req.query);
       const range = parseDateRange(req.query);
-      const customerIdsInScope = await resolveScopedCustomerIds(req.account);
+      const customerIdsInScope = await resolveScopedCustomerIds(req.account, company._id);
       const qualifying = await InvestmentModel.find({
+        app_id: company._id,
         isDeleted: false,
         status: { $in: ["active", "matured"] },
         ...scopedMatch("customer_id", customerIdsInScope),
@@ -350,6 +411,7 @@ const DashboardController = {
         .lean();
       const customerIds = [...new Set(qualifying.map((item) => String(item.customer_id)))];
       const history = await InvestmentModel.find({
+        app_id: company._id,
         customer_id: { $in: customerIds },
         isDeleted: false,
         status: { $ne: "cancelled" }
@@ -384,7 +446,9 @@ const DashboardController = {
         amount,
         percentage: total ? Math.round((amount / total) * 1000) / 10 : 0
       }));
-      return res.status(200).json({ data: { total, segments } });
+      return res.status(200).json({
+        data: { total, segments, app_code: company.code, company_name: company.name }
+      });
     } catch (error) {
       return handleError(res, error, "getAumQuality");
     }
@@ -392,9 +456,11 @@ const DashboardController = {
 
   getInteractionKpi: async (req, res) => {
     try {
+      const company = await resolveCompany(req.query);
       const range = parseDateRange(req.query);
-      const customerIdsInScope = await resolveScopedCustomerIds(req.account);
+      const customerIdsInScope = await resolveScopedCustomerIds(req.account, company._id);
       const interactions = await CustomerInteractionModel.find({
+        app_id: company._id,
         isDeleted: false,
         type: { $in: ["call", "message"] },
         ...scopedMatch("customer_id", customerIdsInScope),
@@ -419,13 +485,22 @@ const DashboardController = {
         cursor.setMonth(cursor.getMonth() + 1);
       }
       const [customers, investments, kpis] = await Promise.all([
-        CustomerModel.find({ _id: { $in: customerIds }, isDeleted: false })
+        CustomerModel.find({
+          _id: { $in: customerIds },
+          app_id: company._id,
+          isDeleted: false
+        })
           .select("identity.verified_at")
           .lean(),
-        InvestmentModel.find({ customer_id: { $in: customerIds }, isDeleted: false })
+        InvestmentModel.find({
+          customer_id: { $in: customerIds },
+          app_id: company._id,
+          isDeleted: false
+        })
           .select("customer_id product_name status")
           .lean(),
         SaleKpiModel.find({
+          app_id: company._id,
           isDeleted: false,
           ...(saleIds.length ? { sale_id: { $in: saleIds } } : { _id: null }),
           $or: kpiPeriods
@@ -468,7 +543,9 @@ const DashboardController = {
           achievement: target ? Math.round((actual / target) * 1000) / 10 : 0
         };
       });
-      return res.status(200).json({ data: { segments } });
+      return res.status(200).json({
+        data: { segments, app_code: company.code, company_name: company.name }
+      });
     } catch (error) {
       return handleError(res, error, "getInteractionKpi");
     }

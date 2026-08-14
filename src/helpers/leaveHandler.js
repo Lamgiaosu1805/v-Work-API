@@ -41,13 +41,6 @@ async function validate(body, userInfo) {
       }
     };
 
-  if (fromMoment.isSame(today, "day")) {
-    if (from_period === "morning" && now.isSameOrAfter(today.clone().hour(12)))
-      return { error: { status: 400, message: "Không thể tạo đơn nghỉ cho buổi đã qua" } };
-    if (from_period === "afternoon" && now.isSameOrAfter(today.clone().hour(13)))
-      return { error: { status: 400, message: "Không thể tạo đơn nghỉ cho buổi đã qua" } };
-  }
-
   const total_days = calcTotalDays(from_date, from_period, to_date, to_period);
   if (total_days === null || total_days === 0)
     return {

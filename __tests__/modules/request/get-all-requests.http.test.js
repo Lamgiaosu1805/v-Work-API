@@ -23,6 +23,9 @@ const AccountModel = require("../../../src/models/AccountModel");
 const { LeaveRequest } = require("../../../src/models/RequestModel");
 const requestRoutes = require("../../../src/modules/request/interface/request.routes");
 const { errorHandlerMiddleware } = require("../../../src/core/http/error-handler.middleware");
+const { grantRequestPermission } = require("../../helpers/grantRequestPermission");
+const EmployeePermissionProfileModel =
+  require("../../../src/models/EmployeePermissionProfileModel").default;
 
 let mongod;
 let app;
@@ -46,6 +49,7 @@ afterEach(async () => {
   await UserInfoModel.deleteMany({});
   await AccountModel.deleteMany({});
   await LeaveRequest.deleteMany({});
+  await EmployeePermissionProfileModel.deleteMany({});
   jest.clearAllMocks();
 });
 
@@ -63,6 +67,7 @@ async function createUserInfo(n, fullName) {
     ma_nv: `NV${n}`,
     employment_type: "fulltime"
   });
+  await grantRequestPermission(userInfo._id);
   return { account, userInfo };
 }
 
@@ -107,7 +112,9 @@ describe("GET /requests (getAll)", () => {
     await LeaveRequest.create(leaveRequestPayload(managedInfo._id));
     await LeaveRequest.create(leaveRequestPayload(outOfScopeInfo._id));
 
-    const res = await request(app).get("/requests").set("x-test-account", String(me._id));
+    const res = await request(app)
+      .get("/requests?intent=review")
+      .set("x-test-account", String(me._id));
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -127,7 +134,9 @@ describe("GET /requests (getAll)", () => {
     const account = await AccountModel.create({ username: "no-info", password: "x", role: "user" });
     can.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
 
-    const res = await request(app).get("/requests").set("x-test-account", String(account._id));
+    const res = await request(app)
+      .get("/requests?intent=review")
+      .set("x-test-account", String(account._id));
 
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ message: "Không tìm thấy thông tin nhân viên" });

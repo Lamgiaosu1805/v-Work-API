@@ -23,6 +23,9 @@ const AccountModel = require("../../../src/models/AccountModel");
 const { LeaveRequest } = require("../../../src/models/RequestModel");
 const requestRoutes = require("../../../src/modules/request/interface/request.routes");
 const { errorHandlerMiddleware } = require("../../../src/core/http/error-handler.middleware");
+const { grantRequestPermission } = require("../../helpers/grantRequestPermission");
+const EmployeePermissionProfileModel =
+  require("../../../src/models/EmployeePermissionProfileModel").default;
 
 let mongod;
 let app;
@@ -46,6 +49,7 @@ afterEach(async () => {
   await UserInfoModel.deleteMany({});
   await AccountModel.deleteMany({});
   await LeaveRequest.deleteMany({});
+  await EmployeePermissionProfileModel.deleteMany({});
   jest.clearAllMocks();
 });
 
@@ -63,6 +67,7 @@ async function createUserInfo(n) {
     ma_nv: `NV${n}`,
     employment_type: "fulltime"
   });
+  await grantRequestPermission(userInfo._id);
   return { account, userInfo };
 }
 

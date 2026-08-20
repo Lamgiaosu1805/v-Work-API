@@ -1,5 +1,6 @@
 const express = require("express");
-const { authenticate, hasModuleAccess, canManage } = require("../middlewares/authMiddleware");
+const { authenticate, hasModuleAccess } = require("../middlewares/authMiddleware");
+const { requirePermission } = require("../core/authorization/require-permission.middleware");
 const CustomerController = require("../controllers/CustomerController");
 const CustomerInteractionController = require("../controllers/CustomerInteractionController");
 const verifyInternalRequest = require("../middlewares/verifyInternalRequest");
@@ -15,7 +16,12 @@ router.get(
 );
 router.get("/agent-customers", verifyInternalRequest, CustomerController.getMyCustomersAsAgent);
 router.get("/my-info", authenticate, CustomerController.getMyInfo);
-router.get("/all", authenticate, canManage("crm"), CustomerController.getAll);
+router.get(
+  "/all",
+  authenticate,
+  requirePermission("customer.view", "Customer"),
+  CustomerController.getAll
+);
 router.get("/export-excel", authenticate, hasModuleAccess("crm"), CustomerController.exportExcel);
 router.get(
   "/detail-info-customer",
@@ -54,8 +60,14 @@ router.post(
   hasModuleAccess("crm"),
   CustomerInteractionController.create
 );
-router.post("/:id/assign", authenticate, canManage("crm"), CustomerController.assignCustomer);
-router.patch("/:id/reassign", authenticate, canManage("crm"), CustomerController.reassignCustomer);
-router.patch("/:id/unassign-sale", authenticate, canManage("crm"), CustomerController.unassignSale);
+const canAssignCustomer = requirePermission("customer.assign", "Customer");
+router.post("/:id/assign", authenticate, canAssignCustomer, CustomerController.assignCustomer);
+router.patch("/:id/reassign", authenticate, canAssignCustomer, CustomerController.reassignCustomer);
+router.patch(
+  "/:id/unassign-sale",
+  authenticate,
+  canAssignCustomer,
+  CustomerController.unassignSale
+);
 
 module.exports = router;

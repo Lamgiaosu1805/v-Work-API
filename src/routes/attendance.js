@@ -1,41 +1,70 @@
 const express = require("express");
 const multer = require("multer");
 const AttendanceController = require("../controllers/AttendanceController");
-const { authenticate, hasModuleAccess } = require("../middlewares/authMiddleware");
-const { requirePermission } = require("../helpers/rbac");
-const { PERMISSION } = require("../constants");
+const { authenticate } = require("../middlewares/authMiddleware");
+const { requirePermission } = require("../core/authorization/require-permission.middleware");
 
 const router = express.Router();
 const uploadMemory = multer({ storage: multer.memoryStorage() });
 
-router.get("/getWorkSheet", authenticate, AttendanceController.getWorkSheet);
-router.get("/standard-work-units", authenticate, AttendanceController.getStandardWorkUnits);
-router.get("/getLichCong", authenticate, AttendanceController.getLichCong);
-router.get("/getAllShifts", authenticate, AttendanceController.getAllShifts);
-router.get("/stats", authenticate, AttendanceController.getStats);
-router.get("/calendar", authenticate, AttendanceController.getCalendar);
+router.get(
+  "/getWorkSheet",
+  authenticate,
+  requirePermission("attendance.view", "Attendance"),
+  AttendanceController.getWorkSheet
+);
+router.get(
+  "/standard-work-units",
+  authenticate,
+  requirePermission("attendance.view", "Attendance"),
+  AttendanceController.getStandardWorkUnits
+);
+router.get(
+  "/getLichCong",
+  authenticate,
+  requirePermission("attendance.view", "Attendance"),
+  AttendanceController.getLichCong
+);
+router.get(
+  "/getAllShifts",
+  authenticate,
+  requirePermission("shift_config.view", "ShiftConfig"),
+  AttendanceController.getAllShifts
+);
+router.get(
+  "/stats",
+  authenticate,
+  requirePermission("attendance.view", "Attendance"),
+  AttendanceController.getStats
+);
+router.get(
+  "/calendar",
+  authenticate,
+  requirePermission("attendance.view", "Attendance"),
+  AttendanceController.getCalendar
+);
 router.get(
   "/getAllowedWifiLocations",
   authenticate,
-  requirePermission(PERMISSION.HRM_ATTENDANCE_EDIT),
+  requirePermission("wifi_config.view", "WifiConfig"),
   AttendanceController.getAllowedWifiLocations
 );
 router.get(
   "/getAllWorkSheets",
   authenticate,
-  requirePermission(PERMISSION.HRM_MENU_WORK_UNIT),
+  requirePermission("attendance.view", "Attendance"),
   AttendanceController.getAllWorkSheets
 );
 router.get(
   "/payroll-stats-all",
   authenticate,
-  hasModuleAccess("hrm"),
+  requirePermission("payroll.view", "Payroll"),
   AttendanceController.getPayrollStatsAll
 );
 router.get(
   "/payroll-stats/:userId",
   authenticate,
-  hasModuleAccess("hrm"),
+  requirePermission("payroll.view", "Payroll"),
   AttendanceController.getPayrollStats
 );
 router.get("/my-payroll-stats", authenticate, AttendanceController.getMyPayrollStats);
@@ -43,7 +72,7 @@ router.get("/my-payroll-stats", authenticate, AttendanceController.getMyPayrollS
 router.post(
   "/createAllowedWifiLocation",
   authenticate,
-  requirePermission(PERMISSION.HRM_ATTENDANCE_EDIT),
+  requirePermission("wifi_config.manage", "WifiConfig"),
   AttendanceController.createAllowedWifiLocation
 );
 router.post("/checkIn", authenticate, AttendanceController.checkIn);
@@ -51,13 +80,13 @@ router.post("/checkOut", authenticate, AttendanceController.checkOut);
 router.post(
   "/createShift",
   authenticate,
-  requirePermission(PERMISSION.HRM_ATTENDANCE_EDIT),
+  requirePermission("shift_config.manage", "ShiftConfig"),
   AttendanceController.createShift
 );
 router.post(
   "/import-excel",
   authenticate,
-  requirePermission(PERMISSION.HRM_ATTENDANCE_IMPORT),
+  requirePermission("attendance.import", "Attendance"),
   uploadMemory.single("file"),
   AttendanceController.importExcel
 );
@@ -65,14 +94,14 @@ router.post(
 router.patch(
   "/admin/worksheet/:worksheetId",
   authenticate,
-  requirePermission(PERMISSION.HRM_ATTENDANCE_EDIT),
+  requirePermission("attendance.edit", "Attendance"),
   AttendanceController.adminEditWorksheet
 );
 
 router.delete(
   "/deleteAllowedWifiLocation/:id",
   authenticate,
-  requirePermission(PERMISSION.HRM_ATTENDANCE_EDIT),
+  requirePermission("wifi_config.delete", "WifiConfig"),
   AttendanceController.deleteAllowedWifiLocation
 );
 

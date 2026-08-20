@@ -1,40 +1,45 @@
 const express = require("express");
 
 const router = express.Router();
-const { authenticate, hasModuleAccess, canManage } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
+const { requirePermission } = require("../core/authorization/require-permission.middleware");
 const upload = require("../middlewares/uploadFile");
 const uploadDocuments = require("../middlewares/uploadDocuments");
 const UserController = require("../controllers/UserController");
-const { can } = require("../helpers/rbac");
-const { PERMISSION } = require("../constants");
-
-async function canManageEmployees(req, res, next) {
-  try {
-    if (req.account?.role === "admin") return next();
-    if (req.account?.role === "manager" && req.account?.module_access?.includes("hrm"))
-      return next();
-    if (await can(req.account, PERMISSION.HRM_EMPLOYEE_EDIT)) return next();
-    return res
-      .status(403)
-      .json({ errorCode: "FORBIDDEN", message: "Bạn không có quyền quản lý nhân viên" });
-  } catch (err) {
-    return res.status(500).json({ message: "Lỗi kiểm tra quyền", error: err.message });
-  }
-}
 
 // GET
-router.get("/getUsers", authenticate, UserController.getUsers);
+router.get(
+  "/getUsers",
+  authenticate,
+  requirePermission("employee.view", "Employee"),
+  UserController.getUsers
+);
 router.get("/getUserInfo", authenticate, UserController.getUserInfo);
 router.get("/getQRSale", authenticate, UserController.generateMyQR);
-router.get("/getUserById/:id", authenticate, UserController.getUserById);
-router.get("/birthday/this-month", authenticate, UserController.getBirthdayThisMonth);
-router.get("/profile/:accountId", authenticate, UserController.getProfile);
+router.get(
+  "/getUserById/:id",
+  authenticate,
+  requirePermission("employee.view", "Employee"),
+  UserController.getUserById
+);
+router.get(
+  "/birthday/this-month",
+  authenticate,
+  requirePermission("employee.view", "Employee"),
+  UserController.getBirthdayThisMonth
+);
+router.get(
+  "/profile/:accountId",
+  authenticate,
+  requirePermission("employee.view", "Employee"),
+  UserController.getProfile
+);
 
 // PUT
 router.put(
   "/updateUser/:id",
   authenticate,
-  canManageEmployees,
+  requirePermission("employee.update", "Employee"),
   uploadDocuments,
   UserController.updateUser
 );
@@ -43,7 +48,7 @@ router.put(
 router.post(
   "/createUser",
   authenticate,
-  canManageEmployees,
+  requirePermission("employee.create", "Employee"),
   uploadDocuments,
   UserController.createUser
 );
@@ -58,7 +63,7 @@ router.post(
 router.patch(
   "/:id/employment-status",
   authenticate,
-  canManageEmployees,
+  requirePermission("employee.set_status", "Employee"),
   UserController.setEmploymentStatus
 );
 

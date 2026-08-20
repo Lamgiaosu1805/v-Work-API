@@ -20,6 +20,7 @@ const customerClaimRequestRouter = require("./customerClaimRequest");
 const aiRouter = require("./ai");
 const chatRouter = require("./chat");
 const requestRouter = require("../modules/request/interface/request.routes");
+const permissionRouter = require("../modules/permission/interface/permission.routes");
 const holidayRouter = require("./holiday");
 const employmentStatusRouter = require("./employmentStatus");
 const attendanceMappingRouter = require("./attendanceMapping");
@@ -51,6 +52,7 @@ const route = (app) => {
   app.use(`/print`, printRouter);
   app.use(`/customer-claim-request`, customerClaimRequestRouter);
   app.use(`/requests`, requestRouter);
+  app.use(`/permissions`, permissionRouter);
   app.use(`/holidays`, holidayRouter);
   app.use(`/employment-status`, employmentStatusRouter);
   app.use(`/attendance-mapping`, attendanceMappingRouter);

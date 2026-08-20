@@ -7,11 +7,6 @@ import { NotFoundException, ForbiddenException } from "../../../core/exceptions/
 
 const requestRepository = new RequestRepository();
 
-// Chỉ còn phần thuần Request: check chủ sở hữu + entity.cancel() + persist. KHÔNG còn tự mở transaction
-// (nhận `session` từ ngoài) và KHÔNG còn tự dispatch handler.onReject (side-effect xuyên Timesheet/
-// Leave — đã chuyển sang workflows/request-side-effects/, xem workflows/cancel-request.workflow.ts,
-// task 1.8.6) — đúng rule #1 mục 13. Validate `id` là ObjectId hợp lệ giờ nằm ở
-// workflows/cancel-request.workflow.ts (chạy trước khi mở transaction, khớp đúng thứ tự gốc).
 export async function cancelRequestEntity(
   account: any,
   id: string,

@@ -1,14 +1,29 @@
-import { createMongoAbility, subject as caslSubject, MongoAbility } from "@casl/ability";
+import {
+  Ability as CaslAbility,
+  buildMongoQueryMatcher,
+  fieldPatternMatcher,
+  subject as caslSubject,
+  MongoAbility
+} from "@casl/ability";
 import { permittedFieldsOf } from "@casl/ability/extra";
 import { accessibleBy } from "@casl/mongoose";
+import { $and, $or, $nor, and, or, nor } from "@ucast/mongo2js";
 import pick from "lodash/pick";
 import { RawCaslRule } from "../domain/services/ability-rule-builder.service";
 import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
 
 export type Ability = MongoAbility;
 
+const conditionsMatcher = buildMongoQueryMatcher({ $and, $or, $nor }, { and, or, nor });
+
 export function buildAbility(rawRules: RawCaslRule[]): Ability {
-  return createMongoAbility(rawRules as any);
+  return new CaslAbility(
+    rawRules as any,
+    {
+      conditionsMatcher,
+      fieldMatcher: fieldPatternMatcher
+    } as any
+  );
 }
 
 export function toMongoQuery(

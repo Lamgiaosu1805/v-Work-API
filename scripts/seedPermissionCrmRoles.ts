@@ -6,11 +6,6 @@ import EmployeePermissionProfileModel from "../src/models/EmployeePermissionProf
 import AccountModel from "../src/models/AccountModel";
 import UserInfoModel from "../src/models/UserInfoModel";
 
-// Seed 2 role CRM cơ bản (Sale / Sale Manager) + gán cho account thật đang có module_access chứa
-// "crm", theo đúng tổ hợp role/dept_scope đã khảo sát (scripts/surveyLegacyAccountPermissions.ts).
-// Bắt buộc chạy TRƯỚC KHI deploy phần route CRM đã chuyển sang requirePermission (xem
-// src/routes/customer.js, agent.js, investment.js, claimPeriod.js, customerClaimRequest.js,
-// dashboard.js) — nếu không, các account manager CRM thật sẽ mất quyền vào các route đã gate.
 const SALE_ROLE_CODE = "CRM_SALE";
 const SALE_MANAGER_ROLE_CODE = "CRM_SALE_MANAGER";
 
@@ -36,8 +31,6 @@ const SALE_GRANTS: PermissionGrantDoc[] = [
   }
 ];
 
-// Manager kế thừa toàn bộ quyền Sale nhưng ở scope ALL_COMPANY, cộng thêm các quyền quản lý
-// (đúng nhóm route vừa chuyển sang requirePermission — xem Phần A trong plan).
 const SALE_MANAGER_GRANTS: PermissionGrantDoc[] = [
   { permissionCode: "customer.view", dataScopePolicyCode: "CUSTOMER_ALL_COMPANY", fieldScopePolicyCode: null },
   { permissionCode: "customer.assign", dataScopePolicyCode: "CUSTOMER_ALL_COMPANY", fieldScopePolicyCode: null },

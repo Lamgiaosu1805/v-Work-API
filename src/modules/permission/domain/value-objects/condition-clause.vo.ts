@@ -34,10 +34,6 @@ export class ConditionClause extends ValueObject<ConditionClauseProps> {
 
   // eslint-disable-next-line class-methods-use-this
   validate({ left, operator, right }: ConditionClauseProps): void {
-    // "$" bị cấm tuyệt đối trong left: không attribute path hợp lệ nào cần ký tự này (path luôn
-    // dạng "resource.managerId"), trong khi left sẽ được dùng thẳng làm object key khi compile
-    // sang Mongo filter — left = "$where"/"$expr" sẽ biến thành operator Mongo đặc biệt thay vì tên
-    // field, mở đường NoSQL injection nếu lọt qua được whitelist ở tầng entity.
     if (!left || typeof left !== "string" || left.includes("$")) {
       throw new ArgumentInvalidException(
         `ConditionClause thiếu left attribute path hợp lệ (không được chứa ký tự "$"): "${left}"`

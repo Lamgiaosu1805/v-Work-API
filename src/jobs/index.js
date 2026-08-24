@@ -3,7 +3,7 @@ const { registerFinalizeWorkDayJob } = require("./finalizeWorkDay");
 const { registerCleanupDeviceTokensJob } = require("./cleanupDeviceTokens");
 const { registerWeeklyReportJobs } = require("./weeklyReportJob");
 const { registerAccrueMonthlyLeaveJob } = require("./accrueMonthlyLeave");
-const { registerAutoRejectLeaveRequestsJob } = require("./autoRejectLeaveRequests");
+// const { registerAutoRejectLeaveRequestsJob } = require("./autoRejectLeaveRequests");
 const { registerChurnDetectionJob } = require("./churnDetectionJob");
 const { registerSharedFolderCleanupJob } = require("./sharedFolderCleanupJob");
 
@@ -13,7 +13,7 @@ function startCronJobs() {
   registerCleanupDeviceTokensJob();
   registerWeeklyReportJobs();
   registerAccrueMonthlyLeaveJob();
-  registerAutoRejectLeaveRequestsJob();
+  // registerAutoRejectLeaveRequestsJob();
   registerChurnDetectionJob();
   registerSharedFolderCleanupJob();
 }

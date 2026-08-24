@@ -1682,6 +1682,177 @@ const CustomerController = {
     }
   },
 
+  bulkAssignCustomer: async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      const { customer_ids, sale_user_info_id, confirm_sale_source = false } = req.body;
+      const accountId = req.account._id;
+
+      if (!sale_user_info_id) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Thiếu sale_user_info_id" });
+      }
+      if (!Array.isArray(customer_ids) || customer_ids.length === 0) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Thiếu danh sách khách hàng" });
+      }
+
+      const sale = await UserInfoModel.findById(sale_user_info_id).session(session);
+      if (!sale) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
+      }
+      if (!(await canManageSale(req.account, sale._id))) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(403).json({ message: "Bạn không có quyền phân công cho sale này" });
+      }
+
+      const customers = await CustomerModel.find({
+        _id: { $in: customer_ids },
+        isDeleted: false
+      }).session(session);
+      const foundIds = new Set(customers.map((c) => String(c._id)));
+
+      const assigned = [];
+      const skipped = [];
+      const tncn_rate = getTNCNRate(sale.employment_type);
+
+      for (const customer of customers) {
+        if (!(await canAccessCustomer(req.account, customer, { allowUnassigned: true }))) {
+          skipped.push({ customer_id: customer._id, reason: "Bạn không có quyền phân khách này" });
+          continue;
+        }
+        if (customer.referred_by) {
+          skipped.push({ customer_id: customer._id, reason: "Khách hàng đã có sale phụ trách" });
+          continue;
+        }
+        const pendingClaim = await CustomerClaimRequestModel.findOne({
+          customer_id: customer._id,
+          status: "pending"
+        }).session(session);
+        if (pendingClaim) {
+          skipped.push({
+            customer_id: customer._id,
+            reason: "Khách hàng đang có yêu cầu nhận từ sale"
+          });
+          continue;
+        }
+
+        const updateData = {
+          referred_by: sale._id,
+          source_type: confirm_sale_source ? "sale" : customer.source_type,
+          ref_code: `${sale.phone_number}-${sale.ma_nv}`,
+          referred_at: new Date()
+        };
+        await CustomerModel.findByIdAndUpdate(customer._id, { $set: updateData }, { session });
+
+        const unownedInvestments = await InvestmentModel.find({
+          customer_id: customer._id,
+          "commission.sale_id": null,
+          status: { $nin: ["cancelled", "early_terminated"] },
+          isDeleted: false
+        }).session(session);
+
+        if (unownedInvestments.length > 0) {
+          const bulkOps = unownedInvestments.map((inv) => {
+            if (inv.term_type !== "month") {
+              return {
+                updateOne: {
+                  filter: { _id: inv._id },
+                  update: { $set: { "commission.sale_id": sale._id } }
+                }
+              };
+            }
+            const calc = calculateCommission({
+              amount: inv.amount,
+              term_months: inv.term_value,
+              tncn_rate
+            });
+            return {
+              updateOne: {
+                filter: { _id: inv._id },
+                update: {
+                  $set: {
+                    "commission.receiver_type": "sale",
+                    "commission.sale_id": sale._id,
+                    "commission.commission_rate": calc.commission_rate,
+                    "commission.gross_amount": calc.gross_amount,
+                    "commission.tncn_rate": tncn_rate,
+                    "commission.tncn_amount": calc.tncn_amount,
+                    "commission.net_amount": calc.net_amount,
+                    "commission.status": "pending"
+                  }
+                }
+              }
+            };
+          });
+          await InvestmentModel.bulkWrite(bulkOps, { session });
+        }
+
+        await CustomerInteractionModel.create(
+          [
+            {
+              app_id: customer.app_id,
+              customer_id: customer._id,
+              sale_id: sale._id,
+              agent_id: null,
+              type: "note",
+              content: confirm_sale_source
+                ? `Xác nhận khách hàng do sale ${sale.full_name} (${sale.ma_nv}) giới thiệu — đổi nguồn sang Sale`
+                : `Phân khách về cho sale ${sale.full_name} (${sale.ma_nv}) để quản lý — nguồn giữ nguyên Marketing`,
+              result: null,
+              metadata: {
+                assigned_by: accountId,
+                confirm_sale_source,
+                bulk: true
+              }
+            }
+          ],
+          { session }
+        );
+
+        assigned.push(customer._id);
+      }
+
+      for (const id of customer_ids) {
+        if (!foundIds.has(String(id))) {
+          skipped.push({ customer_id: id, reason: "Không tìm thấy khách hàng" });
+        }
+      }
+
+      if (assigned.length === 0) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(409)
+          .json({ message: "Không có khách hàng nào được phân", data: { assigned, skipped } });
+      }
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.status(200).json({
+        message: `Đã phân ${assigned.length}/${customer_ids.length} khách hàng cho sale ${sale.full_name}`,
+        data: {
+          sale: { _id: sale._id, ma_nv: sale.ma_nv, full_name: sale.full_name },
+          assigned_count: assigned.length,
+          assigned_ids: assigned,
+          skipped
+        }
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      console.error("Error in bulkAssignCustomer:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
   exportExcel: async (req, res) => {
     try {
       let pipeline;

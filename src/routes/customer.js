@@ -54,6 +54,7 @@ router.post(
   hasModuleAccess("crm"),
   CustomerInteractionController.create
 );
+router.post("/bulk-assign", authenticate, canManage("crm"), CustomerController.bulkAssignCustomer);
 router.post("/:id/assign", authenticate, canManage("crm"), CustomerController.assignCustomer);
 router.patch("/:id/reassign", authenticate, canManage("crm"), CustomerController.reassignCustomer);
 router.patch("/:id/unassign-sale", authenticate, canManage("crm"), CustomerController.unassignSale);

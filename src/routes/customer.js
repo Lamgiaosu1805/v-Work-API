@@ -46,6 +46,13 @@ router.get(
 router.post("/upsert", verifyInternalRequest, CustomerController.upsert);
 router.post("/apply-referral", verifyInternalRequest, CustomerController.applyReferral);
 router.post("/bulk-upsert", verifyInternalRequest, CustomerController.bulkUpsert);
+router.post(
+  "/interactions/:externalId",
+  authenticate,
+  hasModuleAccess("crm"),
+  CustomerInteractionController.create
+);
+router.post("/bulk-assign", authenticate, canManage("crm"), CustomerController.bulkAssignCustomer);
 router.post("/:id/assign", authenticate, canManage("crm"), CustomerController.assignCustomer);
 router.patch("/:id/reassign", authenticate, isAdmin, CustomerController.reassignCustomer);
 router.patch("/:id/unassign-sale", authenticate, isAdmin, CustomerController.unassignSale);

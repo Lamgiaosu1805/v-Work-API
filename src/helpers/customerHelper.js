@@ -37,7 +37,8 @@ async function buildCustomerPipeline(req, query) {
     funnel_status,
     behavior,
     role_type,
-    sale_ids
+    sale_ids,
+    assigned
   } = query;
 
   const parseMulti = (value) =>
@@ -51,6 +52,8 @@ async function buildCustomerPipeline(req, query) {
 
   if (status && status !== "all") initialMatch.status = status;
   if (source_type && source_type !== "all") initialMatch.source_type = source_type;
+  if (assigned === "false") initialMatch.referred_by = null;
+  else if (assigned === "true") initialMatch.referred_by = { $ne: null };
 
   if (app_code) {
     console.log("App code: ", app_code);

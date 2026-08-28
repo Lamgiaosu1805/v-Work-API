@@ -45,6 +45,13 @@ router.get(
   asyncHandler(customerCallHttpController.getCallHistory)
 );
 
+router.get(
+  "/history/sale-options",
+  authenticate,
+  requirePermission("call_log.view", "CallLog"),
+  asyncHandler(customerCallHttpController.getCallHistorySaleOptions)
+);
+
 router.post(
   "/reconcile",
   authenticate,

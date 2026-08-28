@@ -17,10 +17,6 @@ import { RequestEntity } from "../domain/request.entity";
 const requestRepository = new RequestRepository();
 export const VALID_ACTIONS = ["approve", "reject"];
 
-// Redis lock (chỉ cần khi action=approve và đơn cần đa duyệt) phải acquire TRƯỚC khi mở Mongo
-// transaction (snapshot isolation) — giữ nguyên vị trí gọi ở workflows/review-request.workflow.ts,
-// hàm này chỉ tách riêng phần "đọc trước để biết có cần lock hay không" (đọc thêm 1 lần, tách biệt với
-// lần đọc thật trong transaction — đúng cấu trúc gốc).
 export async function acquireReviewLockIfNeeded(
   id: string,
   action: string
@@ -54,11 +50,6 @@ export interface ReviewRequestEntityResult {
   isFinal: boolean;
 }
 
-// Chỉ còn phần thuần Request: check quyền/chuỗi duyệt (approval-chain — domain riêng của Request, xem
-// mục 3 CLAUDE.md) + entity.approve()/reject() + persist. KHÔNG còn tự mở transaction (nhận `session`
-// từ ngoài) và KHÔNG còn tự dispatch handler.onApprove/onReject (side-effect xuyên Timesheet/Leave —
-// đã chuyển sang workflows/request-side-effects/, xem workflows/review-request.workflow.ts, task
-// 1.8.6) — đúng rule #1 mục 13.
 export async function reviewRequestEntity(
   account: any,
   id: string,
@@ -80,11 +71,6 @@ export async function reviewRequestEntity(
     const isInChain = chain.some((c) => String(c.accountId) === account._id.toString());
     if (!isInChain) throw new ForbiddenException("Bạn không được chỉ định duyệt đơn này");
   }
-
-  // Người dùng xác nhận (chốt qua hỏi trực tiếp): bỏ hẳn ràng buộc "cấp 1 (trực tiếp) phải duyệt
-  // trước cấp 2 (gián tiếp)" cho MỌI loại đơn đa cấp — ai trong chain duyệt trước cũng được, không
-  // quan tâm thứ tự. Trước đây chỉ forgot_checkin/late_early bị ràng buộc (LEVEL1_FIRST_TYPES), leave
-  // vốn dĩ đã không bị — giờ đồng nhất bằng cách bỏ ràng buộc luôn, không phải mở rộng thêm nó.
 
   if (action === "approve") {
     entity.approve(reviewerInfo._id.toString(), reviewer_note);

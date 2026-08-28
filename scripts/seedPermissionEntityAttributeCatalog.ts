@@ -80,7 +80,12 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
   {
     entity: "Customer",
     subjectAttributes: [
-      { path: "subject.userId", label: "ID nhân viên (chính mình)", type: "reference" }
+      { path: "subject.userId", label: "ID nhân viên (chính mình)", type: "reference" },
+      {
+        path: "subject.departmentColleagueUserIds",
+        label: "Danh sách user cùng phòng ban",
+        type: "reference"
+      }
     ],
     resourceAttributes: [
       {
@@ -572,6 +577,45 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
       { name: "sale_id", label: "Sale phụ trách" },
       { name: "agent_id", label: "Đại lý liên quan" }
     ]
+  },
+  {
+    entity: "CallLog",
+    subjectAttributes: [
+      { path: "subject.userId", label: "ID nhân viên (chính mình)", type: "reference" },
+      {
+        path: "subject.departmentColleagueUserIds",
+        label: "Danh sách user cùng phòng ban",
+        type: "reference"
+      }
+    ],
+    resourceAttributes: [
+      { path: "resource.sale_id", label: "Sale xử lý cuộc gọi", type: "reference" }
+    ],
+    fields: [
+      { name: "direction", label: "Hướng gọi" },
+      { name: "phone_number", label: "Số điện thoại khách hàng" },
+      { name: "hotline", label: "Hotline" },
+      { name: "sip_user", label: "Máy lẻ nhân viên" },
+      { name: "sale_id", label: "Sale xử lý cuộc gọi" },
+      { name: "customer_id", label: "Khách hàng" },
+      { name: "answer_sec", label: "Số giây trả lời" },
+      { name: "bill_sec", label: "Số giây tính tiền" },
+      { name: "duration", label: "Thời lượng" },
+      { name: "call_out_price", label: "Cước cuộc gọi" },
+      { name: "time_start_call", label: "Thời gian bắt đầu" },
+      { name: "time_end_call", label: "Thời gian kết thúc" },
+      { name: "hangup_cause", label: "Hình thức kết thúc" },
+      { name: "recording_file_url", label: "File ghi âm" },
+      { name: "record_seconds", label: "Số giây ghi âm" },
+      { name: "note", label: "Ghi chú" },
+      { name: "tag", label: "Tags" }
+    ]
+  },
+  {
+    entity: "SaleOmicallProfile",
+    subjectAttributes: [],
+    resourceAttributes: [],
+    fields: []
   },
   {
     entity: "Transaction",

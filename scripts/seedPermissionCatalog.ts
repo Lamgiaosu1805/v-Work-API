@@ -20,11 +20,22 @@ const EMPLOYEE_SCOPES_VIEW = ["EMPLOYEE_ALL_COMPANY", "EMPLOYEE_OWN_DEPARTMENT",
 const INTERNAL_FILE_SCOPES = ["INTERNAL_FILE_ALL_COMPANY", "INTERNAL_FILE_OWN_DEPARTMENT"];
 const WEEKLY_REPORT_SCOPES_VIEW = ["WEEKLY_REPORT_ALL_COMPANY", "WEEKLY_REPORT_OWN_DEPARTMENT"];
 const CUSTOMER_SCOPES_VIEW = ["CUSTOMER_ALL_COMPANY", "CUSTOMER_SELF_ASSIGNED"];
+const CUSTOMER_CALL_SCOPES = [
+  "CUSTOMER_ALL_COMPANY",
+  "CUSTOMER_OWN_DEPARTMENT",
+  "CUSTOMER_SELF_ASSIGNED"
+];
 const CUSTOMER_INTERACTION_SCOPES_VIEW = [
   "CUSTOMER_INTERACTION_ALL_COMPANY",
   "CUSTOMER_INTERACTION_SELF_ASSIGNED"
 ];
 const COMMISSION_SCOPES_VIEW = ["COMMISSION_ALL_COMPANY", "COMMISSION_SELF_ASSIGNED"];
+const CALL_LOG_SCOPES = [
+  "CALL_LOG_ALL_COMPANY",
+  "CALL_LOG_OWN_DEPARTMENT",
+  "CALL_LOG_SELF_ASSIGNED"
+];
+const SALE_OMICALL_PROFILE_SCOPES = ["SALE_OMICALL_PROFILE_ALL_COMPANY"];
 
 const DEFINITIONS: PermissionDef[] = [
   {
@@ -569,6 +580,38 @@ const DEFINITIONS: PermissionDef[] = [
     entity: "Customer",
     actionKind: "READ",
     validDataScopePolicies: CUSTOMER_SCOPES_VIEW
+  },
+  {
+    code: "customer_call.view",
+    module: "crm",
+    name: "Xem danh sách khách hàng cần gọi",
+    entity: "Customer",
+    actionKind: "READ",
+    validDataScopePolicies: CUSTOMER_CALL_SCOPES
+  },
+  {
+    code: "call_log.view",
+    module: "crm",
+    name: "Xem lịch sử cuộc gọi",
+    entity: "CallLog",
+    actionKind: "READ",
+    validDataScopePolicies: CALL_LOG_SCOPES
+  },
+  {
+    code: "customer_call.initiate",
+    module: "crm",
+    name: "Kích hoạt SDK gọi điện (lấy SIP credentials)",
+    entity: "SaleOmicallProfile",
+    actionKind: "STRUCTURAL",
+    validDataScopePolicies: SALE_OMICALL_PROFILE_SCOPES
+  },
+  {
+    code: "customer_call.update_relationship_status",
+    module: "crm",
+    name: "Cập nhật tình trạng kết bạn (Sale) với khách hàng",
+    entity: "Customer",
+    actionKind: "WRITE",
+    validDataScopePolicies: CUSTOMER_CALL_SCOPES
   },
   {
     code: "customer_interaction.view",

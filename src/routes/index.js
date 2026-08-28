@@ -38,6 +38,7 @@ const kpiAdjustmentRouter = require("./kpiAdjustment");
 const kpiDailyReportRouter = require("./kpiDailyReport");
 const kpiDashboardRouter = require("./kpiDashboard");
 const sharedFolderRouter = require("./sharedFolder");
+const customerCallRouter = require("../modules/customer-call/interface/customer-call.routes");
 
 const route = (app) => {
   app.use(`/posts`, postRouter);
@@ -80,6 +81,7 @@ const route = (app) => {
   app.use(`/kpi/daily-reports`, kpiDailyReportRouter);
   app.use(`/kpi/dashboard`, kpiDashboardRouter);
   app.use("/shared-folders", sharedFolderRouter);
+  app.use("/customer-call", customerCallRouter);
 };
 
 module.exports = route;

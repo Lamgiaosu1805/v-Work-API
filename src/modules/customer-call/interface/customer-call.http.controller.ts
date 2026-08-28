@@ -3,7 +3,7 @@ import { resolveEmployeeId } from "../../../core/authorization/resolve-employee-
 import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
 import { getSipCredentials } from "../application/get-sip-credentials.service";
 import { updateSaleRelationshipStatus } from "../application/update-sale-relationship-status.service";
-import { listCallHistory } from "../application/list-call-history.service";
+import { listCallHistory, listCallHistorySaleOptions } from "../application/list-call-history.service";
 import {
   listCustomersToCall,
   ListCustomersToCallFilters
@@ -47,6 +47,11 @@ export const customerCallHttpController = {
   async getCallHistory(req: Request, res: Response) {
     const result = await listCallHistory(req.permissionAbility!, req.query);
     return res.status(200).json({ message: "OK", ...result });
+  },
+
+  async getCallHistorySaleOptions(req: Request, res: Response) {
+    const data = await listCallHistorySaleOptions(req.permissionAbility!);
+    return res.status(200).json({ message: "OK", data });
   },
 
   async reconcileCallHistory(req: Request, res: Response) {

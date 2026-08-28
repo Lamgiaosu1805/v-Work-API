@@ -37,7 +37,7 @@ export interface OmicallWebhookPayload {
 }
 
 function toDate(unixSeconds: number | null | undefined): Date | null {
-  if (unixSeconds === null || unixSeconds === undefined) return null;
+  if (unixSeconds === null || unixSeconds === undefined || unixSeconds === 0) return null;
   return new Date(unixSeconds * 1000);
 }
 

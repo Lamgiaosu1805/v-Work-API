@@ -44,6 +44,17 @@ const selfCondition = (resourcePath: string, subjectPath: string): ConditionTree
   ]
 });
 
+const ownDepartmentColleaguesCondition = (resourceUserPath: string): ConditionTreeProps => ({
+  operator: "AND",
+  clauses: [
+    {
+      left: resourceUserPath,
+      operator: "IN",
+      right: { type: "SUBJECT_REF", path: "subject.departmentColleagueUserIds" }
+    }
+  ]
+});
+
 // entity không cần phân biệt "của mình" vs "tất cả" — 1 policy generic, không lọc gì (conditionTree
 // null = ability.can() không thêm điều kiện, xem toàn bộ nếu có permission).
 const GENERIC_ALL_COMPANY_ENTITIES: Record<string, string> = {
@@ -74,7 +85,8 @@ const GENERIC_ALL_COMPANY_ENTITIES: Record<string, string> = {
   TRANSACTION_ALL_COMPANY: "Transaction",
   DASHBOARD_METRIC_ALL_COMPANY: "DashboardMetric",
   AI_CHAT_ALL_COMPANY: "AiChat",
-  APP_INTEGRATION_ALL_COMPANY: "AppIntegration"
+  APP_INTEGRATION_ALL_COMPANY: "AppIntegration",
+  SALE_OMICALL_PROFILE_ALL_COMPANY: "SaleOmicallProfile"
 };
 
 const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
@@ -109,6 +121,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     entity: "Customer",
     label: "Chỉ khách hàng do mình giới thiệu",
     conditionTree: selfCondition("resource.referred_by", "subject.userId")
+  },
+  {
+    code: "CUSTOMER_OWN_DEPARTMENT",
+    entity: "Customer",
+    label: "Cùng phòng ban",
+    conditionTree: ownDepartmentColleaguesCondition("resource.referred_by")
   },
 
   // ---- Commission (backed bởi collection investment) ----
@@ -174,6 +192,21 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     entity: "CustomerInteraction",
     label: "Chỉ tương tác do mình phụ trách",
     conditionTree: selfCondition("resource.sale_id", "subject.userId")
+  },
+
+  // ---- CallLog ----
+  { code: "CALL_LOG_ALL_COMPANY", entity: "CallLog", label: "Toàn công ty", conditionTree: null },
+  {
+    code: "CALL_LOG_SELF_ASSIGNED",
+    entity: "CallLog",
+    label: "Chỉ cuộc gọi của chính mình",
+    conditionTree: selfCondition("resource.sale_id", "subject.userId")
+  },
+  {
+    code: "CALL_LOG_OWN_DEPARTMENT",
+    entity: "CallLog",
+    label: "Cùng phòng ban",
+    conditionTree: ownDepartmentColleaguesCondition("resource.sale_id")
   }
 ];
 

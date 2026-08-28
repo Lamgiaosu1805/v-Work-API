@@ -1,4 +1,5 @@
 import UserDepartmentPositionModel from "../../../models/UserDepartmentPositionModel";
+import UserInfoModel from "../../../models/UserInfoModel";
 import PermissionCatalogModel from "../../../models/PermissionCatalogModel";
 import { EmployeePermissionProfileRepository } from "../infrastructure/employee-permission-profile.repository";
 import { RoleRepository } from "../infrastructure/role.repository";
@@ -25,17 +26,32 @@ const dataScopePolicyRepository = new DataScopePolicyRepository();
 const fieldScopePolicyRepository = new FieldScopePolicyRepository();
 
 async function resolveSubjectContext(employeeId: string): Promise<Record<string, unknown>> {
-  const memberships = await UserDepartmentPositionModel.find({
-    user: employeeId,
-    isDeleted: false
-  }).lean();
+  const [memberships, userInfo] = await Promise.all([
+    UserDepartmentPositionModel.find({
+      user: employeeId,
+      isDeleted: false
+    }).lean(),
+    UserInfoModel.findById(employeeId).select("id_account").lean()
+  ]);
 
   const departmentIds = memberships.map((membership: any) => String(membership.department));
 
+  const colleagueMemberships = departmentIds.length
+    ? await UserDepartmentPositionModel.find({
+        department: { $in: departmentIds },
+        isDeleted: false
+      }).lean()
+    : [];
+  const departmentColleagueUserIds = Array.from(
+    new Set(colleagueMemberships.map((membership: any) => String(membership.user)))
+  );
+
   return {
     userId: employeeId,
+    accountId: userInfo ? String((userInfo as { id_account: unknown }).id_account) : null,
     departmentId: departmentIds[0] ?? null,
-    departmentIds
+    departmentIds,
+    departmentColleagueUserIds
   };
 }
 
@@ -60,9 +76,7 @@ export async function resolveEffectiveRules(employeeId: string): Promise<RawCasl
   const dataScopePolicyCodes = Array.from(
     new Set([
       ...allGrants.map((grant) => grant.dataScopePolicyCode),
-      ...overrides
-        .map((o) => o.dataScopePolicyCode)
-        .filter((code): code is string => Boolean(code))
+      ...overrides.map((o) => o.dataScopePolicyCode).filter((code): code is string => Boolean(code))
     ])
   );
   const fieldScopePolicyCodes = Array.from(

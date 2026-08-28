@@ -1,16 +1,3 @@
-/**
- * Script reset bảng công (WorkSheet + WorkDayStatus) về trạng thái "pending"
- * và soft-delete (isDeleted=true) tất cả đơn từ (Request: leave/late_early/remote/
- * business_trip/client_visit/explanation/forgot_checkin) trong một khoảng thời gian
- * (thường dùng khi cần làm lại chấm công/đơn từ cho 1 kỳ tính lương do sai dữ liệu nguồn).
- *
- * KHÔNG đụng vào AttendancePenaltyModel — nếu cần reset cả phạt, báo lại để bổ sung.
- *
- * Chạy:
- *   node scripts/resetAttendanceCycle.js --from=2026-07-01 --to=2026-07-31
- * Dry run (chỉ đếm, không ghi DB):
- *   node scripts/resetAttendanceCycle.js --from=2026-07-01 --to=2026-07-31 --dry-run
- */
 require("dotenv").config();
 const mongoose = require("mongoose");
 const moment = require("moment-timezone");

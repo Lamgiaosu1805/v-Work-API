@@ -8,6 +8,7 @@ import UserInfoModel from "../src/models/UserInfoModel";
 
 const SALE_ROLE_CODE = "CRM_SALE";
 const SALE_MANAGER_ROLE_CODE = "CRM_SALE_MANAGER";
+const TEAM_LEAD_ROLE_CODE = "CRM_SALE_TEAM_LEAD";
 
 const SALE_GRANTS: PermissionGrantDoc[] = [
   { permissionCode: "customer.view", dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED", fieldScopePolicyCode: null },
@@ -27,6 +28,49 @@ const SALE_GRANTS: PermissionGrantDoc[] = [
   {
     permissionCode: "customer_claim_request.create",
     dataScopePolicyCode: "CUSTOMER_CLAIM_REQUEST_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_call.view",
+    dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "call_log.view",
+    dataScopePolicyCode: "CALL_LOG_SELF_ASSIGNED",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_call.initiate",
+    dataScopePolicyCode: "SALE_OMICALL_PROFILE_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_call.update_relationship_status",
+    dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED",
+    fieldScopePolicyCode: null
+  }
+];
+
+const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
+  {
+    permissionCode: "customer_call.view",
+    dataScopePolicyCode: "CUSTOMER_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "call_log.view",
+    dataScopePolicyCode: "CALL_LOG_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_call.initiate",
+    dataScopePolicyCode: "SALE_OMICALL_PROFILE_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_call.update_relationship_status",
+    dataScopePolicyCode: "CUSTOMER_OWN_DEPARTMENT",
     fieldScopePolicyCode: null
   }
 ];
@@ -195,6 +239,12 @@ async function seed(): Promise<void> {
     "Sale CRM Manager",
     "Role hệ thống — quản lý CRM, xem/quản lý toàn bộ dữ liệu khách hàng công ty.",
     SALE_MANAGER_GRANTS
+  );
+  await upsertRole(
+    TEAM_LEAD_ROLE_CODE,
+    "Sale CRM Team Lead",
+    "Role hệ thống — trưởng nhóm sale CRM, xem/gọi khách hàng trong phạm vi cùng phòng ban.",
+    TEAM_LEAD_GRANTS
   );
 
   console.log("");

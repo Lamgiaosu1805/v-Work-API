@@ -13,6 +13,10 @@ import FieldScopePolicyModel from "../src/models/FieldScopePolicyModel";
 import EmployeePermissionProfileModel from "../src/models/EmployeePermissionProfileModel";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const UserDepartmentPositionModel = require("../src/models/UserDepartmentPositionModel");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const AccountModel = require("../src/models/AccountModel");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const UserInfoModel = require("../src/models/UserInfoModel");
 
 let mongod: MongoMemoryServer;
 
@@ -33,7 +37,9 @@ beforeEach(async () => {
     DataScopePolicyModel.deleteMany({}),
     FieldScopePolicyModel.deleteMany({}),
     EmployeePermissionProfileModel.deleteMany({}),
-    UserDepartmentPositionModel.deleteMany({})
+    UserDepartmentPositionModel.deleteMany({}),
+    AccountModel.deleteMany({}),
+    UserInfoModel.deleteMany({})
   ]);
 
   await PermissionCatalogModel.create([
@@ -1428,5 +1434,61 @@ describe("resolveEffectiveAbility", () => {
     const test = guard(query);
 
     expect(test({ _id: "e1", name: "A" })).toBe(false);
+  });
+
+  test("Data Scope Policy dùng subject.accountId (vd Post tự quản) -> resolveEffectiveAbility KHÔNG throw, filter theo đúng accountId thật của account (không phải employeeId)", async () => {
+    const account = await AccountModel.create({ username: "author1", password: "x" });
+    const userInfo = await UserInfoModel.create({
+      full_name: "Tác giả",
+      cccd: "000000000001",
+      phone_number: "0900000001",
+      sex: 1,
+      date_of_birth: new Date("1990-01-01"),
+      address: "HN",
+      tinh_trang_hon_nhan: 0,
+      id_account: account._id,
+      ma_nv: "NV-ACC-01",
+      employment_type: "fulltime"
+    });
+    const employeeId = String(userInfo._id);
+
+    await PermissionCatalogModel.create({
+      code: "post.edit",
+      module: "workplace",
+      name: "Sửa bài đăng",
+      entity: "Post",
+      actionKind: "WRITE",
+      supportsFieldScope: false,
+      validDataScopePolicies: ["POST_SELF_ASSIGNED"],
+      validFieldScopePolicies: []
+    });
+    await DataScopePolicyModel.create({
+      code: "POST_SELF_ASSIGNED",
+      entity: "Post",
+      label: "Chỉ bài của chính mình",
+      conditionTree: {
+        operator: "AND",
+        clauses: [
+          {
+            left: "resource.author_id",
+            operator: "EQ",
+            right: { type: "SUBJECT_REF", path: "subject.accountId" }
+          }
+        ]
+      }
+    });
+    const role = await PermissionRoleModel.create({
+      name: "Nhân viên",
+      code: "STAFF_ACCOUNT_ID",
+      grants: [{ permissionCode: "post.edit", dataScopePolicyCode: "POST_SELF_ASSIGNED" }]
+    });
+    await EmployeePermissionProfileModel.create({ employeeId, roleIds: [role._id], overrides: [] });
+
+    const ability = await resolveEffectiveAbility(employeeId);
+    const query = toMongoQuery(ability, "post.edit", "Post");
+    const test = guard(query);
+
+    expect(test({ _id: "p1", author_id: String(account._id) })).toBe(true);
+    expect(test({ _id: "p2", author_id: "nguoi-khac" })).toBe(false);
   });
 });

@@ -22,9 +22,9 @@ export type DerivedCustomerStatus =
 
 export interface ListCustomersToCallFilters extends PaginationQuery {
   appCode?: string;
-  status?: DerivedCustomerStatus;
-  relationshipStatus?: string;
-  callCount?: number;
+  status?: DerivedCustomerStatus[];
+  relationshipStatus?: string[];
+  callCount?: (number | "gt3")[];
   search?: string;
 }
 
@@ -159,9 +159,25 @@ export async function listCustomersToCall(
   ];
 
   const postLookupMatch: Record<string, unknown> = {};
-  if (filters.status) postLookupMatch.derivedStatus = filters.status;
-  if (filters.relationshipStatus) postLookupMatch.relationshipStatus = filters.relationshipStatus;
-  if (filters.callCount !== undefined) postLookupMatch.callCount = filters.callCount;
+  if (filters.status && filters.status.length > 0) {
+    postLookupMatch.derivedStatus = { $in: filters.status };
+  }
+  if (filters.relationshipStatus && filters.relationshipStatus.length > 0) {
+    postLookupMatch.relationshipStatus = { $in: filters.relationshipStatus };
+  }
+  if (filters.callCount && filters.callCount.length > 0) {
+    const exactValues = filters.callCount.filter((value): value is number => value !== "gt3");
+    const hasGt3 = filters.callCount.includes("gt3");
+    const callCountOr: Record<string, unknown>[] = [];
+    if (exactValues.length > 0) callCountOr.push({ callCount: { $in: exactValues } });
+    if (hasGt3) callCountOr.push({ callCount: { $gt: 3 } });
+
+    if (callCountOr.length === 1) {
+      Object.assign(postLookupMatch, callCountOr[0]);
+    } else if (callCountOr.length > 1) {
+      postLookupMatch.$or = callCountOr;
+    }
+  }
   if (Object.keys(postLookupMatch).length > 0) {
     pipeline.push({ $match: postLookupMatch });
   }
@@ -174,6 +190,7 @@ export async function listCustomersToCall(
         {
           $project: {
             _id: 1,
+            external_id: 1,
             phone_number: 1,
             "identity.full_name": 1,
             derivedStatus: 1,

@@ -54,4 +54,11 @@ router.post(
   asyncHandler(crmSaleAdminHttpController.syncCrmSaleSipCredentials)
 );
 
+router.patch(
+  "/admin/employees/:employeeId/outbound-hotline",
+  authenticate,
+  isAdmin,
+  asyncHandler(crmSaleAdminHttpController.assignExtensionOutboundHotline)
+);
+
 export = router;

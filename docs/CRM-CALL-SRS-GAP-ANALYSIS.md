@@ -49,26 +49,27 @@ SRS (cột `m. Cột cước phí`, CRM.04.2): gọi `GET /api/v2/callTransactio
 còn `Math.round` số nguyên như bản trước. Vẫn đọc `call_out_price` từ `CallLogModel` (không gọi lại
 `getByTransactionId` — giữ nguyên quyết định kiến trúc ở mục 0, không đụng tới nguồn dữ liệu).
 
-### 0.2. Cột "Ghi chú" — SRS có hành vi sửa, code hiện tại chỉ đọc
+### 0.2. Cột "Ghi chú" — SRS có hành vi sửa, code hiện tại chỉ đọc — ✅ ĐÃ LÀM (03-09-2026)
 
 SRS (cột `n. Cột ghi chú`, CRM.04.2):
 
 > **Hành vi Sửa ghi chú:** Khi Actor nhập Ghi chú mới và bấm Lưu (Enter), hệ thống gọi API
 > `POST /api/call_transaction/change/:transaction_id`, truyền nội dung ghi chú vào payload `note`.
 
-Code hiện tại: cột "Ghi chú" trong `CallHistoryTab.jsx` **chỉ hiển thị** field `note` có sẵn (luôn
-rỗng vì Omicall không tự gửi note qua CDR webhook) — không có UI nhập/sửa. Đây là quyết định đã hỏi
-và PM chọn lúc đó ("chỉ hiển thị, để trống cho tới phase sau") — **nhưng lúc hỏi không có SRS trong
-tay**, và SRS thực ra đã có đặc tả rõ hành vi này.
+**Đã triển khai đầy đủ theo đúng SRS:**
+- BE: permission mới `call_log.update_note` (catalog + seed grant cho `CRM_SALE`/`CRM_SALE_TEAM_LEAD`,
+  cùng scope với `call_log.view`) → service `update-call-log-note.service.ts` (check tồn tại →
+  `NotFoundException`, check scope → `ForbiddenException`, gọi `OmicallClient.updateCallTransaction()`
+  thật, lỗi thì `ConflictException` và **không lưu note nửa vời**) → route
+  `PATCH /customer-call/history/:id/note`. Có 4 test integration (`MongoMemoryServer`, mock
+  `OmicallClient`), verify bằng revert-fail-restore.
+- FE: `CallHistoryTab.jsx` — ô "Ghi chú" giờ là input gõ trực tiếp (component `NoteCell`), **lưu khi
+  bấm Enter** (đúng SRS, không có nút Lưu riêng).
 
-Method `OmicallClient.updateCallTransaction()` (map đúng
-`POST /api/call_transaction/change/:transaction_id`) **đã tồn tại sẵn** trong
-`src/utils/omicallClient.ts` từ Phase 1 nhưng **chưa từng được gọi ở bất kỳ đâu** trong toàn bộ
-codebase.
-
-→ **Cần chốt: có làm tính năng sửa ghi chú ngay bây giờ không?** Nếu có, cần thêm: 1 API mới
-(`PATCH /customer-call/history/:id/note` hoặc gọi thẳng `updateCallTransaction` bằng `transaction_id`)
-+ input UI (dạng "nhập rồi Enter để lưu" theo đúng SRS, không phải nút Lưu riêng).
+**Còn thiếu để chạy được trên môi trường thật:** phải chạy lại
+`scripts/seedPermissionCatalog.ts` + `scripts/seedPermissionCrmRoles.ts` trên DB, rồi xoá cache Redis
+quyền (`*:perm:employee:*`, xem lý do ở phần cache-không-TTL đã note trước đó) — nếu không, sale sẽ bị
+403 dù code đã đúng.
 
 ---
 
@@ -79,13 +80,13 @@ File liên quan: `src/modules/customer-call/application/list-customers-to-call.s
 
 | # | SRS (mã BR/FR) | Mô tả SRS | Hiện trạng code | Mức độ |
 |---|---|---|---|---|
-| 1.1 | BR_05, BR_06, FR_08 | Bộ lọc "Lần gọi" gồm: Chưa gọi, Gọi lần 1/2/3, **"Trên 3 lần"** (>3 gộp chung 1 nhóm) | `CALL_COUNT_OPTIONS` chỉ có giá trị đúng 0/1/2/3; BE so khớp `callCount` bằng `$eq` chính xác — **không có bucket "Trên 3 lần"** | 🟡 Thiếu tính năng |
-| 1.2 | FR_01, FR_02 | Bấm "Gọi ngay" → hiện **popup xác nhận** (Hủy / Xác nhận gọi) trước khi thực sự gọi | `handleCallNow` gọi thẳng `makeOmiCall()`, không có popup xác nhận | 🟡 Thiếu tính năng |
+| 1.1 | BR_05, BR_06, FR_08 | Bộ lọc "Lần gọi" gồm: Chưa gọi, Gọi lần 1/2/3, **"Trên 3 lần"** (>3 gộp chung 1 nhóm) | ✅ Đã thêm option `value: "gt3"` (`CALL_COUNT_OPTIONS`), BE map thành `{ $gt: 3 }` thay vì `$eq` | ✅ Đã làm (03-09-2026), có test |
+| 1.2 | FR_01, FR_02 | Bấm "Gọi ngay" → hiện **popup xác nhận** (Hủy / Xác nhận gọi) trước khi thực sự gọi | ✅ Đã làm — `Dialog` xác nhận trong `CustomersToCallTab.jsx`, Hủy bỏ = đóng không gọi, Xác nhận = ghi nhận lượt gọi rồi mới `makeOmiCall()` | ✅ Đã làm (03-09-2026) |
 | 1.3 | FR_05 | Trong lúc gọi, hiện **popup riêng của app** show tên KH/SĐT/thời gian đang diễn ra | Chưa có — chỉ có widget nổi của chính SDK Omicall (không phải UI tự làm) | 🟡 Thiếu tính năng |
 | 1.4 | FR_06, FR_07 | Khi cuộc gọi kết thúc (actor hoặc khách tắt máy) → đóng popup cuộc gọi, hiện **popup đánh giá + nhập ghi chú** | Chưa có | 🟡 Thiếu tính năng |
-| 1.5 | BR_09, BR_11, FR_03, FR_04 | Khi actor **xác nhận gọi** (không phải khi cuộc gọi kết thúc), hệ thống phải tăng "Lần gọi" +1 và cập nhật "Liên hệ cuối" **ngay lập tức**, không phụ thuộc kết quả cuộc gọi | `call_count`/`last_contacted_at` (trong `CustomerCallStatsModel`) hiện chỉ tăng khi **webhook CDR về** (`handleOmicallWebhook`, lần đầu thấy `transaction_id`) — có độ trễ, và **mất luôn nếu webhook lỗi/không tới** | 🔴 Sai lệch hành vi nghiệp vụ — cần thêm API mới gọi ngay lúc actor bấm xác nhận, tách khỏi luồng webhook |
-| 1.6 | Mục `k`, ID 0015 | Icon xem chi tiết → điều hướng sang màn "Thông tin chi tiết khách hàng" | Chưa có icon/điều hướng này trong `CustomersToCallTab.jsx` | 🟡 Thiếu tính năng |
-| 1.7 | Mục `a`, ID 0001 | Toggle dự án mặc định = **VNFITE** | `CustomersToCallTab.jsx`: `filters.appCode: "tikluy"` — mặc định **TIKLUY**, ngược với SRS | 🟢 Sai default, dễ sửa |
+| 1.5 | BR_09, BR_11, FR_03, FR_04 | Khi actor **xác nhận gọi** (không phải khi cuộc gọi kết thúc), hệ thống phải tăng "Lần gọi" +1 và cập nhật "Liên hệ cuối" **ngay lập tức**, không phụ thuộc kết quả cuộc gọi | ✅ Đã làm — API mới `POST /customer-call/customers/:id/call-attempts` (`record-call-attempt.service.ts`) gọi ngay lúc xác nhận. Đã **gỡ** logic tăng count cũ khỏi `handleOmicallWebhook` (tránh đếm trùng — webhook giờ chỉ lưu CDR, không đụng stats nữa) | ✅ Đã làm (03-09-2026), có 4 test integration |
+| 1.6 | Mục `k`, ID 0015 | Icon xem chi tiết → điều hướng sang màn "Thông tin chi tiết khách hàng" | ✅ Theo yêu cầu user, đổi thành bấm cả dòng (row) để điều hướng thay vì icon riêng — `TableRow` trong `CustomersToCallTab.jsx` `onClick` → `/khach-hang/:external_id`, có hover style, chặn propagation ở ô dropdown/nút gọi | ✅ Đã làm (03-09-2026) |
+| 1.7 | Mục `a`, ID 0001 | Toggle dự án mặc định = **VNFITE** | ✅ Đã sửa `filters.appCode` mặc định thành `"vnfite"` | ✅ Đã sửa (03-09-2026) |
 | 1.8 | Mục `c`, ID 0003 | Dropdown "Trạng thái" có **2 bộ giá trị khác nhau theo app**: TIKLUY dùng (Chưa eKYC/eKYC chưa ĐT/Đang đầu tư/Đã tất toán); app khác dùng (Chưa KYC/Chờ duyệt/Đã duyệt/Từ chối) | Chỉ có 1 bộ `CUSTOMER_STATUS_OPTIONS` cố định dùng chung mọi app — chưa phân biệt theo `appCode` | 🟡 Thiếu tính năng (chưa rõ app nào tương ứng "app khác" ngoài TIKLUY/VNFITE — SRS không nói rõ VNFITE dùng bộ nào) |
 
 **Điểm khớp đúng, không có gap:** BR_01/02 (phân quyền xem theo scope), BR_03/04 (tách theo dự án +
@@ -105,8 +106,8 @@ liệu — áp dụng cho toàn bộ mục này).
 |---|---|---|---|---|
 | 2.1 | (mục 0) | Nguồn dữ liệu = live query `call-transaction/search` mỗi lần vào màn | Đọc từ `CallLogModel` (đồng bộ qua webhook, không live-query) | ✅ Đã chốt (03-09-2026) — giữ nguyên, xem mục 0 |
 | 2.2 | (mục 0.1) | Cước phí làm tròn **3 chữ số thập phân** | Đã sửa `toLocaleString("vi-VN", { maximumFractionDigits: 3 })` | ✅ Đã sửa (03-09-2026) — xem mục 0.1 |
-| 2.3 | (mục 0.2) | Ghi chú **cho phép sửa**, gọi `updateCallTransaction` | Chỉ hiển thị, chưa có UI/API sửa | 🔴 Còn mở — chờ PM chốt có làm không |
-| 2.4 | BR_04 | Nút Play chỉ hiện khi **có file ghi âm VÀ thời lượng cuộc gọi > 0 giây** | Code chỉ check `recording_file_url` truthy, **chưa check thêm điều kiện thời lượng > 0** | 🟢 Thiếu điều kiện phụ, dễ sửa |
+| 2.3 | (mục 0.2) | Ghi chú **cho phép sửa**, gọi `updateCallTransaction` | Đã làm — BE + FE + test | ✅ Đã làm (03-09-2026) — xem mục 0.2 |
+| 2.4 | BR_04 | Nút Play chỉ hiện khi **có file ghi âm VÀ thời lượng cuộc gọi > 0 giây** | ✅ Đã thêm điều kiện `callLog.duration > 0` | ✅ Đã sửa (03-09-2026) |
 | 2.5 | BR_03 | Phân trang tối đa 50 bản ghi/trang (giới hạn cứng của API Omicall) | Không áp dụng — đã chốt giữ kiến trúc đọc từ DB riêng (mục 0), giới hạn 50 không còn bắt buộc | ✅ Không còn là gap (03-09-2026) |
 
 **Điểm khớp đúng, không có gap:** BR_01 (tách theo TIKLUY/VNFITE), BR_02 (Sale tự xem, Trưởng nhóm
@@ -122,30 +123,106 @@ Lỗi đánh máy trong chính SRS (không phải bug code): mục cột "Thời
 
 ## 3. CRM.04.3 — Tổng đài (quản lý đầu số Hotline)
 
-**Chưa build gì cả** — không có route/controller/model/UI nào cho màn danh sách quản lý đầu số
-Hotline. Bản thân SRS phần này cũng có dấu hiệu **chưa viết xong** — 2 trang cuối tài liệu (28-29)
-lặp lại nguyên văn template của mục 1 (Business Rule BR_01-BR_16 giống hệt CRM.04.1, mockup screen
-cũng là ảnh màn "Danh sách khách hàng cần gọi") thay vì nội dung riêng cho Tổng đài. Cần xác nhận lại
-với người viết SRS trước khi bắt tay build mục này — không đủ thông tin để tự suy luận đúng.
+**✅ SRS đã đầy đủ (03-09-2026)** — bản trước (2 trang cuối file 29 trang) chỉ là placeholder lặp
+lại mục 1. Bản SRS riêng, đầy đủ đã có: `vWork - CRM website - Tài liệu SRS (1).pdf` (mã tài liệu
+`CRM.006`, phiên bản 1.0, 27-08-2026, DatMN).
 
-API liên quan đã có sẵn trong `omicallClient.ts` nhưng chưa dùng: không có — cần thêm mới
-`internal_phone/list`, `hotline/search`, `hotline/by-phone`, `hotline/update` nếu triển khai.
+**Use case CRM.04.3 — Quản lý Đầu Số Hotline**
+
+- **Actor:** chỉ **Admin** (khác CRM.04.1/2 — Sale/Manager tự xem theo scope).
+- **Kích hoạt:** chọn tab "Đầu Số Hotline" trong phân hệ "Tổng đài".
+- **Luồng chính:** vào màn → hệ thống load danh sách Hotline dạng **Card** → Admin click "Cấu hình"
+  trên 1 Card → popup → chỉnh gọi vào/gọi ra/kịch bản/phạm vi quyền/danh sách NV → "Lưu cấu hình" →
+  gọi API update → đóng popup, toast, tải lại danh sách.
+- **Luồng thất bại:** API cấu hình lỗi (kết nối Omicall) → toast "Cập nhật cấu hình thất bại, vui
+  lòng thử lại".
+
+**Business Rules:**
+
+| ID | Mô tả |
+|---|---|
+| BR_01 | Danh sách Hotline đồng bộ **trực tiếp từ Omicall**, CRM **không lưu DB** — chỉ đóng vai trò phân quyền/cấu hình. Không cần model Mongoose mới, mọi thao tác proxy thẳng qua `omicallClient.ts`. |
+| BR_02 | Để NV gọi ra được bằng 1 đầu số, Admin bắt buộc bật `allow_call_out` + chọn "Phạm vi quyền gọi ra". |
+| BR_03 | `access_type = applies_to_all_employees` → toàn bộ NV có SIP dùng được. `access_type = applies_according_to_employee_criteria` → Admin tick chọn đích danh Extension. |
+
+**Functional Requirements → API Omicall cần thêm vào `omicallClient.ts` (chưa có):**
+
+| ID | API | Việc |
+|---|---|---|
+| FR_01 | `GET /api/call_center/hotline/search` | Danh sách Hotline |
+| FR_01 | `GET /api/call_center/hotline/by-phone` | Chi tiết 1 Hotline |
+| FR_02/03 | (nằm trong FR_05, không phải API riêng) | Toggle gọi vào (`allow_call_in`) / gọi ra (`allow_call_out`) — local UI trước, gửi kèm lúc lưu |
+| FR_04 | (nằm trong FR_05) | `access_type` + danh sách `group_ids`/`sip_users` khi phạm vi = theo phân quyền cụ thể |
+| FR_05 | `PUT /api/call_center/hotline/update` | Lưu cấu hình (gửi `allow_call_in`, `allow_call_out`, `access_type`, `group_ids` hoặc `sip_users`) |
+
+**Mockup — Card danh sách (ID 0001):** Số Hotline, badge Active/Inactive, trạng thái Gọi vào/Gọi ra
+(bật/tắt), Kịch bản đang áp dụng, Hạn sử dụng, Quyền sử dụng (vd "Toàn bộ NV" / "3 NV được phép" /
+"Chỉ Admin"), nút "Cấu Hình".
+
+**Mockup — Popup cấu hình (ID 0002):** Tiêu đề "Cấu Hình: [Số Hotline]"; Toggle 1 = gọi VÀO
+(`allow_call_in`); Toggle 2 = gọi RA (`allow_call_out`); Dropdown 1 = kịch bản mặc định
+(`call_script`); Dropdown 2 = phạm vi quyền gọi ra (`access_type`, 2 giá trị); danh sách Badge
+Extension (chỉ hiện khi Dropdown 2 = "Theo phân quyền cụ thể", click để chọn/bỏ chọn); nút Hủy /
+Lưu cấu hình.
+
+**✅ Đã build (03-09-2026).** Đúng như đề xuất — feature thuần proxy qua Omicall, không có domain
+Entity/Repository/DB, route Admin-only bằng `isAdmin` (giống pattern `crm-sale-admin.routes.ts`,
+không dùng `requirePermission` vì BR nói rõ chỉ Admin).
+
+Backend:
+- `src/utils/omicallClient.ts` — thêm `searchHotlines`, `getHotlineByPhone`, `updateHotlineConfig`,
+  `listCallScripts`, `listInternalPhones` + type tương ứng, đúng contract trong `Tài liệu API.xlsx`
+  (`/api/call_center/hotline/search|by-phone|update`, `/call_script/list`, `/internal_phone/list`).
+- `src/modules/customer-call/application/list-hotlines.service.ts`,
+  `get-hotline-detail.service.ts` (throw `NotFoundException` nếu Omicall trả null),
+  `update-hotline-config.service.ts` (validate `accessType`, bắt buộc extensions/groupIds khi
+  `applies_according_to_employee_criteria`, wrap lỗi Omicall thành `ConflictException` — cùng
+  pattern `update-call-log-note.service.ts`), `list-hotline-call-scripts.service.ts`,
+  `list-hotline-extensions.service.ts` — đều mới.
+- `src/modules/customer-call/interface/hotline-admin.http.controller.ts` +
+  `hotline-admin.routes.ts` — mount tại `/customer-call/admin/hotlines`,
+  `/customer-call/admin/hotline-call-scripts`, `/customer-call/admin/hotline-extensions`, đăng ký
+  trong `src/routes/index.js`.
+- `__tests__/customerCallHotlineAdmin.test.ts` — 6 test (mock `OmicallClient`), verify bằng
+  revert-fail-restore: NotFound khi Omicall trả null, ArgumentInvalid khi accessType sai/thiếu
+  extensions, ConflictException khi Omicall lỗi.
+
+Frontend:
+- `src/features/customer-call/apis/hotlineAdmin.js`, `hooks/useHotlineAdminQuery.js`,
+  `constants/hotlineAdmin.constants.js` — mới.
+- `src/pages/hotline/HotlineManagementScreen.jsx` — mới, Card grid + popup cấu hình
+  (Toggle gọi vào/ra, Dropdown kịch bản, Dropdown phạm vi quyền, Badge chọn Extension).
+- Route `/tong-dai` (`router/MainRoutes.jsx`) + menu "Tổng đài" trong `AdminMenu`
+  (`CrmMenuItems.js`).
+
+**Điểm còn giả định, chưa verify được với Omicall thật** (không có sandbox/credentials để test
+end-to-end trong phiên này — cần Admin thật thử trên môi trường có kết nối Omicall thật):
+- Shape chính xác của field `accesses` (SRS/Excel chỉ ghi "Array", không nói rõ item là string hay
+  object) — code xử lý cả 2 trường hợp (`normalizeAccessEntry`) nhưng chưa chạy được với data thật.
+- Field `allow_call_in`/`allow_call_out` trong `hotline/update` được Excel đánh kiểu String — code
+  gửi `String(true/false)` theo đúng doc, nhưng chưa xác nhận Omicall có chấp nhận boolean thay vì
+  string hay không.
 
 ---
 
 ## 4. Việc cần PM/dev chốt trước khi code tiếp
 
 - [x] **Cước phí (0.1):** ✅ 03-09-2026 — đổi về làm tròn 3 chữ số thập phân theo SRS. Đã sửa.
-- [ ] **Ghi chú (0.2):** có làm tính năng sửa note gọi thẳng Omicall (`updateCallTransaction`) ngay
-      bây giờ không?
+- [x] **Ghi chú (0.2):** ✅ 03-09-2026 — đã làm tính năng sửa note gọi thẳng Omicall
+      (`updateCallTransaction`), BE + FE + test đầy đủ.
 - [x] **Kiến trúc nguồn dữ liệu lịch sử cuộc gọi (mục 0):** ✅ 03-09-2026 — giữ nguyên webhook +
       `CallLogModel`, không đổi sang live-query. Deviation có chủ đích, ghi nhận trong mục 0.
-- [ ] **Luồng popup xác nhận gọi + tăng Lần gọi ngay lúc xác nhận (1.2-1.5):** đây là gap lớn nhất ở
-      CRM.04.1, cần thiết kế lại cả FE (popup) lẫn BE (API mới ghi nhận lượt gọi tại thời điểm xác
-      nhận, tách khỏi luồng webhook).
+- [x] **Luồng popup xác nhận gọi + tăng Lần gọi ngay lúc xác nhận (1.2, 1.5):** ✅ 03-09-2026 — đã
+      làm xong FR_01/02 (popup Hủy/Xác nhận) + BR_09/BR_11/FR_03/FR_04 (tăng ngay lúc xác nhận, tách
+      khỏi webhook). **Chưa làm** FR_05 (popup hiện trạng thái đang gọi) và FR_06/FR_07 (popup đánh
+      giá + ghi chú sau khi cuộc gọi kết thúc) — 2 việc này (mục 1.3, 1.4) vẫn còn mở, phụ thuộc vào
+      việc đọc state từ SDK Omicall (`useOmiCall.js`'s `handleAccepted`/`handleEnded`, hiện chỉ log
+      console, chưa có state quản lý ở tầng UI).
 - [ ] **Bộ giá trị Trạng thái theo app (1.8):** SRS chỉ mô tả rõ cho TIKLUY, "app khác" dùng KYC —
       cần hỏi lại VNFITE thuộc nhóm nào.
-- [ ] **CRM.04.3 (Tổng đài):** SRS chưa viết xong, cần bổ sung trước khi build.
+- [x] **CRM.04.3 (Tổng đài):** ✅ 03-09-2026 — SRS riêng (`CRM.006`) đã đầy đủ, đã build xong BE+FE.
+      Còn 2 điểm cần verify với Omicall thật (shape `accesses`, kiểu `allow_call_in`/`out`) — xem
+      mục 3.
 
 ## 5. Đề xuất thứ tự ưu tiên (chưa làm, chờ PM duyệt)
 
@@ -157,4 +234,4 @@ API liên quan đã có sẵn trong `omicallClient.ts` nhưng chưa dùng: khôn
    kiểm tra trước khi làm.
 5. Ghi chú sửa được (0.2) + cước phí làm tròn 3 số (0.1) — làm cùng lúc vì cùng đụng
    `CallHistoryTab.jsx`.
-6. CRM.04.3 — chờ SRS viết xong.
+6. ✅ CRM.04.3 — đã làm (03-09-2026).

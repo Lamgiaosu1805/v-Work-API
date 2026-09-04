@@ -34,4 +34,12 @@ export class SaleOmicallProfileRepository extends MongooseRepositoryBase<
       .lean();
     return docs.map((doc) => this.mapper.toDomain(doc));
   }
+
+  async findManyByExtensions(extensions: string[]): Promise<SaleOmicallProfileEntity[]> {
+    const docs = await this.model
+      .find({ omicall_extension: { $in: extensions }, isDeleted: false })
+      .session(this.session ?? null)
+      .lean();
+    return docs.map((doc) => this.mapper.toDomain(doc));
+  }
 }

@@ -40,6 +40,7 @@ const kpiDashboardRouter = require("./kpiDashboard");
 const sharedFolderRouter = require("./sharedFolder");
 const customerCallRouter = require("../modules/customer-call/interface/customer-call.routes");
 const crmSaleAdminRouter = require("../modules/customer-call/interface/crm-sale-admin.routes");
+const hotlineAdminRouter = require("../modules/customer-call/interface/hotline-admin.routes");
 
 const route = (app) => {
   app.use(`/posts`, postRouter);
@@ -84,6 +85,7 @@ const route = (app) => {
   app.use("/shared-folders", sharedFolderRouter);
   app.use("/customer-call", customerCallRouter);
   app.use("/customer-call", crmSaleAdminRouter);
+  app.use("/customer-call", hotlineAdminRouter);
 };
 
 module.exports = route;

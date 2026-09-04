@@ -82,12 +82,102 @@ export interface OmicallExtensionDetail {
   };
 }
 
-function createClient(baseURL: string | undefined): AxiosInstance {
-  return axios.create({
-    baseURL,
-    headers: { Authorization: `Bearer ${process.env.OMICALL_API_KEY}` },
+export interface InviteAgentInput {
+  identifyInfo: string;
+  fullName: string;
+  roleName: string;
+  password: string;
+  ownerEmail?: string;
+}
+
+export interface TransferAgentInput {
+  sourceEmail: string;
+  targetEmail: string;
+  targetInfo?: { fullName?: string; phoneNumber?: string };
+  callbackResultConfig?: { url: string; headers?: Record<string, string> };
+}
+
+export interface UpdateInternalPhoneInput {
+  sipUser: string;
+  password?: string;
+  callTimeout?: string;
+}
+
+interface CachedOmicallToken {
+  accessToken: string;
+  expiresAt: number;
+}
+
+let cachedToken: CachedOmicallToken | null = null;
+let pendingTokenRequest: Promise<string> | null = null;
+
+function decodeJwtExpiry(accessToken: string): number | null {
+  try {
+    const payloadPart = accessToken.split(".")[1];
+    const decoded = JSON.parse(Buffer.from(payloadPart, "base64").toString("utf8"));
+    return typeof decoded.exp === "number" ? decoded.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchOmicallAccessToken(): Promise<string> {
+  const authClient = axios.create({
+    baseURL: process.env.OMICALL_BASE_URL_V1,
     timeout: 10000
   });
+  const { data } = await authClient.get("/api/auth", {
+    params: { apiKey: process.env.OMICALL_API_KEY }
+  });
+
+  const accessToken = data?.payload?.access_token;
+  if (!accessToken) {
+    throw new Error("Không lấy được access_token từ Omicall /api/auth");
+  }
+
+  const expiresAt = decodeJwtExpiry(accessToken) ?? Date.now() + 23 * 60 * 60 * 1000;
+  cachedToken = { accessToken, expiresAt };
+  return accessToken;
+}
+
+async function getOmicallAccessToken(forceRefresh = false): Promise<string> {
+  if (!forceRefresh && cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
+    return cachedToken.accessToken;
+  }
+  if (!pendingTokenRequest) {
+    pendingTokenRequest = fetchOmicallAccessToken().finally(() => {
+      pendingTokenRequest = null;
+    });
+  }
+  return pendingTokenRequest;
+}
+
+function createClient(baseURL: string | undefined): AxiosInstance {
+  const instance = axios.create({ baseURL, timeout: 10000 });
+
+  instance.interceptors.request.use(async (config) => {
+    const token = await getOmicallAccessToken();
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${token}`;
+    return config;
+  });
+
+  instance.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      const originalRequest = error.config;
+      if (error.response?.status === 401 && originalRequest && !originalRequest._omicallRetried) {
+        originalRequest._omicallRetried = true;
+        const token = await getOmicallAccessToken(true);
+        originalRequest.headers = originalRequest.headers ?? {};
+        originalRequest.headers.Authorization = `Bearer ${token}`;
+        return instance(originalRequest);
+      }
+      return Promise.reject(error);
+    }
+  );
+
+  return instance;
 }
 
 export class OmicallClient {
@@ -145,5 +235,42 @@ export class OmicallClient {
       params: { type, keyword }
     });
     return data?.payload ?? null;
+  }
+
+  async inviteAgent(input: InviteAgentInput): Promise<Record<string, unknown>> {
+    const { data } = await this.v1.post("/api/agent/invite", {
+      identify_info: input.identifyInfo,
+      full_name: input.fullName,
+      role_name: input.roleName,
+      password: input.password,
+      ...(input.ownerEmail ? { owner_email: input.ownerEmail } : {})
+    });
+    return data?.payload ?? data;
+  }
+
+  async transferAgent(input: TransferAgentInput): Promise<{ requestId: string }> {
+    const { data } = await this.v3.post("/api/v3/agent/transfer", {
+      sourceEmail: input.sourceEmail,
+      targetEmail: input.targetEmail,
+      ...(input.targetInfo ? { targetInfo: input.targetInfo } : {}),
+      ...(input.callbackResultConfig ? { callbackResultConfig: input.callbackResultConfig } : {})
+    });
+    return data?.payload;
+  }
+
+  async deleteAgent(email: string): Promise<Record<string, unknown>> {
+    const { data } = await this.v1.get("/api/agent/delete", {
+      params: { identify_info: email }
+    });
+    return data;
+  }
+
+  async updateInternalPhone(input: UpdateInternalPhoneInput): Promise<Record<string, unknown>> {
+    const { data } = await this.v1.post("/api/call_center/internal_phone/update", {
+      sip_user: input.sipUser,
+      ...(input.password ? { password: input.password } : {}),
+      ...(input.callTimeout ? { call_timeout: input.callTimeout } : {})
+    });
+    return data;
   }
 }

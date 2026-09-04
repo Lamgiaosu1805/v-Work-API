@@ -17,6 +17,11 @@ router.post(
   asyncHandler(customerCallWebhookHttpController.receiveOmicallCallEvent)
 );
 
+router.post(
+  "/webhooks/omicall-agent-transfer",
+  asyncHandler(customerCallWebhookHttpController.receiveOmicallAgentTransferCallback)
+);
+
 router.get(
   "/sip-credentials",
   authenticate,

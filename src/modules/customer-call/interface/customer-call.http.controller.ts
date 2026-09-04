@@ -3,7 +3,10 @@ import { resolveEmployeeId } from "../../../core/authorization/resolve-employee-
 import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
 import { getSipCredentials } from "../application/get-sip-credentials.service";
 import { updateSaleRelationshipStatus } from "../application/update-sale-relationship-status.service";
-import { listCallHistory, listCallHistorySaleOptions } from "../application/list-call-history.service";
+import {
+  listCallHistory,
+  listCallHistorySaleOptions
+} from "../application/list-call-history.service";
 import {
   listCustomersToCall,
   ListCustomersToCallFilters

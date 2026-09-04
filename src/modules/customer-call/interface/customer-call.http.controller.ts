@@ -12,6 +12,7 @@ import {
   ListCustomersToCallFilters
 } from "../application/list-customers-to-call.service";
 import { reconcileCallHistory } from "../application/reconcile-call-history.service";
+import { updateCallLogNote } from "../application/update-call-log-note.service";
 import { CustomerSaleRelationshipStatus } from "../domain/customer-sale-relationship.entity";
 
 export const customerCallHttpController = {
@@ -65,5 +66,14 @@ export const customerCallHttpController = {
     }
     const result = await reconcileCallHistory(fromDate, toDate);
     return res.status(200).json({ message: "OK", data: result });
+  },
+
+  async updateCallLogNote(req: Request, res: Response) {
+    const { note } = req.body;
+    if (typeof note !== "string") {
+      throw new ArgumentInvalidException("note là bắt buộc");
+    }
+    await updateCallLogNote(req.permissionAbility!, req.params.id, note);
+    return res.status(200).json({ message: "Cập nhật ghi chú thành công" });
   }
 };

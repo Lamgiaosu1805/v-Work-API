@@ -57,6 +57,13 @@ router.get(
   asyncHandler(customerCallHttpController.getCallHistorySaleOptions)
 );
 
+router.patch(
+  "/history/:id/note",
+  authenticate,
+  requirePermission("call_log.update_note", "CallLog"),
+  asyncHandler(customerCallHttpController.updateCallLogNote)
+);
+
 router.post(
   "/reconcile",
   authenticate,

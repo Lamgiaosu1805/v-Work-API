@@ -13,7 +13,7 @@ SRS gồm 3 use case: **CRM.04.1** Xem danh sách khách hàng cần gọi, **CR
 
 ---
 
-## 0. Gap nghiêm trọng nhất — kiến trúc nguồn dữ liệu "Lịch sử cuộc gọi"
+## 0. Gap nghiêm trọng nhất — kiến trúc nguồn dữ liệu "Lịch sử cuộc gọi" — ✅ ĐÃ CHỐT (03-09-2026): giữ nguyên kiến trúc hiện tại (webhook + `CallLogModel`), không đổi sang live-query. Deviation có chủ đích so với SRS, ghi nhận lại ở đây.
 
 SRS (mục "Bảng lịch sử cuộc gọi", CRM.04.2) ghi rõ:
 
@@ -39,17 +39,15 @@ khác hẳn: webhook CDR từ Omicall được lưu vào **`CallLogModel`** (DB 
 
 **Kéo theo 2 hệ quả trực tiếp:**
 
-### 0.1. Cột "Cước phí" — công thức làm tròn khác nhau
+### 0.1. Cột "Cước phí" — công thức làm tròn khác nhau — ✅ ĐÃ CHỐT (03-09-2026)
 
 SRS (cột `m. Cột cước phí`, CRM.04.2): gọi `GET /api/v2/callTransaction/getByTransactionId` lấy
 `call_out_price`, hiển thị VNĐ, **"làm tròn đến chữ số thập phân thứ 3"**.
 
-Code hiện tại (`CallHistoryTab.jsx`) đọc `call_out_price` từ `CallLogModel` (đã lưu sẵn từ webhook,
-không gọi lại API), và vừa được sửa theo yêu cầu trực tiếp của PM trong phiên làm việc thành
-**`Math.round(...)`** (làm tròn số nguyên, 0 chữ số thập phân) — **mâu thuẫn trực tiếp với SRS**.
-
-→ **Cần chốt: giữ `Math.round` (số nguyên, theo yêu cầu miệng mới nhất) hay đổi lại làm tròn 3 chữ số
-thập phân (theo SRS)?**
+**Đã sửa theo đúng SRS** — `CallHistoryTab.jsx` giờ dùng
+`toLocaleString("vi-VN", { maximumFractionDigits: 3 })` (làm tròn tối đa 3 chữ số thập phân), không
+còn `Math.round` số nguyên như bản trước. Vẫn đọc `call_out_price` từ `CallLogModel` (không gọi lại
+`getByTransactionId` — giữ nguyên quyết định kiến trúc ở mục 0, không đụng tới nguồn dữ liệu).
 
 ### 0.2. Cột "Ghi chú" — SRS có hành vi sửa, code hiện tại chỉ đọc
 
@@ -105,11 +103,11 @@ liệu — áp dụng cho toàn bộ mục này).
 
 | # | SRS (mã BR/FR) | Mô tả SRS | Hiện trạng code | Mức độ |
 |---|---|---|---|---|
-| 2.1 | (mục 0) | Nguồn dữ liệu = live query `call-transaction/search` mỗi lần vào màn | Đọc từ `CallLogModel` (đồng bộ qua webhook, không live-query) | 🔴 Deviation kiến trúc — xem mục 0 |
-| 2.2 | (mục 0.1) | Cước phí làm tròn **3 chữ số thập phân** | Đang `Math.round` (số nguyên) theo yêu cầu mới nhất | 🔴 Mâu thuẫn — cần PM chốt |
-| 2.3 | (mục 0.2) | Ghi chú **cho phép sửa**, gọi `updateCallTransaction` | Chỉ hiển thị, chưa có UI/API sửa | 🔴 Thiếu tính năng đã đặc tả rõ trong SRS |
+| 2.1 | (mục 0) | Nguồn dữ liệu = live query `call-transaction/search` mỗi lần vào màn | Đọc từ `CallLogModel` (đồng bộ qua webhook, không live-query) | ✅ Đã chốt (03-09-2026) — giữ nguyên, xem mục 0 |
+| 2.2 | (mục 0.1) | Cước phí làm tròn **3 chữ số thập phân** | Đã sửa `toLocaleString("vi-VN", { maximumFractionDigits: 3 })` | ✅ Đã sửa (03-09-2026) — xem mục 0.1 |
+| 2.3 | (mục 0.2) | Ghi chú **cho phép sửa**, gọi `updateCallTransaction` | Chỉ hiển thị, chưa có UI/API sửa | 🔴 Còn mở — chờ PM chốt có làm không |
 | 2.4 | BR_04 | Nút Play chỉ hiện khi **có file ghi âm VÀ thời lượng cuộc gọi > 0 giây** | Code chỉ check `recording_file_url` truthy, **chưa check thêm điều kiện thời lượng > 0** | 🟢 Thiếu điều kiện phụ, dễ sửa |
-| 2.5 | BR_03 | Phân trang tối đa 50 bản ghi/trang (giới hạn cứng của API Omicall) | Không áp dụng trực tiếp do đọc từ DB riêng (xem mục 0) — nếu giữ kiến trúc hiện tại, giới hạn 50 không còn ý nghĩa bắt buộc | 🔵 Phụ thuộc quyết định mục 0 |
+| 2.5 | BR_03 | Phân trang tối đa 50 bản ghi/trang (giới hạn cứng của API Omicall) | Không áp dụng — đã chốt giữ kiến trúc đọc từ DB riêng (mục 0), giới hạn 50 không còn bắt buộc | ✅ Không còn là gap (03-09-2026) |
 
 **Điểm khớp đúng, không có gap:** BR_01 (tách theo TIKLUY/VNFITE), BR_02 (Sale tự xem, Trưởng nhóm
 xem theo phòng ban — đã seed đúng `CALL_LOG_SELF_ASSIGNED`/`CALL_LOG_OWN_DEPARTMENT`), FR_01 (search
@@ -137,12 +135,11 @@ API liên quan đã có sẵn trong `omicallClient.ts` nhưng chưa dùng: khôn
 
 ## 4. Việc cần PM/dev chốt trước khi code tiếp
 
-- [ ] **Cước phí (0.1):** giữ `Math.round` số nguyên, hay đổi về làm tròn 3 chữ số thập phân theo SRS?
+- [x] **Cước phí (0.1):** ✅ 03-09-2026 — đổi về làm tròn 3 chữ số thập phân theo SRS. Đã sửa.
 - [ ] **Ghi chú (0.2):** có làm tính năng sửa note gọi thẳng Omicall (`updateCallTransaction`) ngay
       bây giờ không?
-- [ ] **Kiến trúc nguồn dữ liệu lịch sử cuộc gọi (mục 0):** giữ nguyên webhook + `CallLogModel` (có
-      lý do kỹ thuật, deviation có chủ đích) hay đổi sang live-query Omicall đúng SRS? Ảnh hưởng lớn
-      nếu đổi — cần bàn riêng, không nên quyết vội.
+- [x] **Kiến trúc nguồn dữ liệu lịch sử cuộc gọi (mục 0):** ✅ 03-09-2026 — giữ nguyên webhook +
+      `CallLogModel`, không đổi sang live-query. Deviation có chủ đích, ghi nhận trong mục 0.
 - [ ] **Luồng popup xác nhận gọi + tăng Lần gọi ngay lúc xác nhận (1.2-1.5):** đây là gap lớn nhất ở
       CRM.04.1, cần thiết kế lại cả FE (popup) lẫn BE (API mới ghi nhận lượt gọi tại thời điểm xác
       nhận, tách khỏi luồng webhook).

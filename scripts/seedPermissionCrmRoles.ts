@@ -11,9 +11,21 @@ const SALE_MANAGER_ROLE_CODE = "CRM_SALE_MANAGER";
 const TEAM_LEAD_ROLE_CODE = "CRM_SALE_TEAM_LEAD";
 
 const SALE_GRANTS: PermissionGrantDoc[] = [
-  { permissionCode: "customer.view", dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED", fieldScopePolicyCode: null },
-  { permissionCode: "customer.claim", dataScopePolicyCode: "CUSTOMER_ALL_COMPANY", fieldScopePolicyCode: null },
-  { permissionCode: "customer.ai_insight", dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED", fieldScopePolicyCode: null },
+  {
+    permissionCode: "customer.view",
+    dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer.claim",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer.ai_insight",
+    dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED",
+    fieldScopePolicyCode: null
+  },
   {
     permissionCode: "customer_interaction.view",
     dataScopePolicyCode: "CUSTOMER_INTERACTION_SELF_ASSIGNED",
@@ -24,7 +36,11 @@ const SALE_GRANTS: PermissionGrantDoc[] = [
     dataScopePolicyCode: "CUSTOMER_INTERACTION_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
-  { permissionCode: "commission.view", dataScopePolicyCode: "COMMISSION_SELF_ASSIGNED", fieldScopePolicyCode: null },
+  {
+    permissionCode: "commission.view",
+    dataScopePolicyCode: "COMMISSION_SELF_ASSIGNED",
+    fieldScopePolicyCode: null
+  },
   {
     permissionCode: "customer_claim_request.create",
     dataScopePolicyCode: "CUSTOMER_CLAIM_REQUEST_ALL_COMPANY",
@@ -37,6 +53,11 @@ const SALE_GRANTS: PermissionGrantDoc[] = [
   },
   {
     permissionCode: "call_log.view",
+    dataScopePolicyCode: "CALL_LOG_SELF_ASSIGNED",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "call_log.update_note",
     dataScopePolicyCode: "CALL_LOG_SELF_ASSIGNED",
     fieldScopePolicyCode: null
   },
@@ -64,6 +85,11 @@ const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
     fieldScopePolicyCode: null
   },
   {
+    permissionCode: "call_log.update_note",
+    dataScopePolicyCode: "CALL_LOG_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
     permissionCode: "customer_call.initiate",
     dataScopePolicyCode: "SALE_OMICALL_PROFILE_ALL_COMPANY",
     fieldScopePolicyCode: null
@@ -76,10 +102,26 @@ const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
 ];
 
 const SALE_MANAGER_GRANTS: PermissionGrantDoc[] = [
-  { permissionCode: "customer.view", dataScopePolicyCode: "CUSTOMER_ALL_COMPANY", fieldScopePolicyCode: null },
-  { permissionCode: "customer.assign", dataScopePolicyCode: "CUSTOMER_ALL_COMPANY", fieldScopePolicyCode: null },
-  { permissionCode: "customer.claim", dataScopePolicyCode: "CUSTOMER_ALL_COMPANY", fieldScopePolicyCode: null },
-  { permissionCode: "customer.ai_insight", dataScopePolicyCode: "CUSTOMER_ALL_COMPANY", fieldScopePolicyCode: null },
+  {
+    permissionCode: "customer.view",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer.assign",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer.claim",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer.ai_insight",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
   {
     permissionCode: "customer_interaction.view",
     dataScopePolicyCode: "CUSTOMER_INTERACTION_ALL_COMPANY",
@@ -90,10 +132,26 @@ const SALE_MANAGER_GRANTS: PermissionGrantDoc[] = [
     dataScopePolicyCode: "CUSTOMER_INTERACTION_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
-  { permissionCode: "agent.view", dataScopePolicyCode: "AGENT_ALL_COMPANY", fieldScopePolicyCode: null },
-  { permissionCode: "investment.view", dataScopePolicyCode: "INVESTMENT_ALL_COMPANY", fieldScopePolicyCode: null },
-  { permissionCode: "commission.view", dataScopePolicyCode: "COMMISSION_ALL_COMPANY", fieldScopePolicyCode: null },
-  { permissionCode: "claim_period.view", dataScopePolicyCode: "CLAIM_PERIOD_ALL_COMPANY", fieldScopePolicyCode: null },
+  {
+    permissionCode: "agent.view",
+    dataScopePolicyCode: "AGENT_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "investment.view",
+    dataScopePolicyCode: "INVESTMENT_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "commission.view",
+    dataScopePolicyCode: "COMMISSION_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "claim_period.view",
+    dataScopePolicyCode: "CLAIM_PERIOD_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
   {
     permissionCode: "claim_period.manage",
     dataScopePolicyCode: "CLAIM_PERIOD_ALL_COMPANY",

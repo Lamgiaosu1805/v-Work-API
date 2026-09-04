@@ -598,6 +598,14 @@ const DEFINITIONS: PermissionDef[] = [
     validDataScopePolicies: CALL_LOG_SCOPES
   },
   {
+    code: "call_log.update_note",
+    module: "crm",
+    name: "Sửa ghi chú cuộc gọi",
+    entity: "CallLog",
+    actionKind: "WRITE",
+    validDataScopePolicies: CALL_LOG_SCOPES
+  },
+  {
     code: "customer_call.initiate",
     module: "crm",
     name: "Kích hoạt SDK gọi điện (lấy SIP credentials)",

@@ -45,8 +45,20 @@ export class CallLogEntity extends Entity<CallLogPayload> {
     return this.props.transactionId;
   }
 
+  get note(): string {
+    return this.props.note;
+  }
+
+  get saleId(): string | null {
+    return this.props.saleId;
+  }
+
   applyWebhookPayload(payload: CallLogPayload): void {
     this._setProps(payload);
+  }
+
+  updateNote(note: string): void {
+    this._setProps({ ...this.props, note });
   }
 
   validate(): void {

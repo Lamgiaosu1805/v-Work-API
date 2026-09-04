@@ -27,6 +27,12 @@ export type {
   EmployeePermissionListItem,
   ListEmployeesForPermissionResult
 } from "./application/list-employees-for-permission.service";
+
+export { listEmployeesByRoleCodes } from "./application/list-employees-by-role-codes.service";
+export type { EmployeeByRoleItem } from "./application/list-employees-by-role-codes.service";
+
+export { findRolesByCodes } from "./application/find-roles-by-codes.service";
+export type { RoleByCodeItem } from "./application/find-roles-by-codes.service";
 export { getEmployeePermissionProfile } from "./application/get-employee-permission-profile.service";
 export type { EmployeePermissionProfileView } from "./application/get-employee-permission-profile.service";
 export { updateEmployeePermission } from "./application/update-employee-permission.service";

@@ -103,6 +103,117 @@ export interface UpdateInternalPhoneInput {
   callTimeout?: string;
 }
 
+export interface HotlineWorkingDayTimeFrame {
+  from?: string;
+  to?: string;
+  script?: string;
+}
+
+export interface HotlineWorkingDay {
+  weekday: number;
+  type: string;
+  script?: string;
+  time_frames?: HotlineWorkingDayTimeFrame[];
+}
+
+export interface HotlineConfigs {
+  allow_call_in: boolean;
+  allow_call_out: boolean;
+  default_script: string | null;
+  working_days: HotlineWorkingDay[];
+  special_days: unknown[];
+  call_configs: unknown;
+  access_type: string;
+  number_type: string;
+  disable_by_time_frame: boolean;
+  outbound_config: unknown;
+}
+
+export interface HotlineAccessEntry {
+  id: string;
+  type: string;
+  name: string;
+}
+
+export interface HotlineItem {
+  number: string;
+  status: string;
+  expire_date: number | null;
+  created_date: number;
+  last_updated_date: number;
+  configs: HotlineConfigs;
+  accesses: HotlineAccessEntry[];
+}
+
+export interface SearchHotlinesParams {
+  page: number;
+  size: number;
+  keyword?: string;
+}
+
+export interface SearchHotlinesResult {
+  items: HotlineItem[];
+  page_number: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+}
+
+export interface UpdateHotlineConfigInput {
+  hotline: string;
+  extensions?: string[];
+  group_ids?: string[];
+  call_script?: string;
+  allow_call_in?: string;
+  allow_call_out?: string;
+  access_type?: string;
+}
+
+export interface CallScriptItem {
+  _id: string;
+  extension?: string;
+  script_name: string;
+  script_name_unsigned?: string;
+  note?: string;
+  is_deleted?: boolean;
+}
+
+export interface ListCallScriptsResult {
+  items: CallScriptItem[];
+  page_number: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+}
+
+export interface InternalPhoneItem {
+  sip_user: string;
+  full_name: string;
+  email?: string;
+  agent_id?: string;
+  public_number?: string;
+}
+
+export interface ListInternalPhonesParams {
+  keyword?: string;
+  page?: number;
+  size?: number;
+}
+
+export interface ListInternalPhonesResult {
+  items: InternalPhoneItem[];
+  page_number: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+}
+
 interface CachedOmicallToken {
   accessToken: string;
   expiresAt: number;
@@ -272,5 +383,34 @@ export class OmicallClient {
       ...(input.callTimeout ? { call_timeout: input.callTimeout } : {})
     });
     return data;
+  }
+
+  async searchHotlines(params: SearchHotlinesParams): Promise<SearchHotlinesResult> {
+    const { data } = await this.v1.get("/api/call_center/hotline/search", {
+      params: { page: params.page, size: params.size, keyword: params.keyword }
+    });
+    return data?.payload;
+  }
+
+  async getHotlineByPhone(hotline: string): Promise<HotlineItem | null> {
+    const { data } = await this.v1.get("/api/call_center/hotline/by-phone", {
+      params: { hotline }
+    });
+    return data?.payload ?? null;
+  }
+
+  async updateHotlineConfig(input: UpdateHotlineConfigInput): Promise<boolean> {
+    const { data } = await this.v1.put("/api/call_center/hotline/update", input);
+    return Boolean(data?.payload);
+  }
+
+  async listCallScripts(params: { page: number; size: number }): Promise<ListCallScriptsResult> {
+    const { data } = await this.v1.get("/api/call_center/call_script/list", { params });
+    return data?.payload;
+  }
+
+  async listInternalPhones(params: ListInternalPhonesParams): Promise<ListInternalPhonesResult> {
+    const { data } = await this.v1.get("/api/call_center/internal_phone/list", { params });
+    return data?.payload;
   }
 }

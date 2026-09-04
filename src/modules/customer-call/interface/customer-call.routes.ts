@@ -43,6 +43,13 @@ router.patch(
   asyncHandler(customerCallHttpController.updateRelationshipStatus)
 );
 
+router.post(
+  "/customers/:id/call-attempts",
+  authenticate,
+  requirePermission("customer_call.view", "Customer"),
+  asyncHandler(customerCallHttpController.recordCallAttempt)
+);
+
 router.get(
   "/history",
   authenticate,

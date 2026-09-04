@@ -13,7 +13,19 @@ import {
 } from "../application/list-customers-to-call.service";
 import { reconcileCallHistory } from "../application/reconcile-call-history.service";
 import { updateCallLogNote } from "../application/update-call-log-note.service";
+import { recordCallAttempt } from "../application/record-call-attempt.service";
 import { CustomerSaleRelationshipStatus } from "../domain/customer-sale-relationship.entity";
+
+function parseCsvParam(value: unknown): string[] | undefined {
+  if (typeof value !== "string" || value === "") return undefined;
+  return value.split(",").filter(Boolean);
+}
+
+function parseCallCountParam(value: unknown): (number | "gt3")[] | undefined {
+  const parts = parseCsvParam(value);
+  if (!parts) return undefined;
+  return parts.map((part) => (part === "gt3" ? "gt3" : Number(part)));
+}
 
 export const customerCallHttpController = {
   async getSipCredentials(req: Request, res: Response) {
@@ -36,11 +48,12 @@ export const customerCallHttpController = {
 
   async getCustomersToCall(req: Request, res: Response) {
     const { appCode, status, relationshipStatus, callCount, search, page, limit } = req.query;
+
     const result = await listCustomersToCall(req.permissionAbility!, {
       appCode: appCode as string | undefined,
-      status: status as ListCustomersToCallFilters["status"],
-      relationshipStatus: relationshipStatus as string | undefined,
-      callCount: callCount !== undefined ? Number(callCount) : undefined,
+      status: parseCsvParam(status) as ListCustomersToCallFilters["status"],
+      relationshipStatus: parseCsvParam(relationshipStatus),
+      callCount: parseCallCountParam(callCount),
       search: search as string | undefined,
       page,
       limit
@@ -75,5 +88,10 @@ export const customerCallHttpController = {
     }
     await updateCallLogNote(req.permissionAbility!, req.params.id, note);
     return res.status(200).json({ message: "Cập nhật ghi chú thành công" });
+  },
+
+  async recordCallAttempt(req: Request, res: Response) {
+    const data = await recordCallAttempt(req.permissionAbility!, req.params.id);
+    return res.status(200).json({ message: "OK", data });
   }
 };

@@ -8,6 +8,7 @@ import { removeCrmSaleEmployee } from "../../../workflows/remove-crm-sale-employ
 import { transferCrmSaleEmployee } from "../../../workflows/transfer-crm-sale-employee.workflow";
 import { configureCrmSaleSipPassword } from "../../../workflows/configure-crm-sale-sip-password.workflow";
 import { CRM_SALE_ROLE_CODES, CrmSaleRoleCode } from "../../../workflows/crm-sale-roles.constants";
+import { assignExtensionOutboundHotline } from "../application/assign-extension-outbound-hotline.service";
 
 function assertValidCrmSaleRoleCode(roleCode: unknown): asserts roleCode is CrmSaleRoleCode {
   if (!CRM_SALE_ROLE_CODES.includes(roleCode as CrmSaleRoleCode)) {
@@ -60,5 +61,14 @@ export const crmSaleAdminHttpController = {
   async syncCrmSaleSipCredentials(req: Request, res: Response) {
     const data = await getSipCredentials(req.params.employeeId, true);
     return res.status(200).json({ message: "Đồng bộ SIP thành công", data });
+  },
+
+  async assignExtensionOutboundHotline(req: Request, res: Response) {
+    const { hotlineNumber } = req.body;
+    if (!hotlineNumber || typeof hotlineNumber !== "string") {
+      throw new ArgumentInvalidException("hotlineNumber là bắt buộc");
+    }
+    await assignExtensionOutboundHotline(req.params.employeeId, hotlineNumber);
+    return res.status(200).json({ message: "Đã gán đầu số gọi ra" });
   }
 };

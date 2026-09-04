@@ -1,15 +1,11 @@
 import mongoose from "mongoose";
 import CustomerModel from "../../../models/CustomerModel";
-import { runInTransaction } from "../../../core/db/run-in-transaction";
 import { CallLogRepository } from "../infrastructure/call-log.repository";
-import { CustomerCallStatsRepository } from "../infrastructure/customer-call-stats.repository";
 import { SaleOmicallProfileRepository } from "../infrastructure/sale-omicall-profile.repository";
 import { CallLogEntity, CallLogPayload, CallLogDirection } from "../domain/call-log.entity";
-import { CustomerCallStatsEntity } from "../domain/customer-call-stats.entity";
 import { normalizePhoneNumber } from "../domain/normalize-phone-number";
 
 const callLogRepository = new CallLogRepository();
-const customerCallStatsRepository = new CustomerCallStatsRepository();
 const saleOmicallProfileRepository = new SaleOmicallProfileRepository();
 
 export interface OmicallWebhookPayload {
@@ -78,34 +74,15 @@ export async function handleOmicallWebhook(payload: OmicallWebhookPayload): Prom
     rawPayload: payload
   };
 
-  await runInTransaction(async () => {
-    const existing = await callLogRepository.findByTransactionId(payload.transaction_id);
+  const existing = await callLogRepository.findByTransactionId(payload.transaction_id);
 
-    if (existing) {
-      existing.applyWebhookPayload(callLogPayload);
-      await callLogRepository.updateById(existing.id, existing);
-      return;
-    }
+  if (existing) {
+    existing.applyWebhookPayload(callLogPayload);
+    await callLogRepository.updateById(existing.id, existing);
+    return;
+  }
 
-    const callLogId = new mongoose.Types.ObjectId().toString();
-    const callLog = CallLogEntity.create({ id: callLogId, ...callLogPayload });
-    await callLogRepository.insert(callLog);
-
-    if (!callLogPayload.customerId) return;
-
-    const stats = await customerCallStatsRepository.findByCustomerId(callLogPayload.customerId);
-    if (stats) {
-      stats.recordCallAttempt(callLogPayload.timeStartCall);
-      await customerCallStatsRepository.updateById(stats.id, stats);
-      return;
-    }
-
-    const statsId = new mongoose.Types.ObjectId().toString();
-    const newStats = CustomerCallStatsEntity.create({
-      id: statsId,
-      customerId: callLogPayload.customerId
-    });
-    newStats.recordCallAttempt(callLogPayload.timeStartCall);
-    await customerCallStatsRepository.insert(newStats);
-  });
+  const callLogId = new mongoose.Types.ObjectId().toString();
+  const callLog = CallLogEntity.create({ id: callLogId, ...callLogPayload });
+  await callLogRepository.insert(callLog);
 }

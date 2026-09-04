@@ -212,6 +212,7 @@ describe("listCustomersToCall (integration, MongoMemoryServer)", () => {
       app_id: app._id,
       phone_number: "0911111111",
       referred_by: saleA.employeeId,
+      external_id: "EXT-KHACH-01",
       identity: { full_name: "Khach Da Dau Tu", verified_at: new Date() }
     });
 
@@ -244,5 +245,146 @@ describe("listCustomersToCall (integration, MongoMemoryServer)", () => {
     expect(item.relationshipStatus).toBe("friended");
     expect(item.saleName).toBe("Sale A4");
     expect(item.derivedStatus).toBe("dang_dau_tu");
+    expect(item.external_id).toBe("EXT-KHACH-01");
+  });
+
+  test("callCount='gt3' -> chỉ trả về khách hàng có call_count > 3, không gồm đúng 3", async () => {
+    const saleA = await createSale("saleA5", "Sale A5", "NV-A5");
+    await seedCustomerCallPermission(saleA.employeeId);
+    const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
+
+    const customer3Calls = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0911111111",
+      referred_by: saleA.employeeId,
+      identity: { full_name: "Khach Goi 3 Lan" }
+    });
+    const customer4Calls = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0922222222",
+      referred_by: saleA.employeeId,
+      identity: { full_name: "Khach Goi 4 Lan" }
+    });
+
+    await CustomerCallStatsModel.create({
+      customer_id: customer3Calls._id,
+      call_count: 3,
+      last_contacted_at: new Date()
+    });
+    await CustomerCallStatsModel.create({
+      customer_id: customer4Calls._id,
+      call_count: 4,
+      last_contacted_at: new Date()
+    });
+
+    const abilityA = await resolveEffectiveAbility(saleA.employeeId);
+    const result = await listCustomersToCall(abilityA, {
+      appCode: "tikluy",
+      page: 1,
+      limit: 20,
+      callCount: ["gt3"]
+    });
+
+    expect(result.total).toBe(1);
+    expect((result.data[0] as any).phone_number).toBe("0922222222");
+  });
+
+  test("callCount=['0','gt3'] (multi-select) -> gộp cả 'Chưa gọi' VÀ 'Trên 3 lần', bỏ qua lần 1/2/3", async () => {
+    const saleA = await createSale("saleA6", "Sale A6", "NV-A6");
+    await seedCustomerCallPermission(saleA.employeeId);
+    const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
+
+    const customer0Calls = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0911111111",
+      referred_by: saleA.employeeId,
+      identity: { full_name: "Khach Chua Goi" }
+    });
+    const customer2Calls = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0922222222",
+      referred_by: saleA.employeeId,
+      identity: { full_name: "Khach Goi 2 Lan" }
+    });
+    const customer5Calls = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0933333333",
+      referred_by: saleA.employeeId,
+      identity: { full_name: "Khach Goi 5 Lan" }
+    });
+
+    await CustomerCallStatsModel.create({
+      customer_id: customer2Calls._id,
+      call_count: 2,
+      last_contacted_at: new Date()
+    });
+    await CustomerCallStatsModel.create({
+      customer_id: customer5Calls._id,
+      call_count: 5,
+      last_contacted_at: new Date()
+    });
+
+    const abilityA = await resolveEffectiveAbility(saleA.employeeId);
+    const result = await listCustomersToCall(abilityA, {
+      appCode: "tikluy",
+      page: 1,
+      limit: 20,
+      callCount: [0, "gt3"]
+    });
+
+    expect(result.total).toBe(2);
+    const phones = (result.data as any[]).map((item) => item.phone_number).sort();
+    expect(phones).toEqual(["0911111111", "0933333333"]);
+    expect(customer0Calls).toBeTruthy();
+  });
+
+  test("status=['dang_dau_tu','chua_ekyc'] (multi-select) -> gộp 2 nhóm trạng thái", async () => {
+    const saleA = await createSale("saleA7", "Sale A7", "NV-A7");
+    await seedCustomerCallPermission(saleA.employeeId);
+    const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
+
+    await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0944444444",
+      referred_by: saleA.employeeId,
+      identity: { full_name: "Khach Chua eKYC" }
+    });
+    const investedCustomer = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0955555555",
+      referred_by: saleA.employeeId,
+      identity: { full_name: "Khach Dang Dau Tu", verified_at: new Date() }
+    });
+    await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0966666666",
+      referred_by: saleA.employeeId,
+      identity: { full_name: "Khach eKYC Chua DT", verified_at: new Date() }
+    });
+    await InvestmentModel.create({
+      app_id: app._id,
+      customer_id: investedCustomer._id,
+      external_investment_id: "ext-multi-1",
+      product_name: "Sản phẩm test",
+      amount: 1000000,
+      term_type: "month",
+      term_value: 6,
+      interest_rate: 10,
+      invested_at: new Date(),
+      maturity_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 180),
+      status: "active"
+    });
+
+    const abilityA = await resolveEffectiveAbility(saleA.employeeId);
+    const result = await listCustomersToCall(abilityA, {
+      appCode: "tikluy",
+      page: 1,
+      limit: 20,
+      status: ["dang_dau_tu", "chua_ekyc"]
+    });
+
+    expect(result.total).toBe(2);
+    const phones = (result.data as any[]).map((item) => item.phone_number).sort();
+    expect(phones).toEqual(["0944444444", "0955555555"]);
   });
 });

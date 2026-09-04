@@ -17,6 +17,11 @@ export async function updateCallLogNote(
   callLogId: string,
   note: string
 ): Promise<void> {
+  const entity = await callLogRepository.findOneById(callLogId);
+  if (!entity) {
+    throw new NotFoundException("Không tìm thấy cuộc gọi");
+  }
+
   const scopeFilter = castObjectIdFields(toMongoQuery(ability, "call_log.update_note", "CallLog"), [
     "sale_id"
   ]);
@@ -25,11 +30,6 @@ export async function updateCallLogNote(
   });
   if (!inScope) {
     throw new ForbiddenException("Bạn không có quyền sửa ghi chú cuộc gọi này");
-  }
-
-  const entity = await callLogRepository.findOneById(callLogId);
-  if (!entity) {
-    throw new NotFoundException("Không tìm thấy cuộc gọi");
   }
 
   try {

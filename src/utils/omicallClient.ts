@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import { logger } from "../config/logger";
 
 export interface SearchCallTransactionsFilter {
   fromDate: number;
@@ -359,14 +360,30 @@ export class OmicallClient {
     return data?.payload ?? data;
   }
 
-  async transferAgent(input: TransferAgentInput): Promise<{ requestId: string }> {
+  async transferAgent(input: TransferAgentInput): Promise<{ requestId: string | null }> {
     const { data } = await this.v3.post("/api/v3/agent/transfer", {
       sourceEmail: input.sourceEmail,
       targetEmail: input.targetEmail,
       ...(input.targetInfo ? { targetInfo: input.targetInfo } : {}),
       ...(input.callbackResultConfig ? { callbackResultConfig: input.callbackResultConfig } : {})
     });
-    return data?.payload;
+
+    const requestId: string | null =
+      data?.payload?.requestId ??
+      data?.payload?.request_id ??
+      data?.requestId ??
+      data?.request_id ??
+      null;
+
+    if (!requestId) {
+      logger.warn("Omicall transfer agent: response không có requestId theo shape đã biết", {
+        sourceEmail: input.sourceEmail,
+        targetEmail: input.targetEmail,
+        data
+      });
+    }
+
+    return { requestId };
   }
 
   async deleteAgent(email: string): Promise<Record<string, unknown>> {
@@ -413,4 +430,13 @@ export class OmicallClient {
     const { data } = await this.v1.get("/api/call_center/internal_phone/list", { params });
     return data?.payload;
   }
+}
+
+export function extractOmicallErrorMessage(error: unknown): string {
+  const responseData = (error as { response?: { data?: unknown } })?.response?.data as
+    | { message?: string; error?: string }
+    | undefined;
+  return (
+    responseData?.message ?? responseData?.error ?? (error as Error).message ?? "Lỗi không xác định"
+  );
 }

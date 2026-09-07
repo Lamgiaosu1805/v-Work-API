@@ -1,6 +1,10 @@
 import UserInfoModel from "../models/UserInfoModel";
-import { listSaleOmicallProfilesBySaleIds } from "../modules/customer-call";
-import { OmicallClient } from "../utils/omicallClient";
+import {
+  listSaleOmicallProfilesBySaleIds,
+  beginSaleOmicallProfileTransfer
+} from "../modules/customer-call";
+import { OmicallClient, extractOmicallErrorMessage } from "../utils/omicallClient";
+import { logger } from "../config/logger";
 import {
   ArgumentInvalidException,
   ConflictException,
@@ -10,7 +14,7 @@ import {
 const omicallClient = new OmicallClient();
 
 export interface TransferCrmSaleEmployeeResult {
-  requestId: string;
+  requestId: string | null;
 }
 
 export async function transferCrmSaleEmployee(
@@ -21,11 +25,29 @@ export async function transferCrmSaleEmployee(
     throw new ArgumentInvalidException("Không thể chuyển giao cho chính nhân viên đó");
   }
 
-  const [sourceProfile] = await listSaleOmicallProfilesBySaleIds([sourceEmployeeId]);
+  const [sourceProfile, targetProfile] = await listSaleOmicallProfilesBySaleIds([
+    sourceEmployeeId,
+    targetEmployeeId
+  ]).then((profiles) => [
+    profiles.find((profile) => profile.saleId === sourceEmployeeId),
+    profiles.find((profile) => profile.saleId === targetEmployeeId)
+  ]);
   if (!sourceProfile?.omicallEmail) {
     throw new NotFoundException("Nhân viên nguồn chưa có tài khoản Omicall để chuyển giao", {
       metadata: { sourceEmployeeId }
     });
+  }
+  if (sourceProfile.status === "transferring") {
+    throw new ConflictException(
+      "Nhân viên nguồn đang có 1 giao dịch chuyển giao khác chưa xử lý xong",
+      { metadata: { sourceEmployeeId } }
+    );
+  }
+  if (targetProfile) {
+    throw new ArgumentInvalidException(
+      "Nhân viên nhận đã có tài khoản Omicall — không thể chuyển giao",
+      { metadata: { targetEmployeeId } }
+    );
   }
 
   const targetUserInfo = await UserInfoModel.findOne({ _id: targetEmployeeId, isDeleted: false })
@@ -56,14 +78,18 @@ export async function transferCrmSaleEmployee(
         url: `${process.env.BASE_URL}/customer-call/webhooks/omicall-agent-transfer`
       }
     });
+    await beginSaleOmicallProfileTransfer(sourceEmployeeId, result.requestId, targetEmployeeId);
     return { requestId: result.requestId };
   } catch (error) {
-    throw new ConflictException("Gọi chuyển giao Omicall thất bại", {
-      metadata: {
-        sourceEmail: sourceProfile.omicallEmail,
-        targetEmail,
-        cause: (error as Error).message
-      }
+    const omicallErrorMessage = extractOmicallErrorMessage(error);
+    logger.error("Gọi chuyển giao Omicall thất bại", {
+      sourceEmail: sourceProfile.omicallEmail,
+      targetEmail,
+      omicallErrorMessage,
+      responseData: (error as { response?: { data?: unknown } })?.response?.data
+    });
+    throw new ConflictException(`Gọi chuyển giao Omicall thất bại: ${omicallErrorMessage}`, {
+      metadata: { sourceEmail: sourceProfile.omicallEmail, targetEmail, omicallErrorMessage }
     });
   }
 }

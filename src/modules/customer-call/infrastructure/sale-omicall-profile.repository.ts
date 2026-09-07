@@ -42,4 +42,28 @@ export class SaleOmicallProfileRepository extends MongooseRepositoryBase<
       .lean();
     return docs.map((doc) => this.mapper.toDomain(doc));
   }
+
+  async findByPendingTransferRequestId(
+    requestId: string
+  ): Promise<SaleOmicallProfileEntity | null> {
+    const doc = await this.model
+      .findOne({ pending_transfer_request_id: requestId, isDeleted: false })
+      .session(this.session ?? null)
+      .lean();
+    return doc ? this.mapper.toDomain(doc) : null;
+  }
+
+  async findTransferringByTargetSaleId(
+    targetSaleId: string
+  ): Promise<SaleOmicallProfileEntity | null> {
+    const doc = await this.model
+      .findOne({
+        status: "transferring",
+        pending_transfer_target_sale_id: targetSaleId,
+        isDeleted: false
+      })
+      .session(this.session ?? null)
+      .lean();
+    return doc ? this.mapper.toDomain(doc) : null;
+  }
 }

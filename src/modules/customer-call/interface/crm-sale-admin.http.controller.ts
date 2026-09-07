@@ -2,11 +2,14 @@ import { Request, Response } from "express";
 import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
 import { getSipCredentials } from "../application/get-sip-credentials.service";
 import { listCrmSaleEmployees } from "../../../workflows/list-crm-sale-employees.workflow";
+import { listCrmSaleCandidateEmployees } from "../../../workflows/list-crm-sale-candidate-employees.workflow";
+import { listCrmSaleInviteCandidateEmployees } from "../../../workflows/list-crm-sale-invite-candidate-employees.workflow";
 import { inviteCrmSaleEmployee } from "../../../workflows/invite-crm-sale-employee.workflow";
 import { changeCrmSaleRole } from "../../../workflows/change-crm-sale-role.workflow";
 import { removeCrmSaleEmployee } from "../../../workflows/remove-crm-sale-employee.workflow";
 import { transferCrmSaleEmployee } from "../../../workflows/transfer-crm-sale-employee.workflow";
 import { configureCrmSaleSipPassword } from "../../../workflows/configure-crm-sale-sip-password.workflow";
+import { setCrmSaleEmployeeEmail } from "../../../workflows/set-crm-sale-employee-email.workflow";
 import { CRM_SALE_ROLE_CODES, CrmSaleRoleCode } from "../../../workflows/crm-sale-roles.constants";
 import { assignExtensionOutboundHotline } from "../application/assign-extension-outbound-hotline.service";
 
@@ -19,6 +22,16 @@ function assertValidCrmSaleRoleCode(roleCode: unknown): asserts roleCode is CrmS
 export const crmSaleAdminHttpController = {
   async getCrmSaleEmployees(req: Request, res: Response) {
     const data = await listCrmSaleEmployees();
+    return res.status(200).json({ message: "OK", data });
+  },
+
+  async getCrmSaleCandidateEmployees(req: Request, res: Response) {
+    const data = await listCrmSaleCandidateEmployees();
+    return res.status(200).json({ message: "OK", data });
+  },
+
+  async getCrmSaleInviteCandidateEmployees(req: Request, res: Response) {
+    const data = await listCrmSaleInviteCandidateEmployees();
     return res.status(200).json({ message: "OK", data });
   },
 
@@ -70,5 +83,11 @@ export const crmSaleAdminHttpController = {
     }
     await assignExtensionOutboundHotline(req.params.employeeId, hotlineNumber);
     return res.status(200).json({ message: "Đã gán đầu số gọi ra" });
+  },
+
+  async setCrmSaleEmployeeEmail(req: Request, res: Response) {
+    const { email } = req.body;
+    await setCrmSaleEmployeeEmail(req.params.employeeId, email);
+    return res.status(200).json({ message: "Cập nhật email thành công" });
   }
 };

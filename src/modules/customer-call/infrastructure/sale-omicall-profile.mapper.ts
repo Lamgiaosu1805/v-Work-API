@@ -15,7 +15,12 @@ export const saleOmicallProfileMapper: Mapper<SaleOmicallProfileEntity, any> = {
           omicallExtension: record.omicall_extension,
           sipPassword: record.sip_password,
           omicallAgentId: record.omicall_agent_id ?? null,
-          omicallEmail: record.omicall_email
+          omicallEmail: record.omicall_email,
+          status: record.status ?? "active",
+          pendingTransferRequestId: record.pending_transfer_request_id ?? null,
+          pendingTransferTargetSaleId: record.pending_transfer_target_sale_id
+            ? String(record.pending_transfer_target_sale_id)
+            : null
         } as SaleOmicallProfileProps,
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
@@ -34,7 +39,10 @@ export const saleOmicallProfileMapper: Mapper<SaleOmicallProfileEntity, any> = {
       omicall_extension: props.omicallExtension,
       sip_password: props.sipPassword,
       omicall_agent_id: props.omicallAgentId,
-      omicall_email: props.omicallEmail
+      omicall_email: props.omicallEmail,
+      status: props.status,
+      pending_transfer_request_id: props.pendingTransferRequestId,
+      pending_transfer_target_sale_id: props.pendingTransferTargetSaleId
     };
   }
 };

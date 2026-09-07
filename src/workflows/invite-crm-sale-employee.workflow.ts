@@ -2,7 +2,8 @@ import crypto from "crypto";
 import UserInfoModel from "../models/UserInfoModel";
 import { findRolesByCodes } from "../modules/permission";
 import { getSipCredentials, SipCredentials } from "../modules/customer-call";
-import { OmicallClient } from "../utils/omicallClient";
+import { OmicallClient, extractOmicallErrorMessage } from "../utils/omicallClient";
+import { logger } from "../config/logger";
 import {
   ArgumentInvalidException,
   ConflictException,
@@ -44,8 +45,6 @@ export async function inviteCrmSaleEmployee(
     });
   }
 
-  await setCrmSaleRoleId(employeeId, role.id);
-
   try {
     await omicallClient.inviteAgent({
       identifyInfo: email,
@@ -54,11 +53,19 @@ export async function inviteCrmSaleEmployee(
       password: generateOmicallPassword()
     });
   } catch (error) {
-    throw new ConflictException(
-      "Đã gán quyền Sale CRM nhưng tạo tài khoản Omicall thất bại — kiểm tra email đã dùng trên Omicall chưa rồi thử đồng bộ lại",
-      { metadata: { email, cause: (error as Error).message } }
-    );
+    const omicallErrorMessage = extractOmicallErrorMessage(error);
+    logger.error("Tạo tài khoản Omicall thất bại — chưa gán quyền Sale CRM", {
+      employeeId,
+      email,
+      omicallErrorMessage,
+      responseData: (error as { response?: { data?: unknown } })?.response?.data
+    });
+    throw new ConflictException(`Tạo tài khoản Omicall thất bại: ${omicallErrorMessage}`, {
+      metadata: { employeeId, email, omicallErrorMessage }
+    });
   }
+
+  await setCrmSaleRoleId(employeeId, role.id);
 
   return getSipCredentials(employeeId, true);
 }

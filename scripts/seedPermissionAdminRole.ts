@@ -9,6 +9,15 @@ import UserInfoModel from "../src/models/UserInfoModel";
 
 const ROLE_CODE = "PERMISSION_ADMIN";
 
+// Mặc định PERMISSION_ADMIN nhận scope RỘNG NHẤT (validDataScopePolicies[0]) của mọi permission —
+// đúng nghĩa "toàn quyền". Ngoại lệ: màn "Gọi điện" (customer_call.view) là công cụ tác nghiệp của
+// Sale, không phải công cụ quản trị — admin cũng chỉ nên thấy khách hàng do chính mình phụ trách,
+// không phải toàn công ty. Quyết định theo yêu cầu người dùng (04-09-2026), chỉ áp cho đúng 1
+// permission này — không áp cho customer_call.initiate/update_relationship_status hay call_log.*.
+const ADMIN_SCOPE_OVERRIDES: Record<string, string> = {
+  "customer_call.view": "CUSTOMER_SELF_ASSIGNED"
+};
+
 async function buildFullGrants(): Promise<PermissionGrantDoc[]> {
   const permissions = await PermissionCatalogModel.find({ isDeleted: false }).lean();
   if (!permissions.length) {
@@ -18,13 +27,14 @@ async function buildFullGrants(): Promise<PermissionGrantDoc[]> {
   }
 
   return permissions.map((permission) => {
-    const widestDataScope = permission.validDataScopePolicies[0];
-    if (!widestDataScope) {
+    const overrideScope = ADMIN_SCOPE_OVERRIDES[permission.code];
+    const dataScope = overrideScope ?? permission.validDataScopePolicies[0];
+    if (!dataScope) {
       throw new Error(`Permission "${permission.code}" không có validDataScopePolicies nào`);
     }
     return {
       permissionCode: permission.code,
-      dataScopePolicyCode: widestDataScope,
+      dataScopePolicyCode: dataScope,
       fieldScopePolicyCode: null
     };
   });

@@ -8,6 +8,9 @@ export interface SaleOmicallProfileDoc extends Document {
   sip_password: string;
   omicall_agent_id: string | null;
   omicall_email: string;
+  status: "active" | "transferring";
+  pending_transfer_request_id: string | null;
+  pending_transfer_target_sale_id: mongoose.Types.ObjectId | null;
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -21,6 +24,13 @@ const SaleOmicallProfileSchema = new Schema<SaleOmicallProfileDoc>(
     sip_password: { type: String, required: true },
     omicall_agent_id: { type: String, default: null },
     omicall_email: { type: String, required: true },
+    status: { type: String, enum: ["active", "transferring"], default: "active" },
+    pending_transfer_request_id: { type: String, default: null },
+    pending_transfer_target_sale_id: {
+      type: Schema.Types.ObjectId,
+      ref: "user_info",
+      default: null
+    },
 
     ...BaseSchema.obj
   },

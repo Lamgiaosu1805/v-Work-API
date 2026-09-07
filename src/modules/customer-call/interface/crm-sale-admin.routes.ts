@@ -12,6 +12,20 @@ router.get(
   asyncHandler(crmSaleAdminHttpController.getCrmSaleEmployees)
 );
 
+router.get(
+  "/admin/employees/candidates",
+  authenticate,
+  isAdmin,
+  asyncHandler(crmSaleAdminHttpController.getCrmSaleCandidateEmployees)
+);
+
+router.get(
+  "/admin/employees/invite-candidates",
+  authenticate,
+  isAdmin,
+  asyncHandler(crmSaleAdminHttpController.getCrmSaleInviteCandidateEmployees)
+);
+
 router.post(
   "/admin/employees/:employeeId/invite",
   authenticate,
@@ -59,6 +73,13 @@ router.patch(
   authenticate,
   isAdmin,
   asyncHandler(crmSaleAdminHttpController.assignExtensionOutboundHotline)
+);
+
+router.patch(
+  "/admin/employees/:employeeId/email",
+  authenticate,
+  isAdmin,
+  asyncHandler(crmSaleAdminHttpController.setCrmSaleEmployeeEmail)
 );
 
 export = router;

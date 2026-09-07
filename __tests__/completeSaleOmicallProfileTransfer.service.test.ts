@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { handleOmicallAgentTransferCallback } from "../src/modules/customer-call/application/handle-omicall-agent-transfer-callback.service";
+import { completeSaleOmicallProfileTransferFromWebhook } from "../src/modules/customer-call/application/complete-sale-omicall-profile-transfer.service";
 import SaleOmicallProfileModel from "../src/models/SaleOmicallProfileModel";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AccountModel = require("../src/models/AccountModel");
@@ -45,7 +45,7 @@ async function createEmployee(username: string, fullName: string, maNv: string, 
   return String(userInfo._id);
 }
 
-describe("handleOmicallAgentTransferCallback", () => {
+describe("completeSaleOmicallProfileTransferFromWebhook", () => {
   test("status SUCCESS, khớp theo requestId -> chuyển sale_id sang target, status về active", async () => {
     const sourceId = await createEmployee("cbSrcA", "Callback Src A", "NV-CB-A", "src-a@x.test");
     const targetId = await createEmployee("cbTgtA", "Callback Tgt A", "NV-CB-B", "tgt-a@x.test");
@@ -60,10 +60,16 @@ describe("handleOmicallAgentTransferCallback", () => {
       pending_transfer_target_sale_id: targetId
     });
 
-    await handleOmicallAgentTransferCallback({
+    const result = await completeSaleOmicallProfileTransferFromWebhook({
       requestId: "req-1",
       status: "SUCCESS",
       payload: { fullName: "Callback Tgt A", phoneNumber: "0900000000", email: "tgt-a@x.test" }
+    });
+
+    expect(result).toEqual({
+      outcome: "success",
+      sourceEmployeeId: sourceId,
+      targetEmployeeId: targetId
     });
 
     const doc = await SaleOmicallProfileModel.findOne({ omicall_extension: "101" }).lean();
@@ -88,11 +94,13 @@ describe("handleOmicallAgentTransferCallback", () => {
       pending_transfer_target_sale_id: targetId
     });
 
-    await handleOmicallAgentTransferCallback({
+    const result = await completeSaleOmicallProfileTransferFromWebhook({
       requestId: "req-2",
       status: "ERROR",
       payload: { fullName: "Callback Tgt B", phoneNumber: "0900000000", email: "tgt-b@x.test" }
     });
+
+    expect(result).toEqual({ outcome: "failure", sourceEmployeeId: sourceId });
 
     const doc = await SaleOmicallProfileModel.findOne({ omicall_extension: "102" }).lean();
     expect(String((doc as any).sale_id)).toBe(sourceId);
@@ -114,7 +122,7 @@ describe("handleOmicallAgentTransferCallback", () => {
       pending_transfer_target_sale_id: targetId
     });
 
-    await handleOmicallAgentTransferCallback({
+    await completeSaleOmicallProfileTransferFromWebhook({
       requestId: undefined,
       status: "SUCCESS",
       payload: { fullName: "Callback Tgt C", phoneNumber: "0900000000", email: "tgt-c@x.test" }
@@ -125,13 +133,13 @@ describe("handleOmicallAgentTransferCallback", () => {
     expect((doc as any).status).toBe("active");
   });
 
-  test("không tìm thấy giao dịch tương ứng -> không throw, không đổi gì", async () => {
+  test("không tìm thấy giao dịch tương ứng -> trả outcome not_found, không đổi gì", async () => {
     await expect(
-      handleOmicallAgentTransferCallback({
+      completeSaleOmicallProfileTransferFromWebhook({
         requestId: "req-khong-ton-tai",
         status: "SUCCESS",
         payload: { email: "unknown@x.test" }
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ outcome: "not_found" });
   });
 });

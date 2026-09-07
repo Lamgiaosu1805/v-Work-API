@@ -4,6 +4,7 @@ import { CallLogRepository } from "../infrastructure/call-log.repository";
 import { SaleOmicallProfileRepository } from "../infrastructure/sale-omicall-profile.repository";
 import { CallLogEntity, CallLogPayload, CallLogDirection } from "../domain/call-log.entity";
 import { normalizePhoneNumber } from "../domain/normalize-phone-number";
+import { getIO } from "../../../sockets/ioRegistry";
 
 const callLogRepository = new CallLogRepository();
 const saleOmicallProfileRepository = new SaleOmicallProfileRepository();
@@ -76,13 +77,24 @@ export async function handleOmicallWebhook(payload: OmicallWebhookPayload): Prom
 
   const existing = await callLogRepository.findByTransactionId(payload.transaction_id);
 
+  let callLogId: string;
   if (existing) {
     existing.applyWebhookPayload(callLogPayload);
     await callLogRepository.updateById(existing.id, existing);
-    return;
+    callLogId = existing.id;
+  } else {
+    callLogId = new mongoose.Types.ObjectId().toString();
+    const callLog = CallLogEntity.create({ id: callLogId, ...callLogPayload });
+    await callLogRepository.insert(callLog);
   }
 
-  const callLogId = new mongoose.Types.ObjectId().toString();
-  const callLog = CallLogEntity.create({ id: callLogId, ...callLogPayload });
-  await callLogRepository.insert(callLog);
+  if (callLogPayload.timeEndCall && callLogPayload.saleId) {
+    const io = getIO();
+    io?.to(`user:${callLogPayload.saleId}`).emit("customer_call:rate", {
+      callLogId,
+      phoneNumber: callLogPayload.phoneNumber,
+      direction: callLogPayload.direction,
+      duration: callLogPayload.duration
+    });
+  }
 }

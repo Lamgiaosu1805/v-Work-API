@@ -38,8 +38,10 @@ export async function getSipCredentials(
   }
 
   const detail = await omicallClient.getExtensionDetail("user_email", email);
-  if (!detail) {
-    throw new NotFoundException("Không tìm thấy tài khoản Omicall theo email này");
+  if (!detail?.pbx_account) {
+    throw new NotFoundException(
+      `Không tìm thấy tài khoản Omicall theo email "${email}" — kiểm tra lại email nhân viên hoặc tài khoản Omicall đã bị chuyển giao/xoá`
+    );
   }
 
   const credentials: SipCredentials = {

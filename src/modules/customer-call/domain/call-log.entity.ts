@@ -32,13 +32,17 @@ export interface CallLogPayload {
   rawPayload: unknown;
 }
 
+export interface CallLogProps extends CallLogPayload {
+  rating: number | null;
+}
+
 export interface CreateCallLogInput extends CallLogPayload {
   id: string;
 }
 
-export class CallLogEntity extends Entity<CallLogPayload> {
+export class CallLogEntity extends Entity<CallLogProps> {
   static create({ id, ...payload }: CreateCallLogInput): CallLogEntity {
-    return new CallLogEntity({ id, props: payload });
+    return new CallLogEntity({ id, props: { ...payload, rating: null } });
   }
 
   get transactionId(): string {
@@ -47,6 +51,10 @@ export class CallLogEntity extends Entity<CallLogPayload> {
 
   get note(): string {
     return this.props.note;
+  }
+
+  get rating(): number | null {
+    return this.props.rating;
   }
 
   get saleId(): string | null {
@@ -58,7 +66,11 @@ export class CallLogEntity extends Entity<CallLogPayload> {
   }
 
   updateNote(note: string): void {
-    this._setProps({ ...this.props, note });
+    this._setProps({ note });
+  }
+
+  rate(rating: number): void {
+    this._setProps({ rating });
   }
 
   validate(): void {
@@ -73,6 +85,12 @@ export class CallLogEntity extends Entity<CallLogPayload> {
     }
     if (!(this.props.timeStartCall instanceof Date)) {
       throw new ArgumentInvalidException("CallLog thiếu timeStartCall hợp lệ");
+    }
+    if (
+      this.props.rating !== null &&
+      (!Number.isInteger(this.props.rating) || this.props.rating < 1 || this.props.rating > 5)
+    ) {
+      throw new ArgumentInvalidException("CallLog.rating phải là số nguyên từ 1 đến 5");
     }
   }
 }

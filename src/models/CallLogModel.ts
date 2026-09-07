@@ -26,6 +26,7 @@ export interface CallLogDoc extends Document {
   recording_file_url: string;
   record_seconds: number;
   note: string;
+  rating: number | null;
   tag: string[];
   raw_payload: unknown;
   isDeleted: boolean;
@@ -57,6 +58,7 @@ const CallLogSchema = new Schema<CallLogDoc>(
     recording_file_url: { type: String, default: "" },
     record_seconds: { type: Number, default: 0 },
     note: { type: String, default: "" },
+    rating: { type: Number, default: null, min: 1, max: 5 },
     tag: { type: [String], default: [] },
     raw_payload: { type: Schema.Types.Mixed, default: null },
 

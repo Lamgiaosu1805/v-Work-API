@@ -129,6 +129,7 @@ export async function listCallHistory(
             record_seconds: 1,
             hangup_cause: 1,
             note: 1,
+            rating: 1,
             time_start_call: 1
           }
         }
@@ -152,7 +153,9 @@ export interface CallHistorySaleOption {
   saleName: string;
 }
 
-export async function listCallHistorySaleOptions(ability: Ability): Promise<CallHistorySaleOption[]> {
+export async function listCallHistorySaleOptions(
+  ability: Ability
+): Promise<CallHistorySaleOption[]> {
   const scopeFilter = castObjectIdFields(toMongoQuery(ability, "call_log.view", "CallLog"), [
     "sale_id"
   ]);

@@ -71,6 +71,13 @@ router.patch(
   asyncHandler(customerCallHttpController.updateCallLogNote)
 );
 
+router.patch(
+  "/history/:id/rating",
+  authenticate,
+  requirePermission("call_log.update_note", "CallLog"),
+  asyncHandler(customerCallHttpController.rateCallLog)
+);
+
 router.post(
   "/reconcile",
   authenticate,

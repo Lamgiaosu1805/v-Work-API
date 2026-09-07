@@ -13,6 +13,7 @@ import {
 } from "../application/list-customers-to-call.service";
 import { reconcileCallHistory } from "../application/reconcile-call-history.service";
 import { updateCallLogNote } from "../application/update-call-log-note.service";
+import { rateCallLog } from "../application/rate-call-log.service";
 import { recordCallAttempt } from "../application/record-call-attempt.service";
 import { CustomerSaleRelationshipStatus } from "../domain/customer-sale-relationship.entity";
 
@@ -93,5 +94,11 @@ export const customerCallHttpController = {
   async recordCallAttempt(req: Request, res: Response) {
     const data = await recordCallAttempt(req.permissionAbility!, req.params.id);
     return res.status(200).json({ message: "OK", data });
+  },
+
+  async rateCallLog(req: Request, res: Response) {
+    const { rating, note } = req.body;
+    await rateCallLog(req.permissionAbility!, req.params.id, Number(rating), note);
+    return res.status(200).json({ message: "Đã lưu đánh giá cuộc gọi" });
   }
 };

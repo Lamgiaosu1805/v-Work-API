@@ -3,6 +3,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import { listCrmSaleCandidateEmployees } from "../src/workflows/list-crm-sale-candidate-employees.workflow";
 import PermissionRoleModel from "../src/models/PermissionRoleModel";
 import EmployeePermissionProfileModel from "../src/models/EmployeePermissionProfileModel";
+import SaleOmicallProfileModel from "../src/models/SaleOmicallProfileModel";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const UserInfoModel = require("../src/models/UserInfoModel");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -24,6 +25,7 @@ beforeEach(async () => {
   await Promise.all([
     PermissionRoleModel.deleteMany({}),
     EmployeePermissionProfileModel.deleteMany({}),
+    SaleOmicallProfileModel.deleteMany({}),
     UserInfoModel.deleteMany({}),
     AccountModel.deleteMany({})
   ]);
@@ -49,7 +51,11 @@ async function createEmployee(username: string, fullName: string, maNv: string, 
 
 describe("listCrmSaleCandidateEmployees", () => {
   test("trả về nhân viên có role CRM_SALE/CRM_SALE_MANAGER/CRM_SALE_TEAM_LEAD, bỏ qua role không liên quan", async () => {
-    const saleRole = await PermissionRoleModel.create({ name: "Sale CRM", code: "CRM_SALE", grants: [] });
+    const saleRole = await PermissionRoleModel.create({
+      name: "Sale CRM",
+      code: "CRM_SALE",
+      grants: []
+    });
     const managerRole = await PermissionRoleModel.create({
       name: "Sale CRM Manager",
       code: "CRM_SALE_MANAGER",
@@ -66,7 +72,12 @@ describe("listCrmSaleCandidateEmployees", () => {
       grants: []
     });
 
-    const saleId = await createEmployee("candidateSale", "Candidate Sale", "NV-CAND-SALE", "sale@test.com");
+    const saleId = await createEmployee(
+      "candidateSale",
+      "Candidate Sale",
+      "NV-CAND-SALE",
+      "sale@test.com"
+    );
     const managerId = await createEmployee(
       "candidateManager",
       "Candidate Manager",
@@ -113,5 +124,48 @@ describe("listCrmSaleCandidateEmployees", () => {
       [saleId, managerId, teamLeadId].sort()
     );
     expect(result.find((item) => item.employeeId === unrelatedId)).toBeUndefined();
+  });
+
+  test("nhân viên có role hợp lệ nhưng đã có SaleOmicallProfile -> bị loại khỏi candidate", async () => {
+    const managerRole = await PermissionRoleModel.create({
+      name: "Sale CRM Manager",
+      code: "CRM_SALE_MANAGER",
+      grants: []
+    });
+
+    const managerWithAccountId = await createEmployee(
+      "candidateMgrHasAcc",
+      "Manager Has Account",
+      "NV-CAND-MGR-2",
+      "mgr-has-acc@test.com"
+    );
+    const managerWithoutAccountId = await createEmployee(
+      "candidateMgrNoAcc",
+      "Manager No Account",
+      "NV-CAND-MGR-3",
+      "mgr-no-acc@test.com"
+    );
+
+    await EmployeePermissionProfileModel.create({
+      employeeId: managerWithAccountId,
+      roleIds: [managerRole._id],
+      overrides: []
+    });
+    await EmployeePermissionProfileModel.create({
+      employeeId: managerWithoutAccountId,
+      roleIds: [managerRole._id],
+      overrides: []
+    });
+    await SaleOmicallProfileModel.create({
+      sale_id: managerWithAccountId,
+      sip_realm: "realm",
+      omicall_extension: "102",
+      sip_password: "pass",
+      omicall_email: "mgr-has-acc@test.com"
+    });
+
+    const result = await listCrmSaleCandidateEmployees();
+
+    expect(result.map((item) => item.employeeId)).toEqual([managerWithoutAccountId]);
   });
 });

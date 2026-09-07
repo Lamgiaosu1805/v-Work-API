@@ -14,7 +14,14 @@ interface OmicallAgentTransferWebhookBody {
   payload?: { fullName?: string; phoneNumber?: string; email?: string };
 }
 
-export async function handleOmicallAgentTransferCallback(body: unknown): Promise<void> {
+export type CompleteSaleOmicallProfileTransferResult =
+  | { outcome: "success"; sourceEmployeeId: string; targetEmployeeId: string }
+  | { outcome: "failure"; sourceEmployeeId: string }
+  | { outcome: "not_found" };
+
+export async function completeSaleOmicallProfileTransferFromWebhook(
+  body: unknown
+): Promise<CompleteSaleOmicallProfileTransferResult> {
   const webhookBody = (body ?? {}) as OmicallAgentTransferWebhookBody;
 
   try {
@@ -54,26 +61,32 @@ export async function handleOmicallAgentTransferCallback(body: unknown): Promise
       targetEmail,
       status: webhookBody.status
     });
-    return;
+    return { outcome: "not_found" };
   }
 
+  const sourceEmployeeId = profile.saleId;
+
   if (isSuccess) {
+    const targetEmployeeId = profile.pendingTransferTargetSaleId as string;
     profile.completeTransferSuccess(targetEmail ?? profile.omicallEmail);
     await saleOmicallProfileRepository.updateById(profile.id, profile);
     logger.info("Chuyển giao agent Omicall thành công (theo webhook)", {
       requestId,
-      targetEmail,
+      sourceEmployeeId,
+      targetEmployeeId,
       profileId: profile.id
     });
-    return;
+    return { outcome: "success", sourceEmployeeId, targetEmployeeId };
   }
 
   profile.completeTransferFailure();
   await saleOmicallProfileRepository.updateById(profile.id, profile);
   logger.error("Chuyển giao agent Omicall thất bại (theo webhook)", {
     requestId,
+    sourceEmployeeId,
     sourceEmail: profile.omicallEmail,
     targetEmail,
     status: webhookBody.status
   });
+  return { outcome: "failure", sourceEmployeeId };
 }

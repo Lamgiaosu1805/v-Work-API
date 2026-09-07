@@ -7,7 +7,7 @@ import {
   handleOmicallCallEvent,
   OmicallCallEventPayload
 } from "../application/handle-omicall-call-event.service";
-import { handleOmicallAgentTransferCallback } from "../application/handle-omicall-agent-transfer-callback.service";
+import { handleOmicallAgentTransferCallback } from "../../../workflows/handle-omicall-agent-transfer-callback.workflow";
 
 export const customerCallWebhookHttpController = {
   async receiveOmicallWebhook(req: Request, res: Response) {

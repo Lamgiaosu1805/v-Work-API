@@ -1,4 +1,4 @@
-import { CallLogEntity, CallLogPayload } from "../domain/call-log.entity";
+import { CallLogEntity, CallLogProps } from "../domain/call-log.entity";
 import { Mapper } from "../../../core/db/mongoose-repository.base";
 
 export const callLogMapper: Mapper<CallLogEntity, any> = {
@@ -29,9 +29,10 @@ export const callLogMapper: Mapper<CallLogEntity, any> = {
           recordingFileUrl: record.recording_file_url,
           recordSeconds: record.record_seconds,
           note: record.note,
+          rating: record.rating ?? null,
           tag: record.tag ?? [],
           rawPayload: record.raw_payload ?? null
-        } as CallLogPayload,
+        } as CallLogProps,
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
         isDeleted: record.isDeleted
@@ -66,6 +67,7 @@ export const callLogMapper: Mapper<CallLogEntity, any> = {
       recording_file_url: props.recordingFileUrl,
       record_seconds: props.recordSeconds,
       note: props.note,
+      rating: props.rating,
       tag: props.tag,
       raw_payload: props.rawPayload
     };

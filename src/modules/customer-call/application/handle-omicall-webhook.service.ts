@@ -1,9 +1,9 @@
 import mongoose from "mongoose";
-import CustomerModel from "../../../models/CustomerModel";
 import { CallLogRepository } from "../infrastructure/call-log.repository";
 import { SaleOmicallProfileRepository } from "../infrastructure/sale-omicall-profile.repository";
 import { CallLogEntity, CallLogPayload, CallLogDirection } from "../domain/call-log.entity";
 import { normalizePhoneNumber } from "../domain/normalize-phone-number";
+import { resolveCustomerForCall } from "./resolve-customer-for-call";
 import { getIO } from "../../../sockets/ioRegistry";
 
 const callLogRepository = new CallLogRepository();
@@ -41,12 +41,14 @@ function toDate(unixSeconds: number | null | undefined): Date | null {
 export async function handleOmicallWebhook(payload: OmicallWebhookPayload): Promise<void> {
   const normalizedPhoneNumber = normalizePhoneNumber(payload.phone_number);
 
-  const [saleProfile, customer] = await Promise.all([
-    payload.sip_user
-      ? saleOmicallProfileRepository.findByExtension(payload.sip_user)
-      : Promise.resolve(null),
-    CustomerModel.findOne({ phone_number: normalizedPhoneNumber, isDeleted: false }).lean()
-  ]);
+  const saleProfile = payload.sip_user
+    ? await saleOmicallProfileRepository.findByExtension(payload.sip_user)
+    : null;
+  const customer = await resolveCustomerForCall(
+    normalizedPhoneNumber,
+    payload.hotline,
+    saleProfile?.saleId ?? null
+  );
 
   const callLogPayload: CallLogPayload = {
     transactionId: payload.transaction_id,
@@ -58,7 +60,7 @@ export async function handleOmicallWebhook(payload: OmicallWebhookPayload): Prom
     toNumber: payload.to_number ?? "",
     sipUser: payload.sip_user ?? "",
     saleId: saleProfile?.saleId ?? null,
-    customerId: customer ? String((customer as { _id: unknown })._id) : null,
+    customerId: customer ? String(customer._id) : null,
     answerSec: payload.answer_sec ?? 0,
     billSec: payload.bill_sec ?? 0,
     duration: payload.duration ?? 0,

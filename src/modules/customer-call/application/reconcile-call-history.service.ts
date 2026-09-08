@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import CustomerModel from "../../../models/CustomerModel";
 import CallLogModel from "../../../models/CallLogModel";
 import { runInTransaction } from "../../../core/db/run-in-transaction";
 import { OmicallClient, CallTransactionDetail } from "../../../utils/omicallClient";
@@ -9,6 +8,7 @@ import { SaleOmicallProfileRepository } from "../infrastructure/sale-omicall-pro
 import { CallLogEntity, CallLogPayload } from "../domain/call-log.entity";
 import { CustomerCallStatsEntity } from "../domain/customer-call-stats.entity";
 import { normalizePhoneNumber } from "../domain/normalize-phone-number";
+import { resolveCustomerForCall } from "./resolve-customer-for-call";
 
 const omicallClient = new OmicallClient();
 const callLogRepository = new CallLogRepository();
@@ -49,17 +49,16 @@ async function fetchAllTransactionIds(fromDate: Date, toDate2: Date): Promise<st
 }
 
 async function buildPayloadFromDetail(detail: CallTransactionDetail): Promise<CallLogPayload> {
-  const [saleProfile, customer] = await Promise.all([
-    detail.sip_user
-      ? saleOmicallProfileRepository.findByExtension(detail.sip_user)
-      : Promise.resolve(null),
-    detail.phone_number
-      ? CustomerModel.findOne({
-          phone_number: normalizePhoneNumber(detail.phone_number),
-          isDeleted: false
-        }).lean()
-      : Promise.resolve(null)
-  ]);
+  const saleProfile = detail.sip_user
+    ? await saleOmicallProfileRepository.findByExtension(detail.sip_user)
+    : null;
+  const customer = detail.phone_number
+    ? await resolveCustomerForCall(
+        normalizePhoneNumber(detail.phone_number),
+        detail.sip_number,
+        saleProfile?.saleId ?? null
+      )
+    : null;
 
   return {
     transactionId: detail.transaction_id,
@@ -71,7 +70,7 @@ async function buildPayloadFromDetail(detail: CallTransactionDetail): Promise<Ca
     toNumber: detail.destination_number ?? "",
     sipUser: detail.sip_user ?? "",
     saleId: saleProfile?.saleId ?? null,
-    customerId: customer ? String((customer as { _id: unknown })._id) : null,
+    customerId: customer ? String(customer._id) : null,
     answerSec: detail.answer_sec ?? 0,
     billSec: detail.bill_sec ?? 0,
     duration: detail.duration ?? 0,

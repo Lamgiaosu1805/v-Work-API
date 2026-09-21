@@ -1,12 +1,28 @@
 const express = require("express");
 const router = express.Router();
 const ClaimPeriodController = require("../controllers/ClaimPeriodController");
-const { authenticate, isAdmin, hasModuleAccess, canManage } = require("../middlewares/authMiddleware");
+const { authenticate, hasModuleAccess } = require("../middlewares/authMiddleware");
+const { requirePermission } = require("../core/authorization/require-permission.middleware");
 
 // Admin only
-router.post("/", authenticate, isAdmin, ClaimPeriodController.create);
-router.patch("/:id/close", authenticate, isAdmin, ClaimPeriodController.close);
-router.get("/history", authenticate, canManage("crm"), ClaimPeriodController.getHistory);
+router.post(
+  "/",
+  authenticate,
+  requirePermission("claim_period.manage", "ClaimPeriod"),
+  ClaimPeriodController.create
+);
+router.patch(
+  "/:id/close",
+  authenticate,
+  requirePermission("claim_period.close", "ClaimPeriod"),
+  ClaimPeriodController.close
+);
+router.get(
+  "/history",
+  authenticate,
+  requirePermission("claim_period.view", "ClaimPeriod"),
+  ClaimPeriodController.getHistory
+);
 
 // Tất cả user có CRM access
 router.get("/status", authenticate, hasModuleAccess("crm"), ClaimPeriodController.getStatus);

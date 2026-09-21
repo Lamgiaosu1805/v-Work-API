@@ -6,6 +6,10 @@ const {
 } = require("../src/modules/request/interface/request.http.controller");
 const { asyncHandler } = require("../src/core/http/async-handler");
 const { errorHandlerMiddleware } = require("../src/core/http/error-handler.middleware");
+const { buildAbility } = require("../src/modules/permission");
+const {
+  resolveManagedEmployeeUserIds
+} = require("../src/modules/permission/application/resolve-effective-ability.service");
 const AccountModel = require("../src/models/AccountModel");
 const UserInfoModel = require("../src/models/UserInfoModel");
 const DepartmentModel = require("../src/models/DepartmentModel");
@@ -18,8 +22,6 @@ const UserRoleModel = require("../src/models/UserRoleModel");
 const NotificationModel = require("../src/models/NotificationModel");
 const { LeaveRequest } = require("../src/models/RequestModel");
 const { PERMISSION } = require("../src/constants");
-// leaveHandler.js chỉ còn validate/validateAsync từ task 1.8.6 — onApprove/onReject (side-effect xuyên
-// Timesheet/Leave) đã chuyển sang workflows/request-side-effects/leave.ts, spy nhắm vào đó.
 const leaveHandler = require("../src/workflows/request-side-effects/leave");
 const redisMock = require("./mocks/redis");
 
@@ -29,16 +31,11 @@ let position;
 beforeAll(async () => {
   mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongod.getUri());
-  // Tránh race "Unable to acquire IX lock" khi 1 collection lần đầu được tạo NGAY
-  // trong transaction (xem requestControllerCreate.test.js).
   await Promise.all(Object.values(mongoose.connection.models).map((m) => m.init()));
   position = await PositionModel.create({ position_name: "Nhân viên" });
 }, 60000);
 
 afterAll(async () => {
-  // createRequest/reviewRequest publish domain event fire-and-forget (không await) —
-  // đợi 1 nhịp để notify của lần gọi cuối cùng kịp query xong trước khi ngắt kết nối,
-  // tránh "MongoClientClosedError: Operation interrupted" do disconnect giữa chừng.
   await new Promise((resolve) => {
     setTimeout(resolve, 50);
   });
@@ -46,9 +43,6 @@ afterAll(async () => {
   await mongod.stop();
 });
 
-// Gọi đúng như Express thật sẽ gọi: asyncHandler bắt reject rồi chuyển cho
-// errorHandlerMiddleware format response — tái dùng nguyên request.http.controller.js +
-// core/http thay vì gọi thẳng RequestController.js (đã xoá ở task 1.15).
 async function callController(action, req, res) {
   await asyncHandler(action)(req, res, (error) => errorHandlerMiddleware(error, req, res));
 }
@@ -128,6 +122,22 @@ function makeRes() {
   return { status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() };
 }
 
+const abilityAll = () =>
+  buildAbility([
+    { action: "request.review", subject: "Request" },
+    { action: "request.view", subject: "Request" }
+  ]);
+
+const abilityNone = () => buildAbility([]);
+
+async function abilityForManager(managerUserInfoId) {
+  const managedIds = await resolveManagedEmployeeUserIds(managerUserInfoId.toString());
+  return buildAbility([
+    { action: "request.review", subject: "Request", conditions: { user_id: { $in: managedIds } } },
+    { action: "request.view", subject: "Request", conditions: { user_id: { $in: managedIds } } }
+  ]);
+}
+
 async function createLeaveRequest(userInfoId) {
   const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
   return LeaveRequest.create({
@@ -168,11 +178,9 @@ async function createLongLeaveRequest(userInfoId, totalDays = 5) {
 async function setupTwoReviewers(branchId, dept) {
   const { userInfo: r1, account: a1 } = await createEmployee({ branchId });
   await assignDept(r1._id, dept._id);
-  await grantPermission(a1._id, PERMISSION.HRM_REQUEST_REVIEW);
 
   const { userInfo: r2, account: a2 } = await createEmployee({ branchId });
   await assignDept(r2._id, dept._id);
-  await grantPermission(a2._id, PERMISSION.HRM_REQUEST_REVIEW);
 
   return { r1, a1, r2, a2 };
 }
@@ -189,15 +197,14 @@ const waitFor = async (fn, { timeoutMs = 2000, intervalMs = 50 } = {}) => {
   }
 };
 
-describe("getAll — authorization động theo approval chain", () => {
-  test("manager có hrm.request.review chỉ thấy đơn của nhân viên thuộc phạm vi quản lý", async () => {
+describe("getAll — data scope theo ABAC (managedEmployeeUserIds)", () => {
+  test("manager chỉ thấy đơn của nhân viên thuộc phạm vi quản lý", async () => {
     const branchId = new mongoose.Types.ObjectId();
     const dept = await createDept("Phòng A", "department");
     const otherDept = await createDept("Phòng B", "department");
 
     const { userInfo: manager, account: managerAccount } = await createEmployee({ branchId });
     await assignDept(manager._id, dept._id);
-    await grantPermission(managerAccount._id, PERMISSION.HRM_REQUEST_REVIEW);
 
     const { userInfo: managedEmployee } = await createEmployee({ branchId });
     await assignDept(managedEmployee._id, dept._id);
@@ -208,7 +215,8 @@ describe("getAll — authorization động theo approval chain", () => {
     await createLeaveRequest(otherEmployee._id);
 
     const req = {
-      account: { _id: managerAccount._id.toString(), role: "user", module_access: [] },
+      account: { _id: managerAccount._id.toString() },
+      permissionAbility: await abilityForManager(manager._id),
       query: {}
     };
     const res = makeRes();
@@ -221,22 +229,25 @@ describe("getAll — authorization động theo approval chain", () => {
     expect(userIds).not.toContain(otherEmployee._id.toString());
   });
 
-  test("user không có permission nào bị 403", async () => {
+  test("ability rỗng (không có quyền nào) trả về danh sách rỗng, không 403", async () => {
     const { account } = await createEmployee({ branchId: new mongoose.Types.ObjectId() });
     const req = {
-      account: { _id: account._id.toString(), role: "user", module_access: [] },
+      account: { _id: account._id.toString() },
+      permissionAbility: abilityNone(),
       query: {}
     };
     const res = makeRes();
     await callController(requestHttpController.getAll, req, res);
-    expect(res.status).toHaveBeenCalledWith(403);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const { data } = res.json.mock.calls[0][0];
+    expect(data).toHaveLength(0);
   });
 
-  test("HR (view_all) thấy tất cả đơn, không bị giới hạn theo phòng ban", async () => {
+  test("HR (scope ALL_COMPANY) thấy tất cả đơn, không bị giới hạn theo phòng ban", async () => {
     const { account: hrAccount } = await createEmployee({
       branchId: new mongoose.Types.ObjectId()
     });
-    await grantPermission(hrAccount._id, PERMISSION.HRM_REQUEST_VIEW_ALL);
 
     const { userInfo: employeeA } = await createEmployee({
       branchId: new mongoose.Types.ObjectId()
@@ -248,7 +259,8 @@ describe("getAll — authorization động theo approval chain", () => {
     await createLeaveRequest(employeeB._id);
 
     const req = {
-      account: { _id: hrAccount._id.toString(), role: "user", module_access: [] },
+      account: { _id: hrAccount._id.toString() },
+      permissionAbility: abilityAll(),
       query: {}
     };
     const res = makeRes();
@@ -259,8 +271,8 @@ describe("getAll — authorization động theo approval chain", () => {
   });
 });
 
-describe("review — authorization động + thông báo dedupe", () => {
-  test("quản lý trong chuỗi phê duyệt (không phải cấp gần nhất) vẫn duyệt được", async () => {
+describe("review — data scope ABAC + thông báo dedupe", () => {
+  test("quản lý cấp trên (phòng cha) vẫn duyệt được đơn của nhân viên phòng con", async () => {
     const branchId = new mongoose.Types.ObjectId();
     const division = await createDept("Miền Bắc", "division");
     const dept = await createDept("Phòng Kế toán", "department", division._id);
@@ -273,10 +285,10 @@ describe("review — authorization động + thông báo dedupe", () => {
       branchId
     });
     await assignDept(divisionHead._id, division._id);
-    await grantPermission(divisionHeadAccount._id, PERMISSION.HRM_REQUEST_REVIEW);
 
     const req = {
-      account: { _id: divisionHeadAccount._id.toString(), role: "user" },
+      account: { _id: divisionHeadAccount._id.toString() },
+      permissionAbility: await abilityForManager(divisionHead._id),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
@@ -288,7 +300,7 @@ describe("review — authorization động + thông báo dedupe", () => {
     expect(updated.status).toBe("approved");
   });
 
-  test("người không thuộc chuỗi phê duyệt bị chặn 403", async () => {
+  test("người không thuộc phạm vi quản lý bị chặn 403", async () => {
     const branchId = new mongoose.Types.ObjectId();
     const dept = await createDept("Phòng Kế toán", "department");
     const { userInfo: employee } = await createEmployee({ branchId });
@@ -298,7 +310,8 @@ describe("review — authorization động + thông báo dedupe", () => {
     const { account: strangerAccount } = await createEmployee({ branchId });
 
     const req = {
-      account: { _id: strangerAccount._id.toString(), role: "user" },
+      account: { _id: strangerAccount._id.toString() },
+      permissionAbility: abilityNone(),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
@@ -315,17 +328,16 @@ describe("review — authorization động + thông báo dedupe", () => {
     await assignDept(employee._id, dept._id);
     const request = await createLeaveRequest(employee._id);
 
-    // M vừa là quản lý trực tiếp (unit_head) vừa là HR (view_all) — 2 đường dẫn cùng trỏ về 1 người
     const { userInfo: manager, account: managerAccount } = await createEmployee({ branchId });
     await assignDept(manager._id, dept._id);
     await grantPermission(managerAccount._id, PERMISSION.HRM_REQUEST_REVIEW);
     await grantPermission(managerAccount._id, PERMISSION.HRM_REQUEST_VIEW_ALL);
 
-    // Người duyệt là 1 admin khác (không phải M) — dùng review_all bypass
     const { account: adminAccount } = await createEmployee({ branchId, role: "admin" });
 
     const req = {
-      account: { _id: adminAccount._id.toString(), role: "admin" },
+      account: { _id: adminAccount._id.toString() },
+      permissionAbility: abilityAll(),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
@@ -356,7 +368,8 @@ describe("review — authorization động + thông báo dedupe", () => {
     await grantPermission(managerAccount._id, PERMISSION.HRM_REQUEST_REVIEW);
 
     const req = {
-      account: { _id: managerAccount._id.toString(), role: "user" },
+      account: { _id: managerAccount._id.toString() },
+      permissionAbility: await abilityForManager(manager._id),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
@@ -377,25 +390,21 @@ describe("review — authorization động + thông báo dedupe", () => {
 });
 
 describe("review — tier-2 (department.manager) có thể duyệt dù không phải thành viên", () => {
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  test("người được gán department.manager (không thuộc UserDepartmentPositionModel) vẫn duyệt được", async () => {
+  test("người được gán department.manager (không thuộc UserDepartmentPositionModel, khác chi nhánh) vẫn duyệt được", async () => {
     const branchId = new mongoose.Types.ObjectId();
     const dept = await createDept("Phòng Kế toán", "department");
     const { userInfo: employee } = await createEmployee({ branchId });
     await assignDept(employee._id, dept._id);
     const request = await createLeaveRequest(employee._id);
 
-    // Phó TGĐ: KHÔNG assignDept — chỉ gán tier-2 trực tiếp trên phòng ban, khác chi nhánh
     const { userInfo: deputy, account: deputyAccount } = await createEmployee({
       branchId: new mongoose.Types.ObjectId()
     });
     await DepartmentModel.updateOne({ _id: dept._id }, { manager: deputy._id });
 
     const req = {
-      account: { _id: deputyAccount._id.toString(), role: "user" },
+      account: { _id: deputyAccount._id.toString() },
+      permissionAbility: await abilityForManager(deputy._id),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
@@ -419,12 +428,13 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     const { userInfo: employee } = await createEmployee({ branchId });
     await assignDept(employee._id, dept._id);
     const request = await createLongLeaveRequest(employee._id);
-    const { a1 } = await setupTwoReviewers(branchId, dept);
+    const { r1, a1 } = await setupTwoReviewers(branchId, dept);
 
     const onApproveSpy = jest.spyOn(leaveHandler, "onApprove");
 
     const req = {
-      account: { _id: a1._id.toString(), role: "user" },
+      account: { _id: a1._id.toString() },
+      permissionAbility: await abilityForManager(r1._id),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
@@ -444,7 +454,7 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     const { userInfo: employee } = await createEmployee({ branchId });
     await assignDept(employee._id, dept._id);
     const request = await createLongLeaveRequest(employee._id);
-    const { a1, a2 } = await setupTwoReviewers(branchId, dept);
+    const { r1, a1, r2, a2 } = await setupTwoReviewers(branchId, dept);
 
     const onApproveSpy = jest.spyOn(leaveHandler, "onApprove");
 
@@ -452,7 +462,8 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     await callController(
       requestHttpController.review,
       {
-        account: { _id: a1._id.toString(), role: "user" },
+        account: { _id: a1._id.toString() },
+        permissionAbility: await abilityForManager(r1._id),
         params: { id: request._id.toString() },
         body: { action: "approve" }
       },
@@ -463,7 +474,8 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     await callController(
       requestHttpController.review,
       {
-        account: { _id: a2._id.toString(), role: "user" },
+        account: { _id: a2._id.toString() },
+        permissionAbility: await abilityForManager(r2._id),
         params: { id: request._id.toString() },
         body: { action: "approve" }
       },
@@ -483,10 +495,12 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     const { userInfo: employee } = await createEmployee({ branchId });
     await assignDept(employee._id, dept._id);
     const request = await createLongLeaveRequest(employee._id);
-    const { a1 } = await setupTwoReviewers(branchId, dept);
+    const { r1, a1 } = await setupTwoReviewers(branchId, dept);
+    const ability = await abilityForManager(r1._id);
 
     const reqPayload = {
-      account: { _id: a1._id.toString(), role: "user" },
+      account: { _id: a1._id.toString() },
+      permissionAbility: ability,
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
@@ -507,12 +521,13 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     const { userInfo: employee } = await createEmployee({ branchId });
     await assignDept(employee._id, dept._id);
     const request = await createLongLeaveRequest(employee._id);
-    const { a1 } = await setupTwoReviewers(branchId, dept);
+    const { r1, a1 } = await setupTwoReviewers(branchId, dept);
 
     const onRejectSpy = jest.spyOn(leaveHandler, "onReject");
 
     const req = {
-      account: { _id: a1._id.toString(), role: "user" },
+      account: { _id: a1._id.toString() },
+      permissionAbility: await abilityForManager(r1._id),
       params: { id: request._id.toString() },
       body: { action: "reject" }
     };
@@ -530,11 +545,12 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     const dept = await createDept("Phòng Kế toán", "department");
     const { userInfo: employee } = await createEmployee({ branchId });
     await assignDept(employee._id, dept._id);
-    const request = await createLeaveRequest(employee._id); // total_days = 1
-    const { a1 } = await setupTwoReviewers(branchId, dept);
+    const request = await createLeaveRequest(employee._id);
+    const { r1, a1 } = await setupTwoReviewers(branchId, dept);
 
     const req = {
-      account: { _id: a1._id.toString(), role: "user" },
+      account: { _id: a1._id.toString() },
+      permissionAbility: await abilityForManager(r1._id),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
@@ -547,7 +563,7 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     expect(updated.approvals.length).toBe(0);
   });
 
-  test("admin (review_all) duyệt đơn nghỉ dài ngày một mình: vẫn chỉ tính 1/2, chưa approved", async () => {
+  test("admin (scope ALL_COMPANY) duyệt đơn nghỉ dài ngày một mình: vẫn chỉ tính 1/2, chưa approved", async () => {
     const branchId = new mongoose.Types.ObjectId();
     const dept = await createDept("Phòng Kế toán", "department");
     const { userInfo: employee } = await createEmployee({ branchId });
@@ -557,15 +573,14 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     const { account: adminAccount } = await createEmployee({ branchId, role: "admin" });
 
     const req = {
-      account: { _id: adminAccount._id.toString(), role: "admin" },
+      account: { _id: adminAccount._id.toString() },
+      permissionAbility: abilityAll(),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
     const res = makeRes();
     await callController(requestHttpController.review, req, res);
 
-    // review_all chỉ bypass yêu cầu "phải nằm trong chuỗi duyệt" — KHÔNG bypass yêu cầu
-    // đủ 2 người của đơn nghỉ dài ngày. 1 mình admin không được tự ý duyệt xong.
     expect(res.status).toHaveBeenCalledWith(200);
     const updated = await LeaveRequest.findById(request._id);
     expect(updated.status).toBe("pending");
@@ -585,7 +600,8 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     await callController(
       requestHttpController.review,
       {
-        account: { _id: adminA._id.toString(), role: "admin" },
+        account: { _id: adminA._id.toString() },
+        permissionAbility: abilityAll(),
         params: { id: request._id.toString() },
         body: { action: "approve" }
       },
@@ -596,7 +612,8 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     await callController(
       requestHttpController.review,
       {
-        account: { _id: adminB._id.toString(), role: "admin" },
+        account: { _id: adminB._id.toString() },
+        permissionAbility: abilityAll(),
         params: { id: request._id.toString() },
         body: { action: "approve" }
       },
@@ -615,17 +632,19 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     const { userInfo: employee } = await createEmployee({ branchId });
     await assignDept(employee._id, dept._id);
     const request = await createLongLeaveRequest(employee._id);
-    const { a1, a2 } = await setupTwoReviewers(branchId, dept);
+    const { r1, a1, r2, a2 } = await setupTwoReviewers(branchId, dept);
 
     const onApproveSpy = jest.spyOn(leaveHandler, "onApprove");
 
     const reqA = {
-      account: { _id: a1._id.toString(), role: "user" },
+      account: { _id: a1._id.toString() },
+      permissionAbility: await abilityForManager(r1._id),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
     const reqB = {
-      account: { _id: a2._id.toString(), role: "user" },
+      account: { _id: a2._id.toString() },
+      permissionAbility: await abilityForManager(r2._id),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };

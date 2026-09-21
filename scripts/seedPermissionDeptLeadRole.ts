@@ -3,9 +3,19 @@ import mongoose from "mongoose";
 import isEqual from "lodash/isEqual";
 import PermissionRoleModel, { PermissionGrantDoc } from "../src/models/PermissionRoleModel";
 
-const ROLE_CODE = "DEPT_MANAGER_HRM_WORKPLACE";
+const ROLE_CODE = "DEPT_LEAD";
 
 const DEPT_MANAGER_GRANTS: PermissionGrantDoc[] = [
+  {
+    permissionCode: "request.review",
+    dataScopePolicyCode: "REQUEST_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "request.view",
+    dataScopePolicyCode: "REQUEST_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
   {
     permissionCode: "employee.update",
     dataScopePolicyCode: "EMPLOYEE_OWN_DEPARTMENT",
@@ -51,9 +61,9 @@ const DEPT_MANAGER_GRANTS: PermissionGrantDoc[] = [
 async function upsertRole(): Promise<void> {
   const existing = await PermissionRoleModel.findOne({ code: ROLE_CODE });
   const payload = {
-    name: "Quản lý phòng ban (HRM + Workplace, phạm vi phòng ban)",
+    name: "Trưởng phòng (dùng chung mọi phòng ban)",
     description:
-      "Role hệ thống — quyền quản lý nhân sự/file nội bộ/báo cáo tuần trong PHẠM VI PHÒNG BAN MÌNH, cộng quyền xem read-only dữ liệu tham chiếu chung công ty. Chưa có quyền Workplace hay duyệt đơn phòng ban — thiếu hạ tầng Data Scope OWN_DEPARTMENT cho 2 nhóm này, xem docs/DEFAULT-PERMISSION-ROLES-PLAN.md mục 2.4.",
+      "Role hệ thống — quyền quản lý nhân sự/file nội bộ/báo cáo tuần trong PHẠM VI PHÒNG BAN MÌNH, cộng quyền xem read-only dữ liệu tham chiếu chung công ty.",
     isSystemRole: true,
     grants: DEPT_MANAGER_GRANTS,
     isDeleted: false

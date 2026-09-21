@@ -1,13 +1,6 @@
 import { execFileSync } from "child_process";
 import path from "path";
 
-// Chạy toàn bộ seed permission ABAC theo đúng thứ tự dependency thật (không đoán):
-// 1-3: nền tảng (catalog / data scope / field scope) — role nào cũng reference tới, phải có trước.
-// 4: PERMISSION_ADMIN — tự throw lỗi rõ nếu catalog rỗng, nên phải sau bước 1.
-// 5+: các role nghiệp vụ theo module — không throw cứng khi thiếu dependency, nhưng grant sẽ crash
-//     lúc runtime (resolveEffectiveRules) nếu Data Scope Policy tham chiếu chưa tồn tại.
-// Mỗi script trong danh sách đều IDEMPOTENT (upsert + so sánh isEqual trước khi ghi) — chạy lại
-// nhiều lần, kể cả trên production đã có data, không tạo trùng/ghi đè sai.
 const SEED_SCRIPTS = [
   "seedPermissionCatalog.ts",
   "seedPermissionDataScopePolicy.ts",
@@ -17,7 +10,7 @@ const SEED_SCRIPTS = [
   "seedPermissionEmployeeBaselineRole.ts",
   "seedPermissionHrmStaffRole.ts",
   "seedPermissionHrmManagerRole.ts",
-  "seedPermissionDeptManagerHrmWorkplaceRole.ts",
+  "seedPermissionDeptLeadRole.ts",
   "seedPermissionWorkplaceManagerRole.ts",
   "seedPermissionCompanyExecutiveRole.ts"
 ];

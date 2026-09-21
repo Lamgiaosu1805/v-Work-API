@@ -5,6 +5,7 @@ const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const {
   requestHttpController
 } = require("../src/modules/request/interface/request.http.controller");
+const { buildAbility } = require("../src/modules/permission");
 const { asyncHandler } = require("../src/core/http/async-handler");
 const { errorHandlerMiddleware } = require("../src/core/http/error-handler.middleware");
 const UserInfoModel = require("../src/models/UserInfoModel");
@@ -18,6 +19,12 @@ const { getLeaveBalance } = require("../src/modules/leave");
 const { LEAVE_BALANCE_REASON } = require("../src/constants");
 
 const TZ = "Asia/Ho_Chi_Minh";
+
+const abilityAll = () =>
+  buildAbility([
+    { action: "request.review", subject: "Request" },
+    { action: "request.view", subject: "Request" }
+  ]);
 
 let mongod;
 
@@ -399,6 +406,7 @@ test("duyệt đơn business_trip: WorkSheet có check_in/check_out/work_unit đ
     {
       params: { id: created._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
+      permissionAbility: abilityAll(),
       body: { action: "approve" }
     },
     reviewRes
@@ -565,6 +573,7 @@ test("duyệt đơn nghỉ phép có lương (1 ngày): WorkSheet.work_unit ph�
     {
       params: { id: created._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
+      permissionAbility: abilityAll(),
       body: { action: "approve" }
     },
     reviewRes
@@ -642,6 +651,7 @@ test("duyệt đơn business_trip đè lên ngày đã nghỉ phép có lương:
     {
       params: { id: leaveRequest._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
+      permissionAbility: abilityAll(),
       body: { action: "approve" }
     },
     leaveReviewRes
@@ -680,6 +690,7 @@ test("duyệt đơn business_trip đè lên ngày đã nghỉ phép có lương:
     {
       params: { id: tripRequest._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
+      permissionAbility: abilityAll(),
       body: { action: "approve" }
     },
     tripReviewRes
@@ -764,6 +775,7 @@ test("duyệt đơn nghỉ phép (nửa ngày) đè lên ngày đã có công t�
     {
       params: { id: tripRequest._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
+      permissionAbility: abilityAll(),
       body: { action: "approve" }
     },
     tripReviewRes
@@ -808,6 +820,7 @@ test("duyệt đơn nghỉ phép (nửa ngày) đè lên ngày đã có công t�
     {
       params: { id: leaveRequest._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
+      permissionAbility: abilityAll(),
       body: { action: "approve" }
     },
     leaveReviewRes
@@ -933,6 +946,7 @@ test("duyệt đơn nghỉ phép đè lên ngày đã CHẤM CÔNG THẬT: giữ
     {
       params: { id: leaveRequest._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
+      permissionAbility: abilityAll(),
       body: { action: "approve" }
     },
     leaveReviewRes
@@ -1009,6 +1023,7 @@ test("duyệt đơn remote (làm việc từ xa): WorkSheet có check_in/check_o
     {
       params: { id: created._id.toString() },
       account: { _id: adminAccount._id, role: "admin" },
+      permissionAbility: abilityAll(),
       body: { action: "approve" }
     },
     reviewRes

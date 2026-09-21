@@ -1,5 +1,6 @@
 import UserDepartmentPositionModel from "../../../models/UserDepartmentPositionModel";
 import UserInfoModel from "../../../models/UserInfoModel";
+import DepartmentModel from "../../../models/DepartmentModel";
 import CustomerModel from "../../../models/CustomerModel";
 import PermissionCatalogModel from "../../../models/PermissionCatalogModel";
 import { EmployeePermissionProfileRepository } from "../infrastructure/employee-permission-profile.repository";
@@ -26,14 +27,60 @@ const roleRepository = new RoleRepository();
 const dataScopePolicyRepository = new DataScopePolicyRepository();
 const fieldScopePolicyRepository = new FieldScopePolicyRepository();
 
+export async function resolveManagedEmployeeUserIds(employeeId: string): Promise<string[]> {
+  const manager = await UserInfoModel.findById(employeeId, { branch_id: 1, isDeleted: 1 }).lean();
+  if (!manager || (manager as { isDeleted?: boolean }).isDeleted) return [];
+
+  const [ownDepts, managedDepts] = await Promise.all([
+    UserDepartmentPositionModel.find({ user: employeeId, isDeleted: false }).distinct("department"),
+    DepartmentModel.find({ manager: employeeId, isDeleted: false }).distinct("_id")
+  ]);
+  const isTier2Manager = managedDepts.length > 0;
+  const startDepts = [...new Set([...ownDepts, ...managedDepts].map(String))];
+  if (!startDepts.length) return [];
+
+  const seenDeptIds = new Set(startDepts);
+  let frontier = startDepts;
+
+  while (frontier.length) {
+    const children = await DepartmentModel.find(
+      { parent: { $in: frontier }, isDeleted: false },
+      { _id: 1 }
+    ).lean();
+    const newIds = children
+      .map((d: any) => String(d._id))
+      .filter((id: string) => !seenDeptIds.has(id));
+    if (!newIds.length) break;
+    newIds.forEach((id: string) => seenDeptIds.add(id));
+    frontier = newIds;
+  }
+
+  const members = await UserDepartmentPositionModel.find({
+    department: { $in: [...seenDeptIds] },
+    isDeleted: false,
+    user: { $ne: employeeId }
+  }).distinct("user");
+  if (!members.length) return [];
+
+  const employeeFilter: { _id: unknown; isDeleted: boolean; branch_id?: unknown } = {
+    _id: { $in: members },
+    isDeleted: false
+  };
+  if (!isTier2Manager) employeeFilter.branch_id = (manager as { branch_id?: unknown }).branch_id;
+
+  const employees = await UserInfoModel.find(employeeFilter, { _id: 1 }).lean();
+  return employees.map((e: any) => String(e._id));
+}
+
 async function resolveSubjectContext(employeeId: string): Promise<Record<string, unknown>> {
-  const [memberships, userInfo, managedCustomers] = await Promise.all([
+  const [memberships, userInfo, managedCustomers, managedEmployeeUserIds] = await Promise.all([
     UserDepartmentPositionModel.find({
       user: employeeId,
       isDeleted: false
     }).lean(),
     UserInfoModel.findById(employeeId).select("id_account").lean(),
-    CustomerModel.find({ referred_by: employeeId, isDeleted: false }).select("_id").lean()
+    CustomerModel.find({ referred_by: employeeId, isDeleted: false }).select("_id").lean(),
+    resolveManagedEmployeeUserIds(employeeId)
   ]);
 
   const departmentIds = memberships.map((membership: any) => String(membership.department));
@@ -69,7 +116,8 @@ async function resolveSubjectContext(employeeId: string): Promise<Record<string,
     departmentIds,
     departmentColleagueUserIds,
     managedCustomerIds,
-    departmentColleagueCustomerIds
+    departmentColleagueCustomerIds,
+    managedEmployeeUserIds
   };
 }
 

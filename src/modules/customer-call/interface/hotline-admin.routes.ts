@@ -1,5 +1,6 @@
 import express from "express";
-import { authenticate, isAdmin } from "../../../middlewares/authMiddleware";
+import { authenticate } from "../../../middlewares/authMiddleware";
+import { requirePermission } from "../../../core/authorization/require-permission.middleware";
 import { asyncHandler } from "../../../core/http/async-handler";
 import { hotlineAdminHttpController } from "./hotline-admin.http.controller";
 
@@ -8,42 +9,42 @@ const router = express.Router();
 router.get(
   "/admin/hotlines",
   authenticate,
-  isAdmin,
+  requirePermission("hotline.manage", "HotlineAdmin"),
   asyncHandler(hotlineAdminHttpController.getHotlines)
 );
 
 router.get(
   "/admin/hotline-call-scripts",
   authenticate,
-  isAdmin,
+  requirePermission("hotline.manage", "HotlineAdmin"),
   asyncHandler(hotlineAdminHttpController.getHotlineCallScripts)
 );
 
 router.get(
   "/admin/hotline-extensions",
   authenticate,
-  isAdmin,
+  requirePermission("hotline.manage", "HotlineAdmin"),
   asyncHandler(hotlineAdminHttpController.getHotlineExtensions)
 );
 
 router.get(
   "/admin/hotlines/:phone",
   authenticate,
-  isAdmin,
+  requirePermission("hotline.manage", "HotlineAdmin"),
   asyncHandler(hotlineAdminHttpController.getHotlineDetail)
 );
 
 router.patch(
   "/admin/hotlines/:phone",
   authenticate,
-  isAdmin,
+  requirePermission("hotline.manage", "HotlineAdmin"),
   asyncHandler(hotlineAdminHttpController.updateHotlineConfig)
 );
 
 router.post(
   "/admin/hotlines/:phone/sync-extension-assignments",
   authenticate,
-  isAdmin,
+  requirePermission("hotline.manage", "HotlineAdmin"),
   asyncHandler(hotlineAdminHttpController.syncHotlineExtensionAssignments)
 );
 

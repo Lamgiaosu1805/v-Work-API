@@ -2,18 +2,16 @@ const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 
 jest.mock("../../src/helpers/rbac", () => ({
-  can: jest.fn(),
   getAccountsWithPermission: jest.fn().mockResolvedValue([])
 }));
 jest.mock("../../src/modules/request/domain/approval-chain", () => ({
-  getApprovalChain: jest.fn()
+  getApprovalChain: jest.fn().mockResolvedValue([])
 }));
 jest.mock("../../src/helpers/requestUtils", () => {
   const actual = jest.requireActual("../../src/helpers/requestUtils");
   return { ...actual, notify: jest.fn() };
 });
 
-const { can } = require("../../src/helpers/rbac");
 const { getApprovalChain } = require("../../src/modules/request/domain/approval-chain");
 const { notify } = require("../../src/helpers/requestUtils");
 const AccountModel = require("../../src/models/AccountModel");
@@ -31,6 +29,9 @@ const {
 } = require("../../src/modules/request/infrastructure/request.repository");
 const { reviewRequest } = require("../../src/workflows/review-request.workflow");
 const { RequestContextService } = require("../../src/core/context/request-context");
+
+const ALL = {};
+const NONE = { $expr: { $eq: [0, 1] } };
 
 let mongod;
 let repo;
@@ -54,8 +55,7 @@ afterEach(async () => {
   await LeaveRequest.deleteMany({});
   await ForgotCheckinRequest.deleteMany({});
   jest.restoreAllMocks();
-  can.mockReset();
-  getApprovalChain.mockReset();
+  getApprovalChain.mockReset().mockResolvedValue([]);
   notify.mockReset();
 });
 
@@ -123,14 +123,13 @@ function newMultiApprovalForgotCheckinEntity(userId) {
 // Port nguyên __tests__/modules/request/review-request.test.js (task 1.8.6) — orchestration (acquire
 // lock + mở transaction + dispatch side-effect xuyên module) đã chuyển từ modules/request/application/
 // review-request.service.ts sang workflows/review-request.workflow.ts, giữ nguyên toàn bộ assertion.
-// Khác biệt duy nhất: spy onApprove/onReject giờ nhắm vào workflows/request-side-effects/leave và
-// forgot-checkin (nơi logic thật đang sống) thay vì helpers/leaveHandler/forgotCheckinHandler (giờ chỉ
-// còn validate/validateAsync).
+// Đã convert sang scope filter ABAC thay vì can()/getApprovalChain() cho phần xác thực — chain giờ
+// chỉ còn dùng cho thông báo (request-notification.handlers.ts), không còn gate quyền duyệt.
 describe("reviewRequest() (workflows/review-request.workflow)", () => {
   it("throw ArgumentInvalidException (400) khi id không hợp lệ", async () => {
     const { account } = await createUserInfo(1);
     await expect(
-      reviewRequest(account, "not-an-object-id", { action: "approve" })
+      reviewRequest(account, ALL, "not-an-object-id", { action: "approve" })
     ).rejects.toMatchObject({ statusCode: 400 });
   });
 
@@ -141,7 +140,7 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     await insertEntity(entity);
 
     await expect(
-      reviewRequest(account, entity.id, { action: "not_a_real_action" })
+      reviewRequest(account, ALL, entity.id, { action: "not_a_real_action" })
     ).rejects.toMatchObject({ statusCode: 400 });
   });
 
@@ -155,7 +154,9 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newExplanationEntity(owner._id);
     await insertEntity(entity);
 
-    await expect(reviewRequest(account, entity.id, { action: "approve" })).rejects.toMatchObject({
+    await expect(
+      reviewRequest(account, ALL, entity.id, { action: "approve" })
+    ).rejects.toMatchObject({
       statusCode: 404,
       message: "Không tìm thấy thông tin nhân viên"
     });
@@ -164,20 +165,19 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
   it("throw NotFoundException (404) khi đơn không tồn tại", async () => {
     const { account } = await createUserInfo(1);
     await expect(
-      reviewRequest(account, new mongoose.Types.ObjectId().toString(), { action: "approve" })
+      reviewRequest(account, ALL, new mongoose.Types.ObjectId().toString(), { action: "approve" })
     ).rejects.toMatchObject({ statusCode: 404, message: "Đơn không tồn tại" });
   });
 
-  it("throw ForbiddenException (403) khi không canReviewAll và không trong chuỗi duyệt", async () => {
+  it("throw ForbiddenException (403) khi scope filter không khớp đơn này", async () => {
     const { account } = await createUserInfo(1);
     const { userInfo: owner } = await createUserInfo(2);
     const entity = newExplanationEntity(owner._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(false);
-    getApprovalChain.mockResolvedValue([]);
-
-    await expect(reviewRequest(account, entity.id, { action: "approve" })).rejects.toMatchObject({
+    await expect(
+      reviewRequest(account, NONE, entity.id, { action: "approve" })
+    ).rejects.toMatchObject({
       statusCode: 403
     });
   });
@@ -187,11 +187,9 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newExplanationEntity(userInfo._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
-
-    await expect(reviewRequest(account, entity.id, { action: "approve" })).rejects.toMatchObject({
-      statusCode: 403
-    });
+    await expect(
+      reviewRequest(account, ALL, entity.id, { action: "approve" })
+    ).rejects.toMatchObject({ statusCode: 403 });
   });
 
   it("throw InvalidStatusTransitionError (409) khi đơn không còn pending", async () => {
@@ -201,9 +199,9 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     entity.approve(new mongoose.Types.ObjectId().toString(), "");
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
-
-    await expect(reviewRequest(account, entity.id, { action: "approve" })).rejects.toMatchObject({
+    await expect(
+      reviewRequest(account, ALL, entity.id, { action: "approve" })
+    ).rejects.toMatchObject({
       statusCode: 409
     });
   });
@@ -214,9 +212,7 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newExplanationEntity(owner._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
-
-    const result = await reviewRequest(account, entity.id, {
+    const result = await reviewRequest(account, ALL, entity.id, {
       action: "approve",
       reviewer_note: "ok"
     });
@@ -235,9 +231,7 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newExplanationEntity(owner._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
-
-    const result = await reviewRequest(account, entity.id, { action: "reject" });
+    const result = await reviewRequest(account, ALL, entity.id, { action: "reject" });
 
     expect(result.isFinal).toBe(true);
     expect(result.entity.status).toBe("rejected");
@@ -249,10 +243,9 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newLongLeaveEntity(owner._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
     const onApproveSpy = jest.spyOn(leaveSideEffects, "onApprove");
 
-    const result = await reviewRequest(r1, entity.id, { action: "approve" });
+    const result = await reviewRequest(r1, ALL, entity.id, { action: "approve" });
 
     expect(result.isFinal).toBe(false);
     expect(result.entity.status).toBe("pending");
@@ -267,11 +260,10 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newLongLeaveEntity(owner._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
     const onApproveSpy = jest.spyOn(leaveSideEffects, "onApprove").mockResolvedValue(undefined);
 
-    await reviewRequest(r1, entity.id, { action: "approve" });
-    const result = await reviewRequest(r2, entity.id, { action: "approve" });
+    await reviewRequest(r1, ALL, entity.id, { action: "approve" });
+    const result = await reviewRequest(r2, ALL, entity.id, { action: "approve" });
 
     expect(result.isFinal).toBe(true);
     expect(result.entity.status).toBe("approved");
@@ -287,10 +279,8 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newLongLeaveEntity(owner._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
-
-    await reviewRequest(r1, entity.id, { action: "approve" });
-    await expect(reviewRequest(r1, entity.id, { action: "approve" })).rejects.toMatchObject({
+    await reviewRequest(r1, ALL, entity.id, { action: "approve" });
+    await expect(reviewRequest(r1, ALL, entity.id, { action: "approve" })).rejects.toMatchObject({
       statusCode: 409
     });
   });
@@ -302,11 +292,10 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newLongLeaveEntity(owner._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
     const onRejectSpy = jest.spyOn(leaveSideEffects, "onReject").mockResolvedValue(undefined);
 
-    await reviewRequest(r1, entity.id, { action: "approve" });
-    const result = await reviewRequest(r2, entity.id, { action: "reject" });
+    await reviewRequest(r1, ALL, entity.id, { action: "approve" });
+    const result = await reviewRequest(r2, ALL, entity.id, { action: "reject" });
 
     expect(result.isFinal).toBe(true);
     expect(result.entity.status).toBe("rejected");
@@ -320,9 +309,7 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newLongLeaveEntity(owner._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
-
-    await reviewRequest(r1, entity.id, { action: "approve" });
+    await reviewRequest(r1, ALL, entity.id, { action: "approve" });
     await new Promise((resolve) => {
       setTimeout(resolve, 50);
     });
@@ -339,12 +326,10 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newLongLeaveEntity(owner._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
-    getApprovalChain.mockResolvedValue([]);
     jest.spyOn(leaveSideEffects, "onReject").mockResolvedValue(undefined);
 
-    await reviewRequest(r1, entity.id, { action: "approve" });
-    await reviewRequest(r2, entity.id, { action: "reject" });
+    await reviewRequest(r1, ALL, entity.id, { action: "approve" });
+    await reviewRequest(r2, ALL, entity.id, { action: "reject" });
     await new Promise((resolve) => {
       setTimeout(resolve, 50);
     });
@@ -364,12 +349,11 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     const entity = newLongLeaveEntity(owner._id);
     await insertEntity(entity);
 
-    can.mockResolvedValue(true);
     jest.spyOn(leaveSideEffects, "onApprove").mockResolvedValue(undefined);
 
     const [res1, res2] = await Promise.all([
-      reviewRequest(r1, entity.id, { action: "approve" }),
-      reviewRequest(r2, entity.id, { action: "approve" })
+      reviewRequest(r1, ALL, entity.id, { action: "approve" }),
+      reviewRequest(r2, ALL, entity.id, { action: "approve" })
     ]);
 
     const finalized = [res1, res2].filter((r) => r.isFinal);
@@ -378,57 +362,37 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     expect(finalized[0].entity.approvals).toHaveLength(2);
   });
 
-  // Người dùng chốt qua hỏi trực tiếp: KHÔNG ràng buộc thứ tự duyệt giữa 2 cấp — ai trong chain
-  // duyệt trước cũng được, kể cả forgot_checkin/late_early (trước đây có rule "trưởng bộ phận
-  // (chain[0]) phải duyệt trước", đã bỏ hẳn — leave vốn dĩ chưa từng bị ràng buộc này).
-  describe("đơn đa cấp: không ràng buộc thứ tự duyệt giữa cấp 1 và cấp 2", () => {
-    it("200: chain[1] (gián tiếp) duyệt lần đầu dù chain[0] (trực tiếp) chưa duyệt — vẫn được phép, isFinal=false", async () => {
+  // Người dùng chốt qua hỏi trực tiếp: KHÔNG ràng buộc thứ tự duyệt giữa 2 cấp — ai có quyền duyệt
+  // (scope filter khớp) cũng được, kể cả forgot_checkin/late_early.
+  describe("đơn đa cấp: không ràng buộc thứ tự duyệt giữa 2 người duyệt", () => {
+    it("200: reviewer thứ 2 duyệt lần đầu dù reviewer thứ 1 chưa duyệt — vẫn được phép, isFinal=false", async () => {
       const { account: r1 } = await createUserInfo(1);
       const { account: r2 } = await createUserInfo(2);
       const { userInfo: owner } = await createUserInfo(3);
       const entity = newMultiApprovalForgotCheckinEntity(owner._id);
       await insertEntity(entity);
 
-      can.mockResolvedValue(false);
-      getApprovalChain.mockResolvedValue([{ accountId: r1._id }, { accountId: r2._id }]);
-
-      const result = await reviewRequest(r2, entity.id, { action: "approve" });
+      const result = await reviewRequest(r2, ALL, entity.id, { action: "approve" });
 
       expect(result.isFinal).toBe(false);
       expect(result.entity.approvals).toHaveLength(1);
     });
 
-    it("200: chain[1] duyệt trước, sau đó chain[0] duyệt tiếp — hoàn tất đủ 2 cấp bất kể thứ tự", async () => {
+    it("200: reviewer thứ 2 duyệt trước, sau đó reviewer thứ 1 duyệt tiếp — hoàn tất đủ 2 lần bất kể thứ tự", async () => {
       const { account: r1 } = await createUserInfo(1);
       const { account: r2 } = await createUserInfo(2);
       const { userInfo: owner } = await createUserInfo(3);
       const entity = newMultiApprovalForgotCheckinEntity(owner._id);
       await insertEntity(entity);
 
-      can.mockResolvedValue(false);
-      getApprovalChain.mockResolvedValue([{ accountId: r1._id }, { accountId: r2._id }]);
       jest.spyOn(forgotCheckinSideEffects, "onApprove").mockResolvedValue(undefined);
 
-      await reviewRequest(r2, entity.id, { action: "approve" });
-      const result = await reviewRequest(r1, entity.id, { action: "approve" });
+      await reviewRequest(r2, ALL, entity.id, { action: "approve" });
+      const result = await reviewRequest(r1, ALL, entity.id, { action: "approve" });
 
       expect(result.isFinal).toBe(true);
       expect(result.entity.status).toBe("approved");
       expect(result.entity.approvals).toHaveLength(2);
-    });
-
-    it("200: canReviewAll=true vẫn duyệt được lần đầu dù không nằm trong chain", async () => {
-      const { account: r2 } = await createUserInfo(2);
-      const { userInfo: owner } = await createUserInfo(3);
-      const entity = newMultiApprovalForgotCheckinEntity(owner._id);
-      await insertEntity(entity);
-
-      can.mockResolvedValue(true);
-
-      const result = await reviewRequest(r2, entity.id, { action: "approve" });
-
-      expect(result.isFinal).toBe(false);
-      expect(result.entity.approvals).toHaveLength(1);
     });
   });
 });

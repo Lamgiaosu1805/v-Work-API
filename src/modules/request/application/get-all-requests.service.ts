@@ -7,7 +7,6 @@ import {
   buildUserNameSearchFilter,
   RequestFilter
 } from "./request-query-filters";
-import { resolveRequestViewScope } from "./resolve-request-view-scope";
 
 interface GetAllRequestsQuery {
   request_type?: string;
@@ -20,38 +19,30 @@ interface GetAllRequestsQuery {
   intent?: string;
 }
 
-export async function getAllRequests(account: any, query: GetAllRequestsQuery) {
-  const { request_type, status, from, to, search, intent } = query;
+export async function getAllRequests(
+  account: any,
+  scopeFilter: Record<string, unknown>,
+  query: GetAllRequestsQuery
+) {
+  const { request_type, status, from, to, search } = query;
   const { page, limit, skip } = parsePagination(query);
   const filter: RequestFilter = { isDeleted: false };
 
-  const scope = await resolveRequestViewScope(account, intent === "review" ? "review" : "overview");
-  const { myUserInfo } = scope;
-  let scopedUserIds: unknown[] | null = scope.type === "managed" ? (scope.userIds ?? null) : null;
+  const myUserInfo = await UserInfoModel.findOne({ id_account: account._id, isDeleted: false });
 
   applyRequestTypeFilter(filter, request_type);
   if (status) filter.status = status;
   applyDateRangeFilter(filter, from, to);
 
+  const andConditions: Record<string, unknown>[] = [scopeFilter];
+  if (myUserInfo) andConditions.push({ user_id: { $ne: myUserInfo._id } });
+
   if (search) {
     const matchedUsers = await UserInfoModel.find(buildUserNameSearchFilter(search)).select("_id");
-    const matchedIds = matchedUsers.map((u: any) => u._id);
-
-    if (scopedUserIds) {
-      const matchedSet = new Set(matchedIds.map((id: any) => id.toString()));
-      scopedUserIds = scopedUserIds.filter((id: any) => matchedSet.has(id.toString()));
-    } else {
-      scopedUserIds = matchedIds;
-    }
+    andConditions.push({ user_id: { $in: matchedUsers.map((u: any) => u._id) } });
   }
 
-  if (scopedUserIds) filter.user_id = { $in: scopedUserIds };
-  if (myUserInfo) {
-    filter.user_id = {
-      ...((filter.user_id as Record<string, unknown>) ?? {}),
-      $ne: myUserInfo._id
-    };
-  }
+  filter.$and = andConditions;
 
   const [requests, total] = await Promise.all([
     RequestModel.find(filter)

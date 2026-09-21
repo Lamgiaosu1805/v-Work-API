@@ -57,7 +57,12 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
   {
     entity: "Request",
     subjectAttributes: [
-      { path: "subject.userId", label: "ID nhân viên (chính mình)", type: "reference" }
+      { path: "subject.userId", label: "ID nhân viên (chính mình)", type: "reference" },
+      {
+        path: "subject.managedEmployeeUserIds",
+        label: "Nhân viên thuộc phạm vi quản lý (xuyên cấp phòng ban + tier-2)",
+        type: "reference"
+      }
     ],
     resourceAttributes: [
       { path: "resource.user_id", label: "Người tạo đơn", type: "reference" },
@@ -643,6 +648,12 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
   },
   {
     entity: "SaleOmicallProfile",
+    subjectAttributes: [],
+    resourceAttributes: [],
+    fields: []
+  },
+  {
+    entity: "HotlineAdmin",
     subjectAttributes: [],
     resourceAttributes: [],
     fields: []

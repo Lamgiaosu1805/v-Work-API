@@ -1,14 +1,16 @@
 import mongoose from "mongoose";
 import { RequestModel } from "../../../models/RequestModel";
 import UserInfoModel from "../../../models/UserInfoModel";
-import { can } from "../../../helpers/rbac";
 import { getApprovalChain, ApprovalCandidate } from "../domain/approval-chain";
 import { resolveReviewerProfileByAccountId } from "../domain/resolve-reviewer-profile";
 import { RequestNotFoundError } from "../domain/request.errors";
-import { PERMISSION } from "../../../constants";
 import { ArgumentInvalidException, ForbiddenException } from "../../../core/exceptions/exceptions";
 
-export async function getRequestById(account: any, id: string) {
+export async function getRequestById(
+  account: any,
+  scopeFilter: Record<string, unknown>,
+  id: string
+) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new ArgumentInvalidException("ID không hợp lệ");
   }
@@ -20,7 +22,6 @@ export async function getRequestById(account: any, id: string) {
 
   const myUserInfo = await UserInfoModel.findOne({ id_account: account._id, isDeleted: false });
   const isOwner = myUserInfo != null && request.user_id._id.equals(myUserInfo._id);
-  const canViewAll = await can(account, PERMISSION.HRM_REQUEST_VIEW_ALL);
 
   let approvalChain: ApprovalCandidate[] | null = null;
   async function getChain(): Promise<ApprovalCandidate[]> {
@@ -28,13 +29,10 @@ export async function getRequestById(account: any, id: string) {
     return approvalChain as ApprovalCandidate[];
   }
 
-  let canSee = isOwner || canViewAll;
+  let canSee = isOwner;
   if (!canSee) {
-    const canReview = await can(account, PERMISSION.HRM_REQUEST_REVIEW);
-    if (canReview) {
-      const chain = await getChain();
-      canSee = chain.some((c) => String(c.accountId) === account._id.toString());
-    }
+    const match = await RequestModel.exists({ $and: [{ _id: id, isDeleted: false }, scopeFilter] });
+    canSee = !!match;
   }
   if (!canSee) throw new ForbiddenException("Bạn không có quyền xem đơn này");
 

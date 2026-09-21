@@ -383,7 +383,7 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xem đơn từ",
     entity: "Request",
     actionKind: "READ",
-    validDataScopePolicies: ["REQUEST_ALL_COMPANY", "REQUEST_SELF"]
+    validDataScopePolicies: ["REQUEST_ALL_COMPANY", "REQUEST_OWN_DEPARTMENT", "REQUEST_SELF"]
   },
   {
     code: "request.create",
@@ -410,7 +410,7 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Duyệt/từ chối đơn từ",
     entity: "Request",
     actionKind: "STRUCTURAL",
-    validDataScopePolicies: ["REQUEST_ALL_COMPANY"]
+    validDataScopePolicies: ["REQUEST_ALL_COMPANY", "REQUEST_OWN_DEPARTMENT"]
   },
 
   // ==================== Workplace ====================
@@ -623,6 +623,14 @@ const DEFINITIONS: PermissionDef[] = [
     entity: "SaleOmicallProfile",
     actionKind: "STRUCTURAL",
     validDataScopePolicies: SALE_OMICALL_PROFILE_SCOPES
+  },
+  {
+    code: "hotline.manage",
+    module: "crm",
+    name: "Quản lý Hotline / Đồng bộ SIP",
+    entity: "HotlineAdmin",
+    actionKind: "STRUCTURAL",
+    validDataScopePolicies: ["HOTLINE_ADMIN_ALL_COMPANY"]
   },
   {
     code: "customer_call.update_relationship_status",

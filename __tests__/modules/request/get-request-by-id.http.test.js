@@ -11,13 +11,11 @@ jest.mock("../../../src/middlewares/authMiddleware", () => ({
   }
 }));
 
-jest.mock("../../../src/helpers/rbac", () => ({ can: jest.fn() }));
 jest.mock("../../../src/modules/request/domain/approval-chain", () => ({
   getApprovalChain: jest.fn().mockResolvedValue([]),
   getManagedUserIds: jest.fn()
 }));
 
-const { can } = require("../../../src/helpers/rbac");
 const UserInfoModel = require("../../../src/models/UserInfoModel");
 const AccountModel = require("../../../src/models/AccountModel");
 const { LeaveRequest } = require("../../../src/models/RequestModel");
@@ -26,6 +24,9 @@ const { errorHandlerMiddleware } = require("../../../src/core/http/error-handler
 const { grantRequestPermission } = require("../../helpers/grantRequestPermission");
 const EmployeePermissionProfileModel =
   require("../../../src/models/EmployeePermissionProfileModel").default;
+const PermissionCatalogModel = require("../../../src/models/PermissionCatalogModel").default;
+const PermissionRoleModel = require("../../../src/models/PermissionRoleModel").default;
+const DataScopePolicyModel = require("../../../src/models/DataScopePolicyModel").default;
 
 let mongod;
 let app;
@@ -71,6 +72,60 @@ async function createUserInfo(n) {
   return { account, userInfo };
 }
 
+async function createUserInfoSelfOnly(n) {
+  const account = await AccountModel.create({ username: `acc${n}`, password: "x", role: "user" });
+  const userInfo = await UserInfoModel.create({
+    full_name: `NV ${n}`,
+    cccd: `${n}`.padStart(12, "0"),
+    phone_number: `090${n}`.padEnd(10, "0"),
+    sex: 1,
+    date_of_birth: new Date("1995-01-01"),
+    address: "HN",
+    tinh_trang_hon_nhan: 0,
+    id_account: account._id,
+    ma_nv: `NV${n}`,
+    employment_type: "fulltime"
+  });
+  await DataScopePolicyModel.findOneAndUpdate(
+    { code: "REQUEST_SELF" },
+    {
+      code: "REQUEST_SELF",
+      entity: "Request",
+      label: "Chỉ đơn của chính mình",
+      conditionTree: {
+        operator: "AND",
+        clauses: [
+          {
+            left: "resource.user_id",
+            operator: "EQ",
+            right: { type: "SUBJECT_REF", path: "subject.userId" }
+          }
+        ]
+      }
+    },
+    { upsert: true }
+  );
+  await PermissionCatalogModel.updateOne(
+    { code: "request.view" },
+    { $addToSet: { validDataScopePolicies: "REQUEST_SELF" } }
+  );
+  const role = await PermissionRoleModel.findOneAndUpdate(
+    { code: "TEST_REQUEST_SELF" },
+    {
+      code: "TEST_REQUEST_SELF",
+      name: "Test: self-only Request access",
+      grants: [{ permissionCode: "request.view", dataScopePolicyCode: "REQUEST_SELF" }]
+    },
+    { upsert: true, new: true }
+  );
+  await EmployeePermissionProfileModel.findOneAndUpdate(
+    { employeeId: userInfo._id },
+    { employeeId: userInfo._id, roleIds: [role._id], overrides: [] },
+    { upsert: true }
+  );
+  return { account, userInfo };
+}
+
 describe("GET /requests/:id", () => {
   it("400: id không hợp lệ", async () => {
     const { account } = await createUserInfo(1);
@@ -82,7 +137,6 @@ describe("GET /requests/:id", () => {
 
   it("404: đơn không tồn tại", async () => {
     const { account } = await createUserInfo(1);
-    can.mockResolvedValue(false);
     const res = await request(app)
       .get(`/requests/${new mongoose.Types.ObjectId()}`)
       .set("x-test-account", String(account._id));
@@ -102,7 +156,6 @@ describe("GET /requests/:id", () => {
       leave_type: "paid",
       status: "cancelled"
     });
-    can.mockResolvedValue(false);
 
     const res = await request(app)
       .get(`/requests/${doc._id}`)
@@ -112,8 +165,8 @@ describe("GET /requests/:id", () => {
     expect(String(res.body.data.user_id._id)).toBe(String(userInfo._id));
   });
 
-  it("403: không có quyền xem đơn của người khác", async () => {
-    const { account } = await createUserInfo(1);
+  it("403: có quyền view SELF nhưng không có quyền xem đơn của người khác", async () => {
+    const { account } = await createUserInfoSelfOnly(1);
     const { userInfo: owner } = await createUserInfo(2);
     const doc = await LeaveRequest.create({
       user_id: owner._id,
@@ -126,7 +179,6 @@ describe("GET /requests/:id", () => {
       leave_type: "paid",
       status: "cancelled"
     });
-    can.mockResolvedValue(false);
 
     const res = await request(app)
       .get(`/requests/${doc._id}`)

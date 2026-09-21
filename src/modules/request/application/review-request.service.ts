@@ -1,11 +1,9 @@
 import mongoose, { ClientSession } from "mongoose";
 import UserInfoModel from "../../../models/UserInfoModel";
+import { RequestModel } from "../../../models/RequestModel";
 import { RequestRepository } from "../infrastructure/request.repository";
-import { can } from "../../../helpers/rbac";
-import { getApprovalChain } from "../domain/approval-chain";
 import { RequestNotFoundError } from "../domain/request.errors";
 import { acquireRequestReviewLock, RequestReviewLockError } from "../../../helpers/requestUtils";
-import { PERMISSION } from "../../../constants";
 import {
   ArgumentInvalidException,
   NotFoundException,
@@ -52,6 +50,7 @@ export interface ReviewRequestEntityResult {
 
 export async function reviewRequestEntity(
   account: any,
+  scopeFilter: Record<string, unknown>,
   id: string,
   { action, reviewer_note = "" }: ReviewRequestOptions,
   session: ClientSession
@@ -62,15 +61,13 @@ export async function reviewRequestEntity(
   }).session(session);
   if (!reviewerInfo) throw new NotFoundException("Không tìm thấy thông tin nhân viên");
 
+  const allowed = await RequestModel.exists({
+    $and: [{ _id: id, isDeleted: false }, scopeFilter]
+  }).session(session);
+  if (!allowed) throw new ForbiddenException("Bạn không được chỉ định duyệt đơn này");
+
   const entity = await requestRepository.findOneById(id);
   if (!entity) throw new RequestNotFoundError(undefined, { metadata: { requestId: id } });
-
-  const canReviewAll = await can(account, PERMISSION.HRM_REQUEST_REVIEW_ALL);
-  const chain = canReviewAll ? [] : await getApprovalChain(entity.userId);
-  if (!canReviewAll) {
-    const isInChain = chain.some((c) => String(c.accountId) === account._id.toString());
-    if (!isInChain) throw new ForbiddenException("Bạn không được chỉ định duyệt đơn này");
-  }
 
   if (action === "approve") {
     entity.approve(reviewerInfo._id.toString(), reviewer_note);

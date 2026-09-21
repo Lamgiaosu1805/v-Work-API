@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { resolveRequestScopeFilter } from "../../../core/authorization/resolve-request-scope-filter";
 import { getEligibleReviewers } from "../application/get-eligible-reviewers.service";
 import { getMyRequests } from "../application/get-my-requests.service";
 import { getAllRequests } from "../application/get-all-requests.service";
@@ -19,12 +20,15 @@ export const requestHttpController = {
   },
 
   async getAll(req: Request, res: Response) {
-    const result = await getAllRequests(req.account, req.query);
+    const action = req.query.intent === "review" ? "request.review" : "request.view";
+    const scopeFilter = resolveRequestScopeFilter(req.permissionAbility!, action);
+    const result = await getAllRequests(req.account, scopeFilter, req.query);
     return res.status(200).json({ message: "OK", ...result });
   },
 
   async getById(req: Request, res: Response) {
-    const data = await getRequestById(req.account, req.params.id);
+    const scopeFilter = resolveRequestScopeFilter(req.permissionAbility!, "request.view");
+    const data = await getRequestById(req.account, scopeFilter, req.params.id);
     return res.status(200).json({ message: "OK", data });
   },
 
@@ -40,7 +44,8 @@ export const requestHttpController = {
 
   async review(req: Request, res: Response) {
     const { action, reviewer_note } = req.body;
-    const { entity, isFinal } = await reviewRequest(req.account, req.params.id, {
+    const scopeFilter = resolveRequestScopeFilter(req.permissionAbility!, "request.review");
+    const { entity, isFinal } = await reviewRequest(req.account, scopeFilter, req.params.id, {
       action,
       reviewer_note
     });

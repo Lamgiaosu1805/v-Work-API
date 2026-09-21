@@ -13,12 +13,23 @@ import { REQUEST_SIDE_EFFECTS } from "./request-side-effects";
 // transaction duy nhất) → reviewRequestEntity (thuần Request) → dispatch side-effect xuyên module
 // (REQUEST_SIDE_EFFECTS) CHỈ khi isFinal, đúng hành vi gốc (đơn đa duyệt lần 1 chưa final thì không
 // chạy side-effect).
-export async function reviewRequest(account: any, id: string, options: ReviewRequestOptions) {
+export async function reviewRequest(
+  account: any,
+  scopeFilter: Record<string, unknown>,
+  id: string,
+  options: ReviewRequestOptions
+) {
   const release = await acquireReviewLockIfNeeded(id, options.action);
 
   try {
     const result = await runInTransaction(async (session) => {
-      const { entity, isFinal } = await reviewRequestEntity(account, id, options, session);
+      const { entity, isFinal } = await reviewRequestEntity(
+        account,
+        scopeFilter,
+        id,
+        options,
+        session
+      );
 
       if (isFinal) {
         const sideEffects = REQUEST_SIDE_EFFECTS[entity.requestType];

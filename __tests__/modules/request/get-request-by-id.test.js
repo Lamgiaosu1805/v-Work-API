@@ -1,13 +1,11 @@
 const mongoose = require("mongoose");
 const { MongoMemoryServer } = require("mongodb-memory-server");
 
-jest.mock("../../../src/helpers/rbac", () => ({ can: jest.fn() }));
 jest.mock("../../../src/modules/request/domain/approval-chain", () => ({
   getApprovalChain: jest.fn(),
   getManagedUserIds: jest.fn()
 }));
 
-const { can } = require("../../../src/helpers/rbac");
 const { getApprovalChain } = require("../../../src/modules/request/domain/approval-chain");
 const UserInfoModel = require("../../../src/models/UserInfoModel");
 const AccountModel = require("../../../src/models/AccountModel");
@@ -15,6 +13,9 @@ const { LeaveRequest } = require("../../../src/models/RequestModel");
 const {
   getRequestById
 } = require("../../../src/modules/request/application/get-request-by-id.service");
+
+const ALL = {};
+const NONE = { $expr: { $eq: [0, 1] } };
 
 let mongod;
 
@@ -69,72 +70,65 @@ function leaveRequestPayload(userId, overrides = {}) {
 describe("getRequestById()", () => {
   it("throw ArgumentInvalidException (400) khi id không phải ObjectId hợp lệ", async () => {
     const { account } = await createUserInfo(1);
-    await expect(getRequestById(account, "not-an-object-id")).rejects.toMatchObject({
+    await expect(getRequestById(account, ALL, "not-an-object-id")).rejects.toMatchObject({
       statusCode: 400
     });
   });
 
   it("throw NotFoundException (404) khi đơn không tồn tại", async () => {
     const { account } = await createUserInfo(1);
-    can.mockResolvedValue(false);
     await expect(
-      getRequestById(account, new mongoose.Types.ObjectId().toString())
+      getRequestById(account, NONE, new mongoose.Types.ObjectId().toString())
     ).rejects.toMatchObject({ statusCode: 404, message: "Đơn không tồn tại" });
   });
 
-  it("owner luôn xem được đơn của chính mình, không cần permission gì", async () => {
+  it("owner luôn xem được đơn của chính mình, không cần scope filter khớp", async () => {
     const { account, userInfo } = await createUserInfo(1);
     const doc = await LeaveRequest.create(leaveRequestPayload(userInfo._id));
-    can.mockResolvedValue(false);
     getApprovalChain.mockResolvedValue([]);
 
-    const data = await getRequestById(account, String(doc._id));
+    const data = await getRequestById(account, NONE, String(doc._id));
     expect(String(data.user_id._id)).toBe(String(userInfo._id));
   });
 
-  it("canViewAll=true xem được đơn của người khác", async () => {
+  it("scope filter khớp toàn công ty xem được đơn của người khác", async () => {
     const { account } = await createUserInfo(1);
     const { userInfo: owner } = await createUserInfo(2);
     const doc = await LeaveRequest.create(leaveRequestPayload(owner._id));
-    can.mockResolvedValueOnce(true);
     getApprovalChain.mockResolvedValue([]);
 
-    const data = await getRequestById(account, String(doc._id));
+    const data = await getRequestById(account, ALL, String(doc._id));
     expect(String(data.user_id._id)).toBe(String(owner._id));
   });
 
-  it("403: không phải owner, không canViewAll, không canReview", async () => {
+  it("403: không phải owner, scope filter không khớp bản ghi nào", async () => {
     const { account } = await createUserInfo(1);
     const { userInfo: owner } = await createUserInfo(2);
     const doc = await LeaveRequest.create(leaveRequestPayload(owner._id));
-    can.mockResolvedValue(false);
 
-    await expect(getRequestById(account, String(doc._id))).rejects.toMatchObject({
+    await expect(getRequestById(account, NONE, String(doc._id))).rejects.toMatchObject({
       statusCode: 403,
       message: "Bạn không có quyền xem đơn này"
     });
   });
 
-  it("403: canReview=true nhưng KHÔNG nằm trong approval chain của chủ đơn", async () => {
+  it("403: scope filter khớp user_id khác, không khớp chủ đơn thật", async () => {
     const { account } = await createUserInfo(1);
     const { userInfo: owner } = await createUserInfo(2);
     const doc = await LeaveRequest.create(leaveRequestPayload(owner._id));
-    can.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    getApprovalChain.mockResolvedValue([{ accountId: new mongoose.Types.ObjectId() }]);
 
-    await expect(getRequestById(account, String(doc._id))).rejects.toMatchObject({
-      statusCode: 403
-    });
+    await expect(
+      getRequestById(account, { user_id: new mongoose.Types.ObjectId() }, String(doc._id))
+    ).rejects.toMatchObject({ statusCode: 403 });
   });
 
-  it("200: canReview=true VÀ nằm trong approval chain của chủ đơn", async () => {
+  it("200: scope filter khớp đúng user_id của chủ đơn", async () => {
     const { account } = await createUserInfo(1);
     const { userInfo: owner } = await createUserInfo(2);
     const doc = await LeaveRequest.create(leaveRequestPayload(owner._id));
-    can.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    getApprovalChain.mockResolvedValue([{ accountId: account._id }]);
+    getApprovalChain.mockResolvedValue([]);
 
-    const data = await getRequestById(account, String(doc._id));
+    const data = await getRequestById(account, { user_id: owner._id }, String(doc._id));
     expect(String(data.user_id._id)).toBe(String(owner._id));
   });
 
@@ -143,9 +137,8 @@ describe("getRequestById()", () => {
     const doc = await LeaveRequest.create(
       leaveRequestPayload(userInfo._id, { status: "cancelled" })
     );
-    can.mockResolvedValue(false);
 
-    const data = await getRequestById(account, String(doc._id));
+    const data = await getRequestById(account, NONE, String(doc._id));
     expect(data.pending_reviewer).toBeNull();
     expect(getApprovalChain).not.toHaveBeenCalled();
   });
@@ -160,10 +153,9 @@ describe("getRequestById()", () => {
         approvals: [{ account: reviewerA, reviewed_at: new Date() }]
       })
     );
-    can.mockResolvedValue(true);
     getApprovalChain.mockResolvedValue([{ accountId: reviewerA }, { accountId: reviewerB }]);
 
-    const data = await getRequestById(account, String(doc._id));
+    const data = await getRequestById(account, NONE, String(doc._id));
     expect(String(data.pending_reviewer.accountId)).toBe(String(reviewerB));
   });
 
@@ -177,10 +169,9 @@ describe("getRequestById()", () => {
         approvals: [{ account: reviewerA, reviewed_at: new Date() }]
       })
     );
-    can.mockResolvedValue(true);
     getApprovalChain.mockResolvedValue([{ accountId: reviewerA }, { accountId: reviewerB }]);
 
-    const data = await getRequestById(account, String(doc._id));
+    const data = await getRequestById(account, NONE, String(doc._id));
     expect(data.approval_chain).toHaveLength(2);
     expect(data.approval_chain[0]).toMatchObject({
       accountId: reviewerA,
@@ -197,9 +188,8 @@ describe("getRequestById()", () => {
     const doc = await LeaveRequest.create(
       leaveRequestPayload(userInfo._id, { status: "cancelled" })
     );
-    can.mockResolvedValue(false);
 
-    const data = await getRequestById(account, String(doc._id));
+    const data = await getRequestById(account, NONE, String(doc._id));
     expect(data.approval_chain).toEqual([]);
   });
 
@@ -209,10 +199,9 @@ describe("getRequestById()", () => {
     const doc = await LeaveRequest.create(
       leaveRequestPayload(owner._id, { status: "pending", approvals: [] })
     );
-    can.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     getApprovalChain.mockResolvedValue([{ accountId: account._id }]);
 
-    await getRequestById(account, String(doc._id));
+    await getRequestById(account, { user_id: owner._id }, String(doc._id));
 
     expect(getApprovalChain).toHaveBeenCalledTimes(1);
   });
@@ -225,9 +214,8 @@ describe("getRequestById()", () => {
         approvals: [{ account: reviewerAccount._id, reviewed_at: new Date() }]
       })
     );
-    can.mockResolvedValue(false);
 
-    const data = await getRequestById(account, String(doc._id));
+    const data = await getRequestById(account, NONE, String(doc._id));
     expect(data.approvals).toHaveLength(1);
     expect(data.approvals[0].reviewer.full_name).toBe("NV 2");
   });

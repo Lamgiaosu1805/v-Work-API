@@ -1,16 +1,47 @@
 const express = require("express");
 const router = express.Router();
 const ClaimPeriodController = require("../controllers/ClaimPeriodController");
-const { authenticate, isAdmin, hasModuleAccess, canManage } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
+const { requirePermission } = require("../core/authorization/require-permission.middleware");
 
 // Admin only
-router.post("/", authenticate, isAdmin, ClaimPeriodController.create);
-router.patch("/:id/close", authenticate, isAdmin, ClaimPeriodController.close);
-router.get("/history", authenticate, canManage("crm"), ClaimPeriodController.getHistory);
+router.post(
+  "/",
+  authenticate,
+  requirePermission("claim_period.manage", "ClaimPeriod"),
+  ClaimPeriodController.create
+);
+router.patch(
+  "/:id/close",
+  authenticate,
+  requirePermission("claim_period.close", "ClaimPeriod"),
+  ClaimPeriodController.close
+);
+router.get(
+  "/history",
+  authenticate,
+  requirePermission("claim_period.view", "ClaimPeriod"),
+  ClaimPeriodController.getHistory
+);
 
-// Tất cả user có CRM access
-router.get("/status", authenticate, hasModuleAccess("crm"), ClaimPeriodController.getStatus);
-router.get("/unclaimed-customers", authenticate, hasModuleAccess("crm"), ClaimPeriodController.getUnclaimedCustomers);
-router.post("/claim", authenticate, hasModuleAccess("crm"), ClaimPeriodController.claimCustomer);
+// Tất cả sale có quyền "nhận khách chưa ai phụ trách" (customer.claim)
+router.get(
+  "/status",
+  authenticate,
+  requirePermission("customer.claim", "Customer"),
+  ClaimPeriodController.getStatus
+);
+router.get(
+  "/unclaimed-customers",
+  authenticate,
+  requirePermission("customer.claim", "Customer"),
+  ClaimPeriodController.getUnclaimedCustomers
+);
+router.post(
+  "/claim",
+  authenticate,
+  requirePermission("customer.claim", "Customer"),
+  ClaimPeriodController.claimCustomer
+);
 
 module.exports = router;

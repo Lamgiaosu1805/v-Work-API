@@ -2,7 +2,8 @@ const express = require("express");
 const multer = require("multer");
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
-const { authenticate, hasModuleAccess } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
+const { requirePermission } = require("../core/authorization/require-permission.middleware");
 const TransactionManagementController = require("../controllers/TransactionManagementController");
 const rateLimit = require("express-rate-limit");
 
@@ -27,9 +28,9 @@ const manualDepositLimiter = rateLimit({
   },
 });
 
-router.get("/",  authenticate, hasModuleAccess("crm"), TransactionManagementController.getTransactions);
-router.post("/recharge-customer",  authenticate, hasModuleAccess("crm"), upload.single("file"), manualDepositLimiter, TransactionManagementController.createManualDeposit);
-router.post("/recharge-customer/:id",  authenticate, hasModuleAccess("crm"), upload.single("file"), manualDepositLimiter, TransactionManagementController.requestAccounting);
-router.get("/customer-deposits",  authenticate, hasModuleAccess("crm"), TransactionManagementController.getCustomerDepositTransactions);
+router.get("/",  authenticate, requirePermission("transaction.view", "Transaction"), TransactionManagementController.getTransactions);
+router.post("/recharge-customer",  authenticate, requirePermission("transaction.create", "Transaction"), upload.single("file"), manualDepositLimiter, TransactionManagementController.createManualDeposit);
+router.post("/recharge-customer/:id",  authenticate, requirePermission("transaction.create", "Transaction"), upload.single("file"), manualDepositLimiter, TransactionManagementController.requestAccounting);
+router.get("/customer-deposits",  authenticate, requirePermission("transaction.view", "Transaction"), TransactionManagementController.getCustomerDepositTransactions);
 
 module.exports = router;

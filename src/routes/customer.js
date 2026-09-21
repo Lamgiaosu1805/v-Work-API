@@ -1,62 +1,76 @@
 const express = require("express");
-const { authenticate, hasModuleAccess, canManage } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
+const { requirePermission } = require("../core/authorization/require-permission.middleware");
 const CustomerController = require("../controllers/CustomerController");
-const CustomerInteractionController = require("../controllers/CustomerInteractionController");
+// const CustomerInteractionController = require("../controllers/CustomerInteractionController");
 const verifyInternalRequest = require("../middlewares/verifyInternalRequest");
 
 const router = express.Router();
 
+const viewCustomer = requirePermission("customer.view", "Customer");
+const canAssignCustomer = requirePermission("customer.assign", "Customer");
+
 // GET
-router.get(
-  "/my-customers",
-  authenticate,
-  hasModuleAccess("crm"),
-  CustomerController.getMyCustomers
-);
+router.get("/my-customers", authenticate, viewCustomer, CustomerController.getMyCustomers);
 router.get("/agent-customers", verifyInternalRequest, CustomerController.getMyCustomersAsAgent);
 router.get("/my-info", authenticate, CustomerController.getMyInfo);
-router.get("/all", authenticate, canManage("crm"), CustomerController.getAll);
-router.get("/export-excel", authenticate, hasModuleAccess("crm"), CustomerController.exportExcel);
+router.get("/all", authenticate, viewCustomer, CustomerController.getAll);
+router.get("/export-excel", authenticate, viewCustomer, CustomerController.exportExcel);
 router.get(
   "/detail-info-customer",
   authenticate,
-  hasModuleAccess("crm"),
+  viewCustomer,
   CustomerController.getDetailInfo
 );
-router.get("/fluctuation", authenticate, hasModuleAccess("crm"), CustomerController.getFluctuation);
-router.get("/view-image", authenticate, hasModuleAccess("crm"), CustomerController.getViewImage);
+router.get("/fluctuation", authenticate, viewCustomer, CustomerController.getFluctuation);
+router.get("/view-image", authenticate, viewCustomer, CustomerController.getViewImage);
 router.get(
   "/investment-holding",
   authenticate,
-  hasModuleAccess("crm"),
+  viewCustomer,
   CustomerController.getCustomerInvestmentHolding
 );
 router.get(
   "/staff-info",
   authenticate,
-  hasModuleAccess("crm"),
+  viewCustomer,
   CustomerController.getCustomerStaffInfo
 );
-router.get(
-  "/interactions/:externalId",
-  authenticate,
-  hasModuleAccess("crm"),
-  CustomerInteractionController.list
-);
+// router.get(
+//   "/interactions/:externalId",
+//   authenticate,
+//   viewCustomer,
+//   CustomerInteractionController.list
+// );
 
 // POST
 router.post("/upsert", verifyInternalRequest, CustomerController.upsert);
 router.post("/apply-referral", verifyInternalRequest, CustomerController.applyReferral);
 router.post("/bulk-upsert", verifyInternalRequest, CustomerController.bulkUpsert);
+// router.post(
+//   "/interactions/:externalId",
+//   authenticate,
+//   viewCustomer,
+//   CustomerInteractionController.create
+// );
 router.post(
-  "/interactions/:externalId",
+  "/bulk-assign",
   authenticate,
-  hasModuleAccess("crm"),
-  CustomerInteractionController.create
+  canAssignCustomer,
+  CustomerController.bulkAssignCustomer
 );
-router.post("/bulk-assign", authenticate, canManage("crm"), CustomerController.bulkAssignCustomer);
-router.post("/:id/assign", authenticate, canManage("crm"), CustomerController.assignCustomer);
-router.patch("/:id/reassign", authenticate, canManage("crm"), CustomerController.reassignCustomer);
-router.patch("/:id/unassign-sale", authenticate, canManage("crm"), CustomerController.unassignSale);
+router.post("/:id/assign", authenticate, canAssignCustomer, CustomerController.assignCustomer);
+router.patch(
+  "/:id/reassign",
+  authenticate,
+  canAssignCustomer,
+  CustomerController.reassignCustomer
+);
+router.patch(
+  "/:id/unassign-sale",
+  authenticate,
+  canAssignCustomer,
+  CustomerController.unassignSale
+);
 
 module.exports = router;

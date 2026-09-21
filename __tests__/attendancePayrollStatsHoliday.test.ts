@@ -5,6 +5,9 @@ import AttendanceController from "../src/controllers/AttendanceController";
 import UserInfoModel from "../src/models/UserInfoModel";
 import HolidayModel from "../src/models/HolidayModel";
 import WorkSheetModel from "../src/models/WorkSheetModel";
+import { buildAbility } from "../src/modules/permission";
+
+const allCompanyPayrollAbility = buildAbility([{ action: "payroll.view", subject: "Payroll" }]);
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -194,7 +197,8 @@ describe("AttendanceController — Holiday-awareness cho work_unit (gap SRS, tas
 
     const req = {
       query: { month: "9", year: "2026" },
-      account: { _id: adminAccountId, role: "admin" }
+      account: { _id: adminAccountId, role: "admin" },
+      permissionAbility: allCompanyPayrollAbility
     };
     const res = makeRes();
     await AttendanceController.getPayrollStatsAll(req, res);

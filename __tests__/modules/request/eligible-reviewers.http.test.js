@@ -15,6 +15,9 @@ const UserInfoModel = require("../../../src/models/UserInfoModel");
 const AccountModel = require("../../../src/models/AccountModel");
 const requestRoutes = require("../../../src/modules/request/interface/request.routes");
 const { errorHandlerMiddleware } = require("../../../src/core/http/error-handler.middleware");
+const { grantRequestPermission } = require("../../helpers/grantRequestPermission");
+const EmployeePermissionProfileModel =
+  require("../../../src/models/EmployeePermissionProfileModel").default;
 
 let mongod;
 let app;
@@ -37,6 +40,7 @@ afterAll(async () => {
 afterEach(async () => {
   await UserInfoModel.deleteMany({});
   await AccountModel.deleteMany({});
+  await EmployeePermissionProfileModel.deleteMany({});
 });
 
 async function createUserInfo(n) {
@@ -45,7 +49,7 @@ async function createUserInfo(n) {
     password: "x",
     role: "user"
   });
-  return UserInfoModel.create({
+  const userInfo = await UserInfoModel.create({
     full_name: `NV ${n}`,
     cccd: `${n}`.padStart(12, "0"),
     phone_number: `090${n}`.padEnd(10, "0"),
@@ -57,6 +61,8 @@ async function createUserInfo(n) {
     ma_nv: `NV${n}`,
     employment_type: "fulltime"
   });
+  await grantRequestPermission(userInfo._id);
+  return userInfo;
 }
 
 describe("GET /requests/eligible-reviewers — full HTTP pipeline (route -> asyncHandler -> service -> global error middleware)", () => {

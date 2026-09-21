@@ -20,6 +20,7 @@ const customerClaimRequestRouter = require("./customerClaimRequest");
 const aiRouter = require("./ai");
 const chatRouter = require("./chat");
 const requestRouter = require("../modules/request/interface/request.routes");
+const permissionRouter = require("../modules/permission/interface/permission.routes");
 const holidayRouter = require("./holiday");
 const employmentStatusRouter = require("./employmentStatus");
 const attendanceMappingRouter = require("./attendanceMapping");
@@ -29,6 +30,9 @@ const rbacRouter = require("./rbac");
 const kpiMetricRouter = require("./kpiMetric");
 const dashboardRouter = require("./dashboard");
 const sharedFolderRouter = require("./sharedFolder");
+const customerCallRouter = require("../modules/customer-call/interface/customer-call.routes");
+const crmSaleAdminRouter = require("../modules/customer-call/interface/crm-sale-admin.routes");
+const hotlineAdminRouter = require("../modules/customer-call/interface/hotline-admin.routes");
 
 const route = (app) => {
   app.use(`/posts`, postRouter);
@@ -51,6 +55,7 @@ const route = (app) => {
   app.use(`/print`, printRouter);
   app.use(`/customer-claim-request`, customerClaimRequestRouter);
   app.use(`/requests`, requestRouter);
+  app.use(`/permissions`, permissionRouter);
   app.use(`/holidays`, holidayRouter);
   app.use(`/employment-status`, employmentStatusRouter);
   app.use(`/attendance-mapping`, attendanceMappingRouter);
@@ -62,6 +67,9 @@ const route = (app) => {
   app.use(`/kpi/metrics`, kpiMetricRouter);
   app.use(`/dashboard`, dashboardRouter);
   app.use("/shared-folders", sharedFolderRouter);
+  app.use("/customer-call", customerCallRouter);
+  app.use("/customer-call", crmSaleAdminRouter);
+  app.use("/customer-call", hotlineAdminRouter);
 };
 
 module.exports = route;

@@ -1,45 +1,28 @@
-const UserInfoModel = require("../models/UserInfoModel");
-const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
+const CustomerModel = require("../models/CustomerModel");
+const { toMongoQuery } = require("../modules/permission");
 
-const getCurrentUserInfo = (accountId) =>
-  UserInfoModel.findOne({ id_account: accountId, isDeleted: false }).select("_id").lean();
+const canAccessCustomer = async (
+  ability,
+  customer,
+  action = "customer.view",
+  { allowUnassigned = false } = {}
+) => {
+  if (!customer.referred_by) return allowUnassigned;
 
-const getScopedSaleIds = async (account) => {
-  if (account.role === "admin" || account.dept_scope === "all") return null;
+  const scopeFilter = toMongoQuery(ability, action, "Customer");
+  if (Object.keys(scopeFilter).length === 0) return true;
 
-  const currentUser = await getCurrentUserInfo(account._id);
-  if (!currentUser) return [];
-  if (account.role !== "manager") return [currentUser._id];
-
-  const departmentIds = await UserDepartmentPositionModel.distinct("department", {
-    user: currentUser._id,
-    isDeleted: false
-  });
-  return UserDepartmentPositionModel.distinct("user", {
-    department: { $in: departmentIds },
-    isDeleted: false
-  });
+  return Boolean(await CustomerModel.exists({ _id: customer._id, ...scopeFilter }));
 };
 
-const hasId = (ids, id) => ids.some((item) => String(item) === String(id));
+const canManageSale = async (ability, saleId) => {
+  const scopeFilter = toMongoQuery(ability, "customer.assign", "Customer");
+  if (Object.keys(scopeFilter).length === 0) return true;
 
-const canAccessCustomer = async (account, customer, { allowUnassigned = false } = {}) => {
-  if (account.role === "admin" || account.dept_scope === "all") return true;
-  if (!customer.referred_by) return allowUnassigned && account.role === "manager";
-
-  const saleIds = await getScopedSaleIds(account);
-  return hasId(saleIds, customer.referred_by);
-};
-
-const canManageSale = async (account, saleId) => {
-  if (account.role === "admin" || account.dept_scope === "all") return true;
-  const saleIds = await getScopedSaleIds(account);
-  return hasId(saleIds, saleId);
+  return String(scopeFilter.referred_by?.$eq) === String(saleId);
 };
 
 module.exports = {
   canAccessCustomer,
-  canManageSale,
-  getCurrentUserInfo,
-  getScopedSaleIds
+  canManageSale
 };

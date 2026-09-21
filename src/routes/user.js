@@ -1,7 +1,8 @@
 const express = require("express");
 
 const router = express.Router();
-const { authenticate, hasModuleAccess, canManage } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
+const { requirePermission } = require("../core/authorization/require-permission.middleware");
 const upload = require("../middlewares/uploadFile");
 const uploadDocuments = require("../middlewares/uploadDocuments");
 const UserController = require("../controllers/UserController");
@@ -23,18 +24,38 @@ async function canManageEmployees(req, res, next) {
 }
 
 // GET
-router.get("/getUsers", authenticate, UserController.getUsers);
+router.get(
+  "/getUsers",
+  authenticate,
+  requirePermission("employee.view", "Employee"),
+  UserController.getUsers
+);
 router.get("/getUserInfo", authenticate, UserController.getUserInfo);
 router.get("/getQRSale", authenticate, UserController.generateMyQR);
-router.get("/getUserById/:id", authenticate, UserController.getUserById);
-router.get("/birthday/this-month", authenticate, UserController.getBirthdayThisMonth);
-router.get("/profile/:accountId", authenticate, UserController.getProfile);
+router.get(
+  "/getUserById/:id",
+  authenticate,
+  requirePermission("employee.view", "Employee"),
+  UserController.getUserById
+);
+router.get(
+  "/birthday/this-month",
+  authenticate,
+  requirePermission("employee.view", "Employee"),
+  UserController.getBirthdayThisMonth
+);
+router.get(
+  "/profile/:accountId",
+  authenticate,
+  requirePermission("employee.view", "Employee"),
+  UserController.getProfile
+);
 
 // PUT
 router.put(
   "/updateUser/:id",
   authenticate,
-  canManageEmployees,
+  requirePermission("employee.update", "Employee"),
   uploadDocuments,
   UserController.updateUser
 );
@@ -43,7 +64,7 @@ router.put(
 router.post(
   "/createUser",
   authenticate,
-  canManageEmployees,
+  requirePermission("employee.create", "Employee"),
   uploadDocuments,
   UserController.createUser
 );
@@ -58,7 +79,7 @@ router.post(
 router.patch(
   "/:id/employment-status",
   authenticate,
-  canManageEmployees,
+  requirePermission("employee.set_status", "Employee"),
   UserController.setEmploymentStatus
 );
 

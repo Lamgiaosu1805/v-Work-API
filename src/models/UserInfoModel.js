@@ -4,6 +4,7 @@ const BaseSchema = require("./BaseSchema");
 const UserInfoModel = new mongoose.Schema(
   {
     full_name: { type: String, required: true },
+    email: { type: String, default: null },
     cccd: { type: String, required: true },
     phone_number: { type: String, required: true },
     sex: { type: Number, required: true }, // 0: Nữ, 1: Nam, 2: Khác

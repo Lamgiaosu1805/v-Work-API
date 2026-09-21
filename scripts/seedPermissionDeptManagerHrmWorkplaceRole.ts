@@ -1,0 +1,100 @@
+import "dotenv/config";
+import mongoose from "mongoose";
+import isEqual from "lodash/isEqual";
+import PermissionRoleModel, { PermissionGrantDoc } from "../src/models/PermissionRoleModel";
+
+const ROLE_CODE = "DEPT_MANAGER_HRM_WORKPLACE";
+
+const DEPT_MANAGER_GRANTS: PermissionGrantDoc[] = [
+  {
+    permissionCode: "employee.update",
+    dataScopePolicyCode: "EMPLOYEE_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "employee.view",
+    dataScopePolicyCode: "EMPLOYEE_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "internal_file.delete",
+    dataScopePolicyCode: "INTERNAL_FILE_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "internal_file.manage",
+    dataScopePolicyCode: "INTERNAL_FILE_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "internal_file.view",
+    dataScopePolicyCode: "INTERNAL_FILE_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "weekly_report.view",
+    dataScopePolicyCode: "WEEKLY_REPORT_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "document.view",
+    dataScopePolicyCode: "DOCUMENT_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "kpi_metric.view",
+    dataScopePolicyCode: "KPI_METRIC_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  }
+];
+
+async function upsertRole(): Promise<void> {
+  const existing = await PermissionRoleModel.findOne({ code: ROLE_CODE });
+  const payload = {
+    name: "Quản lý phòng ban (HRM + Workplace, phạm vi phòng ban)",
+    description:
+      "Role hệ thống — quyền quản lý nhân sự/file nội bộ/báo cáo tuần trong PHẠM VI PHÒNG BAN MÌNH, cộng quyền xem read-only dữ liệu tham chiếu chung công ty. Chưa có quyền Workplace hay duyệt đơn phòng ban — thiếu hạ tầng Data Scope OWN_DEPARTMENT cho 2 nhóm này, xem docs/DEFAULT-PERMISSION-ROLES-PLAN.md mục 2.4.",
+    isSystemRole: true,
+    grants: DEPT_MANAGER_GRANTS,
+    isDeleted: false
+  };
+
+  if (!existing) {
+    await PermissionRoleModel.create({ code: ROLE_CODE, ...payload });
+    console.log(`✅ Tạo role: ${ROLE_CODE} (${DEPT_MANAGER_GRANTS.length} permission)`);
+    return;
+  }
+
+  const existingPlain = existing.toObject();
+  const isSame =
+    !existing.isDeleted &&
+    existingPlain.name === payload.name &&
+    existingPlain.description === payload.description &&
+    existingPlain.isSystemRole === payload.isSystemRole &&
+    isEqual(existingPlain.grants, payload.grants);
+
+  if (isSame) {
+    console.log(`⏭  Bỏ qua (đã đúng): role ${ROLE_CODE}`);
+    return;
+  }
+
+  await PermissionRoleModel.updateOne({ _id: existing._id }, { $set: payload });
+  console.log(`♻️  Cập nhật role: ${ROLE_CODE} (${DEPT_MANAGER_GRANTS.length} permission)`);
+}
+
+async function seed(): Promise<void> {
+  await mongoose.connect(process.env.MONGODB_URI as string);
+  console.log("✅ Kết nối MongoDB thành công");
+
+  await upsertRole();
+
+  console.log(
+    `\n🎉 Hoàn thành seed ${ROLE_CODE} — CHỈ tạo/cập nhật định nghĩa role, chưa gán cho nhân viên nào.`
+  );
+  process.exit(0);
+}
+
+seed().catch((err) => {
+  console.error("❌ Lỗi:", err.message);
+  process.exit(1);
+});

@@ -6,9 +6,6 @@ import "../modules/request/application/request-notification.handlers";
 import { runInTransaction } from "../core/db/run-in-transaction";
 import { REQUEST_SIDE_EFFECTS } from "./request-side-effects";
 
-// Chuyển nguyên orchestration từ modules/request/application/cancel-request.service.ts (task 1.8.6) —
-// validate id (trước khi mở transaction, khớp thứ tự gốc) → runInTransaction (1 transaction duy nhất)
-// → cancelRequestEntity (thuần Request) → dispatch onReject(isCancel=true) xuyên module nếu có.
 export async function cancelRequest(account: any, id: string): Promise<void> {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new ArgumentInvalidException("ID không hợp lệ");

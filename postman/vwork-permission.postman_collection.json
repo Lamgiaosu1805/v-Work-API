@@ -1,0 +1,1005 @@
+{
+  "info": {
+    "_postman_id": "b6f2a2b0-6e1a-4a3e-9c1a-vwork-permission",
+    "name": "vWork - Permission Module (RBAC) + CRM ABAC",
+    "description": "Test suite cho module phân quyền ABAC (src/modules/permission) và các route CRM đã chuyển sang requirePermission. Đăng nhập 1 lần ở folder Auth, các request khác tự dùng {{accessToken}} qua Bearer auth ở cấp collection.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:2345", "type": "string" },
+    { "key": "username", "value": "", "type": "string" },
+    { "key": "password", "value": "", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" },
+    { "key": "roleId", "value": "", "type": "string" },
+    { "key": "employeeId", "value": "", "type": "string" },
+    { "key": "dataScopePolicyId", "value": "", "type": "string" },
+    { "key": "fieldScopePolicyId", "value": "", "type": "string" },
+    { "key": "permissionCode", "value": "employee.view", "type": "string" },
+    { "key": "entity", "value": "Employee", "type": "string" },
+    { "key": "customerId", "value": "", "type": "string" },
+    { "key": "saleUserInfoId", "value": "", "type": "string" },
+    { "key": "claimPeriodId", "value": "", "type": "string" },
+    { "key": "customerClaimRequestId", "value": "", "type": "string" },
+    { "key": "appCode", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Có accessToken\", () => pm.expect(json.accessToken).to.be.a(\"string\"));",
+                  "if (json.accessToken) {",
+                  "  pm.collectionVariables.set(\"accessToken\", json.accessToken);",
+                  "  pm.collectionVariables.set(\"refreshToken\", json.refreshToken || \"\");",
+                  "  console.log(\"Đã lưu accessToken vào collection variable\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Permission - Me",
+      "item": [
+        {
+          "name": "Get My Effective Permissions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "me"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"data.permissions là mảng\", () => pm.expect(json.data.permissions).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Permission - Roles",
+      "item": [
+        {
+          "name": "List Roles",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/roles?limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "roles"],
+              "query": [{ "key": "limit", "value": "50" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"data là mảng\", () => pm.expect(json.data).to.be.an(\"array\"));",
+                  "if (json.data && json.data.length > 0) {",
+                  "  pm.collectionVariables.set(\"roleId\", json.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Role",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Role Postman\",\n  \"code\": \"TEST_ROLE_POSTMAN\",\n  \"description\": \"Tạo từ Postman collection để test\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/permissions/roles",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "roles"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 201\", () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Trả về id role mới\", () => pm.expect(json.data.id).to.be.a(\"string\"));",
+                  "pm.test(\"Tên không vượt quá 100 ký tự (BR đã fix)\", () => pm.expect(json.data.name.length).to.be.at.most(100));",
+                  "if (json.data && json.data.id) {",
+                  "  pm.collectionVariables.set(\"roleId\", json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Role By Id",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/roles/{{roleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "roles", "{{roleId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"id khớp roleId\", () => pm.expect(json.data.id).to.eql(pm.collectionVariables.get(\"roleId\")));",
+                  "pm.test(\"grants là mảng\", () => pm.expect(json.data.grants).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Role (name có khoảng trắng đầu/cuối -> phải tự trim)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"  Test Role Postman Updated  \",\n  \"description\": \"Cập nhật từ Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/permissions/roles/{{roleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "roles", "{{roleId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Tên đã được trim khoảng trắng đầu/cuối\", () => {",
+                  "  pm.expect(json.data.name).to.eql(json.data.name.trim());",
+                  "  pm.expect(json.data.name).to.eql(\"Test Role Postman Updated\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Role Deletion Impact",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/roles/{{roleId}}/deletion-impact",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "roles", "{{roleId}}", "deletion-impact"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Có affectedEmployeeCount\", () => pm.expect(json.data.affectedEmployeeCount).to.be.a(\"number\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Role",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/roles/{{roleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "roles", "{{roleId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Permission - Employees",
+      "item": [
+        {
+          "name": "List Employees For Permission",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/employees?limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "employees"],
+              "query": [{ "key": "limit", "value": "50" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"data là mảng\", () => pm.expect(json.data).to.be.an(\"array\"));",
+                  "if (json.data && json.data.length > 0) {",
+                  "  pm.collectionVariables.set(\"employeeId\", json.data[0].employeeId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Employee Permission Profile",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/employees/{{employeeId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "employees", "{{employeeId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Có assignedRoles + overrides\", () => {",
+                  "  pm.expect(json.data.assignedRoles).to.be.an(\"array\");",
+                  "  pm.expect(json.data.overrides).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Employee Permission (gán role + override)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roleIds\": [\"{{roleId}}\"],\n  \"overrides\": []\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/permissions/employees/{{employeeId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "employees", "{{employeeId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"roleIds đã lưu đúng\", () => pm.expect(json.data.roleIds).to.include(pm.collectionVariables.get(\"roleId\")));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Permission - Data Scope Policies",
+      "item": [
+        {
+          "name": "List Data Scope Policies",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/data-scope-policies?limit=200",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "data-scope-policies"],
+              "query": [{ "key": "limit", "value": "200" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"data là mảng\", () => pm.expect(json.data).to.be.an(\"array\"));",
+                  "if (json.data && json.data.length > 0) {",
+                  "  pm.collectionVariables.set(\"dataScopePolicyId\", json.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Data Scope Policy",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"TEST_SCOPE_POSTMAN\",\n  \"entity\": \"{{entity}}\",\n  \"label\": \"Test Scope từ Postman\",\n  \"conditionTree\": null\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/permissions/data-scope-policies",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "data-scope-policies"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 201\", () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) pm.collectionVariables.set(\"dataScopePolicyId\", json.data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Data Scope Policy By Id",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/data-scope-policies/{{dataScopePolicyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "data-scope-policies", "{{dataScopePolicyId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Data Scope Policy",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Test Scope đã sửa từ Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/permissions/data-scope-policies/{{dataScopePolicyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "data-scope-policies", "{{dataScopePolicyId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"label đã cập nhật\", () => pm.expect(json.data.label).to.eql(\"Test Scope đã sửa từ Postman\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Data Scope Policy",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/data-scope-policies/{{dataScopePolicyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "data-scope-policies", "{{dataScopePolicyId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 hoặc 409 (nếu đang được Role dùng)\", () => {",
+                  "  pm.expect([200, 409]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Permission - Field Scope Policies",
+      "item": [
+        {
+          "name": "List Field Scope Policies",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/field-scope-policies?limit=200",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "field-scope-policies"],
+              "query": [{ "key": "limit", "value": "200" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"data là mảng\", () => pm.expect(json.data).to.be.an(\"array\"));",
+                  "if (json.data && json.data.length > 0) {",
+                  "  pm.collectionVariables.set(\"fieldScopePolicyId\", json.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Field Scope Policy",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"TEST_FIELD_POSTMAN\",\n  \"entity\": \"{{entity}}\",\n  \"label\": \"Test Field Scope từ Postman\",\n  \"fields\": [\"name\"],\n  \"conditionTree\": null\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/permissions/field-scope-policies",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "field-scope-policies"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 201\", () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) pm.collectionVariables.set(\"fieldScopePolicyId\", json.data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Field Scope Policy By Id",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/field-scope-policies/{{fieldScopePolicyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "field-scope-policies", "{{fieldScopePolicyId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Field Scope Policy",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Test Field Scope đã sửa\",\n  \"fields\": [\"name\", \"phone_number\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/permissions/field-scope-policies/{{fieldScopePolicyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "field-scope-policies", "{{fieldScopePolicyId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"fields đã cập nhật\", () => pm.expect(json.data.fields).to.include(\"phone_number\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Field Scope Policy",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/field-scope-policies/{{fieldScopePolicyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "field-scope-policies", "{{fieldScopePolicyId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 hoặc 409 (nếu đang được Role dùng)\", () => {",
+                  "  pm.expect([200, 409]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Permission - Catalog",
+      "item": [
+        {
+          "name": "List Permission Catalog",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/catalog",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "catalog"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"data là mảng, không có penalty_tier.* (đã gỡ)\", () => {",
+                  "  pm.expect(json.data).to.be.an(\"array\");",
+                  "  const hasPenaltyTier = json.data.some((p) => p.code.startsWith(\"penalty_tier.\"));",
+                  "  pm.expect(hasPenaltyTier).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Attribute Catalog",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/permissions/attribute-catalog?entity={{entity}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "attribute-catalog"],
+              "query": [{ "key": "entity", "value": "{{entity}}" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test(\"Có subjectAttributes/resourceAttributes/fields\", () => {",
+                  "  pm.expect(json.data.subjectAttributes).to.be.an(\"array\");",
+                  "  pm.expect(json.data.resourceAttributes).to.be.an(\"array\");",
+                  "  pm.expect(json.data.fields).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Catalog Whitelists",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"validDataScopePolicies\": [\"ALL_COMPANY\"],\n  \"validFieldScopePolicies\": []\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/permissions/catalog/{{permissionCode}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["permissions", "catalog", "{{permissionCode}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CRM (đã chuyển sang requirePermission)",
+      "item": [
+        {
+          "name": "Customer - List All (customer.view)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/customer/all",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "all"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 nếu có quyền customer.view, 403 nếu không\", () => {",
+                  "  pm.expect([200, 403]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.data && json.data.length > 0) {",
+                  "    pm.collectionVariables.set(\"customerId\", json.data[0]._id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Customer - Assign (customer.assign)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sale_user_info_id\": \"{{saleUserInfoId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customer/{{customerId}}/assign",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "{{customerId}}", "assign"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Không bị 403 nếu có quyền customer.assign\", () => {",
+                  "  pm.expect(pm.response.code).to.not.eql(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agent - List (agent.view)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/agents",
+              "host": ["{{baseUrl}}"],
+              "path": ["agents"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 nếu có quyền agent.view, 403 nếu không\", () => {",
+                  "  pm.expect([200, 403]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Investment - Staff Commission (commission.view)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/investments/staff-commission",
+              "host": ["{{baseUrl}}"],
+              "path": ["investments", "staff-commission"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 nếu có quyền commission.view, 403 nếu không\", () => {",
+                  "  pm.expect([200, 403]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Claim Period - History (claim_period.view)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/claim-period/history",
+              "host": ["{{baseUrl}}"],
+              "path": ["claim-period", "history"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 nếu có quyền claim_period.view, 403 nếu không\", () => {",
+                  "  pm.expect([200, 403]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Claim Period - Create (claim_period.manage)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"app_code\": \"{{appCode}}\",\n  \"start_at\": \"2026-01-01T00:00:00.000Z\",\n  \"end_at\": \"2026-01-31T00:00:00.000Z\",\n  \"note\": \"Tạo từ Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/claim-period",
+              "host": ["{{baseUrl}}"],
+              "path": ["claim-period"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Không bị 403 nếu có quyền claim_period.manage\", () => {",
+                  "  pm.expect(pm.response.code).to.not.eql(403);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.data && json.data._id) pm.collectionVariables.set(\"claimPeriodId\", json.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Claim Period - Close (claim_period.close)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/claim-period/{{claimPeriodId}}/close",
+              "host": ["{{baseUrl}}"],
+              "path": ["claim-period", "{{claimPeriodId}}", "close"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Không bị 403 nếu có quyền claim_period.close\", () => {",
+                  "  pm.expect(pm.response.code).to.not.eql(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Customer Claim Request - List (customer_claim_request.view)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/customer-claim-request",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer-claim-request"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 nếu có quyền customer_claim_request.view, 403 nếu không\", () => {",
+                  "  pm.expect([200, 403]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.data && json.data.length > 0) pm.collectionVariables.set(\"customerClaimRequestId\", json.data[0]._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Customer Claim Request - Approve (customer_claim_request.review)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/customer-claim-request/{{customerClaimRequestId}}/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer-claim-request", "{{customerClaimRequestId}}", "approve"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Không bị 403 nếu có quyền customer_claim_request.review\", () => {",
+                  "  pm.expect(pm.response.code).to.not.eql(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dashboard - Key Metrics (dashboard_metric.view)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/key-metrics",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard", "key-metrics"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 nếu có quyền dashboard_metric.view, 403 nếu không\", () => {",
+                  "  pm.expect([200, 403]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": { "type": "text/javascript", "exec": [""] }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test(\"Response time < 5000ms\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+        ]
+      }
+    }
+  ]
+}

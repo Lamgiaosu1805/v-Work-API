@@ -5,9 +5,6 @@ const DepartmentPositionController = require("../controllers/DepartmentPositionC
 
 const router = express.Router();
 
-const canManageDepartment = requirePermission(PERMISSION.HRM_MENU_DEPARTMENT, PERMISSION.HRM_MENU_BRANCH);
-const canManagePosition = requirePermission(PERMISSION.HRM_MENU_POSITIONS);
-
 // GET
 router.get(
   "/getAll",

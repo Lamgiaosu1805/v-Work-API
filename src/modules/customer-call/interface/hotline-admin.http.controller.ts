@@ -8,6 +8,7 @@ import {
 } from "../application/update-hotline-config.service";
 import { listHotlineCallScripts } from "../application/list-hotline-call-scripts.service";
 import { listHotlineExtensions } from "../application/list-hotline-extensions.service";
+import { syncHotlineExtensionAssignments } from "../application/sync-hotline-extension-assignments.service";
 
 export const hotlineAdminHttpController = {
   async getHotlines(req: Request, res: Response) {
@@ -49,5 +50,18 @@ export const hotlineAdminHttpController = {
   async getHotlineExtensions(req: Request, res: Response) {
     const data = await listHotlineExtensions({ keyword: req.query.keyword as string | undefined });
     return res.status(200).json({ message: "OK", data });
+  },
+
+  async syncHotlineExtensionAssignments(req: Request, res: Response) {
+    const { extensionsToAssign, extensionsToUnassign } = req.body;
+    if (!Array.isArray(extensionsToAssign) || !Array.isArray(extensionsToUnassign)) {
+      throw new ArgumentInvalidException("extensionsToAssign/extensionsToUnassign phải là mảng");
+    }
+    const data = await syncHotlineExtensionAssignments(
+      req.params.phone,
+      extensionsToAssign,
+      extensionsToUnassign
+    );
+    return res.status(200).json({ message: "Đã đồng bộ gán hotline cho extension", data });
   }
 };

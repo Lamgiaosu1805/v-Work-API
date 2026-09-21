@@ -63,7 +63,8 @@ export async function getSipCredentials(
       omicallExtension: credentials.sipUser,
       sipPassword: credentials.sipPassword,
       omicallAgentId: existing.omicallAgentId,
-      omicallEmail: email
+      omicallEmail: email,
+      hotlineNumbers: detail.hotlines ?? []
     });
     await saleOmicallProfileRepository.updateById(existing.id, existing);
     return credentials;
@@ -76,7 +77,8 @@ export async function getSipCredentials(
     sipRealm: credentials.sipRealm,
     omicallExtension: credentials.sipUser,
     sipPassword: credentials.sipPassword,
-    omicallEmail: email
+    omicallEmail: email,
+    hotlineNumbers: detail.hotlines ?? []
   });
   await saleOmicallProfileRepository.insert(profile);
   return credentials;

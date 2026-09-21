@@ -33,7 +33,7 @@ const ensureCustomerAccessByExternalId = async (req, res, externalId) => {
     return false;
   }
 
-  if (!(await canAccessCustomer(req.account, customer))) {
+  if (!(await canAccessCustomer(req.permissionAbility, customer, "customer.view"))) {
     res.status(403).json({ message: "Bạn không có quyền xem khách hàng này" });
     return false;
   }
@@ -428,7 +428,7 @@ const CustomerController = {
       }
 
       const pipeline = [
-        { $match: matchStage },
+        { $match: filter },
         { $addFields: { _sortRegisteredAt: { $ifNull: ["$registeredAt", "$createdAt"] } } },
         { $sort: { _sortRegisteredAt: -1 } },
         {
@@ -1342,7 +1342,7 @@ const CustomerController = {
         session.endSession();
         return res.status(404).json({ message: "Không tìm thấy khách hàng" });
       }
-      if (!(await canAccessCustomer(req.account, customer))) {
+      if (!(await canAccessCustomer(req.permissionAbility, customer, "customer.assign"))) {
         await session.abortTransaction();
         session.endSession();
         return res
@@ -1356,7 +1356,7 @@ const CustomerController = {
         session.endSession();
         return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
       }
-      if (!(await canManageSale(req.account, newSale._id))) {
+      if (!(await canManageSale(req.permissionAbility, newSale._id))) {
         await session.abortTransaction();
         session.endSession();
         return res.status(403).json({ message: "Bạn không có quyền phân công cho sale này" });
@@ -1451,7 +1451,7 @@ const CustomerController = {
         session.endSession();
         return res.status(404).json({ message: "Không tìm thấy khách hàng" });
       }
-      if (!(await canAccessCustomer(req.account, customer))) {
+      if (!(await canAccessCustomer(req.permissionAbility, customer, "customer.assign"))) {
         await session.abortTransaction();
         session.endSession();
         return res
@@ -1558,7 +1558,11 @@ const CustomerController = {
         session.endSession();
         return res.status(404).json({ message: "Không tìm thấy khách hàng" });
       }
-      if (!(await canAccessCustomer(req.account, customer, { allowUnassigned: true }))) {
+      if (
+        !(await canAccessCustomer(req.permissionAbility, customer, "customer.assign", {
+          allowUnassigned: true
+        }))
+      ) {
         await session.abortTransaction();
         session.endSession();
         return res.status(403).json({ message: "Bạn không có quyền phân khách này" });
@@ -1591,7 +1595,7 @@ const CustomerController = {
         session.endSession();
         return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
       }
-      if (!(await canManageSale(req.account, sale._id))) {
+      if (!(await canManageSale(req.permissionAbility, sale._id))) {
         await session.abortTransaction();
         session.endSession();
         return res.status(403).json({ message: "Bạn không có quyền phân công cho sale này" });
@@ -1722,7 +1726,7 @@ const CustomerController = {
         session.endSession();
         return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
       }
-      if (!(await canManageSale(req.account, sale._id))) {
+      if (!(await canManageSale(req.permissionAbility, sale._id))) {
         await session.abortTransaction();
         session.endSession();
         return res.status(403).json({ message: "Bạn không có quyền phân công cho sale này" });
@@ -1739,7 +1743,11 @@ const CustomerController = {
       const tncn_rate = getTNCNRate(sale.employment_type);
 
       for (const customer of customers) {
-        if (!(await canAccessCustomer(req.account, customer, { allowUnassigned: true }))) {
+        if (
+          !(await canAccessCustomer(req.permissionAbility, customer, "customer.assign", {
+            allowUnassigned: true
+          }))
+        ) {
           skipped.push({ customer_id: customer._id, reason: "Bạn không có quyền phân khách này" });
           continue;
         }

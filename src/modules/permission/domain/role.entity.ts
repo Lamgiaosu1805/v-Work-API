@@ -4,6 +4,7 @@ import { RoleCode } from "./value-objects/role-code.vo";
 import { PermissionGrant, PermissionGrantProps } from "./value-objects/permission-grant.vo";
 import { SystemRoleNotDeletableError } from "./permission.errors";
 import { RoleDeletedDomainEvent } from "./events/role-deleted.domain-event";
+import { RoleGrantsChangedDomainEvent } from "./events/role-grants-changed.domain-event";
 
 export interface RoleProps {
   name: string;
@@ -71,6 +72,10 @@ export class RoleEntity extends AggregateRoot<RoleProps> {
     this._setProps({
       grants: this.props.grants.filter((grant) => grant.permissionCode !== permissionCode)
     });
+  }
+
+  recordGrantsChanged(): void {
+    this.addEvent(new RoleGrantsChangedDomainEvent({ aggregateId: this.id, roleId: this.id }));
   }
 
   assertDeletable(): void {

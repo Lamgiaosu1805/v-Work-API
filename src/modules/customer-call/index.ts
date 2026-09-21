@@ -7,3 +7,5 @@ export type { SipCredentials } from "./application/get-sip-credentials.service";
 export { removeSaleOmicallProfile } from "./application/remove-sale-omicall-profile.service";
 
 export { updateSaleOmicallPassword } from "./application/update-sale-omicall-password.service";
+
+export { listOmicallAgentsByEmail } from "./application/list-omicall-agents.service";

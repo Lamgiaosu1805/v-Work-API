@@ -3,37 +3,37 @@ import mongoose from "mongoose";
 import isEqual from "lodash/isEqual";
 import PermissionRoleModel, { PermissionGrantDoc } from "../src/models/PermissionRoleModel";
 
-const ROLE_CODE = "DEPT_MANAGER_HRM_WORKPLACE";
+const ROLE_CODE = "COMPANY_EXECUTIVE";
 
-const DEPT_MANAGER_GRANTS: PermissionGrantDoc[] = [
+const COMPANY_EXECUTIVE_GRANTS: PermissionGrantDoc[] = [
   {
-    permissionCode: "employee.update",
-    dataScopePolicyCode: "EMPLOYEE_OWN_DEPARTMENT",
+    permissionCode: "dashboard_metric.view",
+    dataScopePolicyCode: "DASHBOARD_METRIC_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "investment.view",
+    dataScopePolicyCode: "INVESTMENT_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "commission.view",
+    dataScopePolicyCode: "COMMISSION_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
   {
     permissionCode: "employee.view",
-    dataScopePolicyCode: "EMPLOYEE_OWN_DEPARTMENT",
+    dataScopePolicyCode: "EMPLOYEE_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
   {
-    permissionCode: "internal_file.delete",
-    dataScopePolicyCode: "INTERNAL_FILE_OWN_DEPARTMENT",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "internal_file.manage",
-    dataScopePolicyCode: "INTERNAL_FILE_OWN_DEPARTMENT",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "internal_file.view",
-    dataScopePolicyCode: "INTERNAL_FILE_OWN_DEPARTMENT",
+    permissionCode: "payroll.view",
+    dataScopePolicyCode: "PAYROLL_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
   {
     permissionCode: "weekly_report.view",
-    dataScopePolicyCode: "WEEKLY_REPORT_OWN_DEPARTMENT",
+    dataScopePolicyCode: "WEEKLY_REPORT_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
   {
@@ -42,8 +42,18 @@ const DEPT_MANAGER_GRANTS: PermissionGrantDoc[] = [
     fieldScopePolicyCode: null
   },
   {
-    permissionCode: "kpi_metric.view",
-    dataScopePolicyCode: "KPI_METRIC_ALL_COMPANY",
+    permissionCode: "department.view",
+    dataScopePolicyCode: "DEPARTMENT_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "branch.view",
+    dataScopePolicyCode: "BRANCH_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "position.view",
+    dataScopePolicyCode: "POSITION_ALL_COMPANY",
     fieldScopePolicyCode: null
   }
 ];
@@ -51,17 +61,17 @@ const DEPT_MANAGER_GRANTS: PermissionGrantDoc[] = [
 async function upsertRole(): Promise<void> {
   const existing = await PermissionRoleModel.findOne({ code: ROLE_CODE });
   const payload = {
-    name: "Quản lý phòng ban (HRM + Workplace, phạm vi phòng ban)",
+    name: "Ban Giám đốc / CEO (chỉ xem)",
     description:
-      "Role hệ thống — quyền quản lý nhân sự/file nội bộ/báo cáo tuần trong PHẠM VI PHÒNG BAN MÌNH, cộng quyền xem read-only dữ liệu tham chiếu chung công ty. Chưa có quyền Workplace hay duyệt đơn phòng ban — thiếu hạ tầng Data Scope OWN_DEPARTMENT cho 2 nhóm này, xem docs/DEFAULT-PERMISSION-ROLES-PLAN.md mục 2.4.",
+      "Role hệ thống — quyền xem (view-only) dữ liệu tổng quan HRM + CRM ở phạm vi toàn công ty, không có quyền tạo/sửa/xoá.",
     isSystemRole: true,
-    grants: DEPT_MANAGER_GRANTS,
+    grants: COMPANY_EXECUTIVE_GRANTS,
     isDeleted: false
   };
 
   if (!existing) {
     await PermissionRoleModel.create({ code: ROLE_CODE, ...payload });
-    console.log(`✅ Tạo role: ${ROLE_CODE} (${DEPT_MANAGER_GRANTS.length} permission)`);
+    console.log(`✅ Tạo role: ${ROLE_CODE} (${COMPANY_EXECUTIVE_GRANTS.length} permission)`);
     return;
   }
 
@@ -79,7 +89,7 @@ async function upsertRole(): Promise<void> {
   }
 
   await PermissionRoleModel.updateOne({ _id: existing._id }, { $set: payload });
-  console.log(`♻️  Cập nhật role: ${ROLE_CODE} (${DEPT_MANAGER_GRANTS.length} permission)`);
+  console.log(`♻️  Cập nhật role: ${ROLE_CODE} (${COMPANY_EXECUTIVE_GRANTS.length} permission)`);
 }
 
 async function seed(): Promise<void> {

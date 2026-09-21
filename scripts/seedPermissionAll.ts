@@ -18,7 +18,8 @@ const SEED_SCRIPTS = [
   "seedPermissionHrmStaffRole.ts",
   "seedPermissionHrmManagerRole.ts",
   "seedPermissionDeptManagerHrmWorkplaceRole.ts",
-  "seedPermissionWorkplaceManagerRole.ts"
+  "seedPermissionWorkplaceManagerRole.ts",
+  "seedPermissionCompanyExecutiveRole.ts"
 ];
 
 function runScript(fileName: string): void {

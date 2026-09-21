@@ -40,4 +40,11 @@ router.patch(
   asyncHandler(hotlineAdminHttpController.updateHotlineConfig)
 );
 
+router.post(
+  "/admin/hotlines/:phone/sync-extension-assignments",
+  authenticate,
+  isAdmin,
+  asyncHandler(hotlineAdminHttpController.syncHotlineExtensionAssignments)
+);
+
 export = router;

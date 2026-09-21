@@ -93,6 +93,7 @@ describe("getSipCredentials", () => {
       full_name: "Sip Employee C",
       mail: "sip-c@x.test",
       uuid: "uuid-1",
+      hotlines: ["842871008617"],
       pbx_account: {
         display_name: "Sip Employee C",
         sip_user: "110",
@@ -110,6 +111,9 @@ describe("getSipCredentials", () => {
 
     const result = await getSipCredentials(employeeId, true);
     expect(result).toEqual({ sipRealm: "realm-x", sipUser: "110", sipPassword: "pass123" });
+
+    const saved = await SaleOmicallProfileModel.findOne({ sale_id: employeeId }).lean();
+    expect((saved as any).hotline_numbers).toEqual(["842871008617"]);
   });
 
   test("extension đã gán cho nhân viên khác -> xoá profile cũ, gán extension cho nhân viên đang đồng bộ", async () => {
@@ -165,5 +169,91 @@ describe("getSipCredentials", () => {
       isDeleted: false
     }).lean();
     expect((newProfile as any).omicall_extension).toBe("111");
+  });
+
+  test("refresh (forceRefresh) profile có hotline_numbers SAI (lệch với Omicall) -> ghi đè lại đúng theo Omicall", async () => {
+    const employeeId = await createEmployee(
+      "sipEmpF",
+      "Sip Employee F",
+      "NV-SIP-F",
+      "sip-f@x.test"
+    );
+    await SaleOmicallProfileModel.create({
+      sale_id: employeeId,
+      sip_realm: "realm-old",
+      omicall_extension: "120",
+      sip_password: "pass-old",
+      omicall_email: "sip-f@x.test",
+      hotline_numbers: ["19009999"]
+    });
+
+    jest.spyOn(OmicallClient.prototype, "getExtensionDetail").mockResolvedValue({
+      extension: "120",
+      full_name: "Sip Employee F",
+      mail: "sip-f@x.test",
+      uuid: "uuid-3",
+      hotlines: ["842871008617"],
+      pbx_account: {
+        display_name: "Sip Employee F",
+        sip_user: "120",
+        sip_password: "pass-refreshed",
+        sip_web_socket_server: "wss://x",
+        sip_realm: "realm-refreshed",
+        sip_proxy: "proxy",
+        sip_proxy_port: "5060",
+        stun_servers: [],
+        transport: ["udp"],
+        use_opus: true,
+        opus_quality: 1
+      }
+    } as any);
+
+    await getSipCredentials(employeeId, true);
+
+    const saved = await SaleOmicallProfileModel.findOne({ sale_id: employeeId }).lean();
+    expect((saved as any).hotline_numbers).toEqual(["842871008617"]);
+    expect((saved as any).sip_password).toBe("pass-refreshed");
+  });
+
+  test("refresh (forceRefresh) profile đang có hotline_numbers RỖNG -> lấy từ detail.hotlines", async () => {
+    const employeeId = await createEmployee(
+      "sipEmpG",
+      "Sip Employee G",
+      "NV-SIP-G",
+      "sip-g@x.test"
+    );
+    await SaleOmicallProfileModel.create({
+      sale_id: employeeId,
+      sip_realm: "realm-old",
+      omicall_extension: "121",
+      sip_password: "pass-old",
+      omicall_email: "sip-g@x.test"
+    });
+
+    jest.spyOn(OmicallClient.prototype, "getExtensionDetail").mockResolvedValue({
+      extension: "121",
+      full_name: "Sip Employee G",
+      mail: "sip-g@x.test",
+      uuid: "uuid-4",
+      hotlines: ["842871008617"],
+      pbx_account: {
+        display_name: "Sip Employee G",
+        sip_user: "121",
+        sip_password: "pass-refreshed",
+        sip_web_socket_server: "wss://x",
+        sip_realm: "realm-refreshed",
+        sip_proxy: "proxy",
+        sip_proxy_port: "5060",
+        stun_servers: [],
+        transport: ["udp"],
+        use_opus: true,
+        opus_quality: 1
+      }
+    } as any);
+
+    await getSipCredentials(employeeId, true);
+
+    const saved = await SaleOmicallProfileModel.findOne({ sale_id: employeeId }).lean();
+    expect((saved as any).hotline_numbers).toEqual(["842871008617"]);
   });
 });

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { assignExtensionOutboundHotline } from "../src/modules/customer-call/application/assign-extension-outbound-hotline.service";
-import { OmicallClient, HotlineItem } from "../src/utils/omicallClient";
+import { OmicallClient } from "../src/utils/omicallClient";
 import { NotFoundException } from "../src/core/exceptions/exceptions";
 import SaleOmicallProfileModel from "../src/models/SaleOmicallProfileModel";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -38,30 +38,6 @@ async function createSale(username: string, fullName: string, maNv: string) {
   return { account, employeeId: String(userInfo._id) };
 }
 
-function baseHotlineItem(overrides: Partial<HotlineItem> = {}): HotlineItem {
-  return {
-    number: "19001234",
-    status: "active",
-    expire_date: null,
-    created_date: Date.now(),
-    last_updated_date: Date.now(),
-    configs: {
-      allow_call_in: true,
-      allow_call_out: true,
-      default_script: null,
-      working_days: [],
-      special_days: [],
-      call_configs: null,
-      access_type: "applies_according_to_employee_criteria",
-      number_type: "fixed",
-      disable_by_time_frame: false,
-      outbound_config: null
-    },
-    accesses: [],
-    ...overrides
-  };
-}
-
 beforeEach(async () => {
   jest.restoreAllMocks();
   await Promise.all([
@@ -74,116 +50,60 @@ beforeEach(async () => {
 describe("assignExtensionOutboundHotline (integration, MongoMemoryServer + mock OmicallClient)", () => {
   test("employee chưa có SaleOmicallProfile -> NotFoundException, không gọi Omicall", async () => {
     const sale = await createSale("assignA", "Assign A", "NV-ASSIGN-A");
-    const detailSpy = jest.spyOn(OmicallClient.prototype, "getHotlineByPhone");
-    const updateSpy = jest.spyOn(OmicallClient.prototype, "updateHotlineConfig");
+    const setSpy = jest.spyOn(OmicallClient.prototype, "setExtensionHotline");
 
     await expect(assignExtensionOutboundHotline(sale.employeeId, "19001234")).rejects.toThrow(
       NotFoundException
     );
 
-    expect(detailSpy).not.toHaveBeenCalled();
-    expect(updateSpy).not.toHaveBeenCalled();
+    expect(setSpy).not.toHaveBeenCalled();
   });
 
-  test("hotline access_type = applies_to_all_employees -> no-op, không gọi updateHotlineConfig", async () => {
-    const sale = await createSale("assignB", "Assign B", "NV-ASSIGN-B");
-    await SaleOmicallProfileModel.create({
-      sale_id: sale.employeeId,
-      sip_realm: "realm",
-      omicall_extension: "101",
-      sip_password: "pass",
-      omicall_email: "b@omicall.test"
-    });
-
-    jest.spyOn(OmicallClient.prototype, "getHotlineByPhone").mockResolvedValue(
-      baseHotlineItem({
-        configs: { ...baseHotlineItem().configs, access_type: "applies_to_all_employees" }
-      })
-    );
-    const updateSpy = jest
-      .spyOn(OmicallClient.prototype, "updateHotlineConfig")
-      .mockResolvedValue(true);
-
-    await assignExtensionOutboundHotline(sale.employeeId, "19001234");
-
-    expect(updateSpy).not.toHaveBeenCalled();
-  });
-
-  test("sipUser đã có sẵn trong accesses -> no-op, không gọi updateHotlineConfig", async () => {
-    const sale = await createSale("assignC", "Assign C", "NV-ASSIGN-C");
-    await SaleOmicallProfileModel.create({
-      sale_id: sale.employeeId,
-      sip_realm: "realm",
-      omicall_extension: "202",
-      sip_password: "pass",
-      omicall_email: "c@omicall.test"
-    });
-
-    jest.spyOn(OmicallClient.prototype, "getHotlineByPhone").mockResolvedValue(
-      baseHotlineItem({
-        accesses: [{ id: "acc-1", type: "Extension", name: "202" }]
-      })
-    );
-    const updateSpy = jest
-      .spyOn(OmicallClient.prototype, "updateHotlineConfig")
-      .mockResolvedValue(true);
-
-    await assignExtensionOutboundHotline(sale.employeeId, "19001234");
-
-    expect(updateSpy).not.toHaveBeenCalled();
-  });
-
-  test("sipUser chưa có -> gọi updateHotlineConfig, merge extensions cũ + mới, giữ nguyên allowCallIn/Out/callScript", async () => {
+  test("gán hotline mới -> gọi setExtensionHotline đúng email/hotline/directions cả 2 chiều, lưu hotline_numbers local (thay thế toàn bộ)", async () => {
     const sale = await createSale("assignD", "Assign D", "NV-ASSIGN-D");
     await SaleOmicallProfileModel.create({
       sale_id: sale.employeeId,
       sip_realm: "realm",
       omicall_extension: "303",
       sip_password: "pass",
-      omicall_email: "d@omicall.test"
+      omicall_email: "d@omicall.test",
+      hotline_numbers: ["19009999"]
     });
 
-    jest.spyOn(OmicallClient.prototype, "getHotlineByPhone").mockResolvedValue(
-      baseHotlineItem({
-        configs: {
-          ...baseHotlineItem().configs,
-          allow_call_in: false,
-          allow_call_out: true,
-          default_script: "script-9"
-        },
-        accesses: [{ id: "acc-1", type: "Extension", name: "999" }]
-      })
-    );
-    const updateSpy = jest
-      .spyOn(OmicallClient.prototype, "updateHotlineConfig")
-      .mockResolvedValue(true);
+    const setSpy = jest.spyOn(OmicallClient.prototype, "setExtensionHotline").mockResolvedValue({});
 
     await assignExtensionOutboundHotline(sale.employeeId, "19001234");
 
-    expect(updateSpy).toHaveBeenCalledWith({
+    expect(setSpy).toHaveBeenCalledWith({
       hotline: "19001234",
-      allow_call_in: "false",
-      allow_call_out: "true",
-      access_type: "applies_according_to_employee_criteria",
-      call_script: "script-9",
-      extensions: ["999", "303"]
+      userEmail: "d@omicall.test",
+      directions: ["outbound", "inbound"]
     });
+
+    const saved = await SaleOmicallProfileModel.findOne({ sale_id: sale.employeeId }).lean();
+    expect((saved as any).hotline_numbers).toEqual(["19001234"]);
   });
 
-  test("hotline không tồn tại -> NotFoundException bubble từ getHotlineDetail", async () => {
+  test("Omicall setExtensionHotline lỗi -> ném lỗi, KHÔNG cập nhật hotline_numbers local", async () => {
     const sale = await createSale("assignE", "Assign E", "NV-ASSIGN-E");
     await SaleOmicallProfileModel.create({
       sale_id: sale.employeeId,
       sip_realm: "realm",
       omicall_extension: "404",
       sip_password: "pass",
-      omicall_email: "e@omicall.test"
+      omicall_email: "e@omicall.test",
+      hotline_numbers: ["19009999"]
     });
 
-    jest.spyOn(OmicallClient.prototype, "getHotlineByPhone").mockResolvedValue(null);
+    jest
+      .spyOn(OmicallClient.prototype, "setExtensionHotline")
+      .mockRejectedValue(new Error("Omicall lỗi"));
 
     await expect(assignExtensionOutboundHotline(sale.employeeId, "00000000")).rejects.toThrow(
-      NotFoundException
+      "Omicall lỗi"
     );
+
+    const saved = await SaleOmicallProfileModel.findOne({ sale_id: sale.employeeId }).lean();
+    expect((saved as any).hotline_numbers).toEqual(["19009999"]);
   });
 });

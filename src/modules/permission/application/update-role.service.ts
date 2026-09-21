@@ -5,6 +5,8 @@ import { PermissionGrantProps } from "../domain/value-objects/permission-grant.v
 import PermissionCatalogModel from "../../../models/PermissionCatalogModel";
 import DataScopePolicyModel from "../../../models/DataScopePolicyModel";
 import FieldScopePolicyModel from "../../../models/FieldScopePolicyModel";
+import { eventBus } from "../../../core/events/event-bus";
+import "./handlers/invalidate-permission-cache.handler";
 
 const roleRepository = new RoleRepository();
 
@@ -75,9 +77,12 @@ export async function updateRole(id: string, input: UpdateRoleInput): Promise<Ro
       }
     });
     input.grants.forEach((grant) => role.addGrant(grant));
+    role.recordGrantsChanged();
   }
 
   await roleRepository.updateById(id, role);
+
+  role.publishEvents(eventBus).catch(() => {});
 
   return role;
 }

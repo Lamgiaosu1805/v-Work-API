@@ -19,7 +19,11 @@ const EMPLOYEE_SCOPES_MANAGE = ["EMPLOYEE_ALL_COMPANY", "EMPLOYEE_OWN_DEPARTMENT
 const EMPLOYEE_SCOPES_VIEW = ["EMPLOYEE_ALL_COMPANY", "EMPLOYEE_OWN_DEPARTMENT", "EMPLOYEE_SELF"];
 const INTERNAL_FILE_SCOPES = ["INTERNAL_FILE_ALL_COMPANY", "INTERNAL_FILE_OWN_DEPARTMENT"];
 const WEEKLY_REPORT_SCOPES_VIEW = ["WEEKLY_REPORT_ALL_COMPANY", "WEEKLY_REPORT_OWN_DEPARTMENT"];
-const CUSTOMER_SCOPES_VIEW = ["CUSTOMER_ALL_COMPANY", "CUSTOMER_SELF_ASSIGNED"];
+const CUSTOMER_SCOPES_VIEW = [
+  "CUSTOMER_ALL_COMPANY",
+  "CUSTOMER_OWN_DEPARTMENT",
+  "CUSTOMER_SELF_ASSIGNED"
+];
 const CUSTOMER_CALL_SCOPES = [
   "CUSTOMER_ALL_COMPANY",
   "CUSTOMER_OWN_DEPARTMENT",
@@ -27,6 +31,7 @@ const CUSTOMER_CALL_SCOPES = [
 ];
 const CUSTOMER_INTERACTION_SCOPES_VIEW = [
   "CUSTOMER_INTERACTION_ALL_COMPANY",
+  "CUSTOMER_INTERACTION_OWN_DEPARTMENT",
   "CUSTOMER_INTERACTION_SELF_ASSIGNED"
 ];
 const COMMISSION_SCOPES_VIEW = ["COMMISSION_ALL_COMPANY", "COMMISSION_SELF_ASSIGNED"];
@@ -36,6 +41,12 @@ const CALL_LOG_SCOPES = [
   "CALL_LOG_SELF_ASSIGNED"
 ];
 const SALE_OMICALL_PROFILE_SCOPES = ["SALE_OMICALL_PROFILE_ALL_COMPANY"];
+const ATTENDANCE_SCOPES_VIEW = [
+  "ATTENDANCE_ALL_COMPANY",
+  "ATTENDANCE_OWN_DEPARTMENT",
+  "ATTENDANCE_SELF"
+];
+const PAYROLL_SCOPES_VIEW = ["PAYROLL_ALL_COMPANY", "PAYROLL_OWN_DEPARTMENT"];
 
 const DEFINITIONS: PermissionDef[] = [
   {
@@ -132,7 +143,7 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xem chấm công",
     entity: "Attendance",
     actionKind: "READ",
-    validDataScopePolicies: ["ATTENDANCE_ALL_COMPANY"]
+    validDataScopePolicies: ATTENDANCE_SCOPES_VIEW
   },
   {
     code: "attendance.import",
@@ -196,7 +207,7 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xem bảng lương",
     entity: "Payroll",
     actionKind: "READ",
-    validDataScopePolicies: ["PAYROLL_ALL_COMPANY"]
+    validDataScopePolicies: PAYROLL_SCOPES_VIEW
   },
   {
     code: "document.view",
@@ -651,7 +662,15 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xem khoản đầu tư",
     entity: "Investment",
     actionKind: "READ",
-    validDataScopePolicies: ["INVESTMENT_ALL_COMPANY"]
+    validDataScopePolicies: ["INVESTMENT_ALL_COMPANY", "INVESTMENT_SELF_ASSIGNED"]
+  },
+  {
+    code: "investment.leaderboard",
+    module: "crm",
+    name: "Xem bảng xếp hạng đầu tư",
+    entity: "Investment",
+    actionKind: "READ",
+    validDataScopePolicies: ["INVESTMENT_ALL_COMPANY", "INVESTMENT_OWN_DEPARTMENT"]
   },
   {
     code: "commission.view",

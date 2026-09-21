@@ -70,7 +70,7 @@ const SALE_GRANTS: PermissionGrantDoc[] = [
     permissionCode: "customer_call.update_relationship_status",
     dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED",
     fieldScopePolicyCode: null
-  }
+  },
 ];
 
 const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
@@ -97,6 +97,26 @@ const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
   {
     permissionCode: "customer_call.update_relationship_status",
     dataScopePolicyCode: "CUSTOMER_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer.view",
+    dataScopePolicyCode: "CUSTOMER_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer.ai_insight",
+    dataScopePolicyCode: "CUSTOMER_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_interaction.create",
+    dataScopePolicyCode: "CUSTOMER_INTERACTION_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_interaction.view",
+    dataScopePolicyCode: "CUSTOMER_INTERACTION_OWN_DEPARTMENT",
     fieldScopePolicyCode: null
   }
 ];
@@ -178,8 +198,28 @@ const SALE_MANAGER_GRANTS: PermissionGrantDoc[] = [
     fieldScopePolicyCode: null
   },
   {
+    permissionCode: "customer_claim_request.revoke",
+    dataScopePolicyCode: "CUSTOMER_CLAIM_REQUEST_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
     permissionCode: "dashboard_metric.view",
     dataScopePolicyCode: "DASHBOARD_METRIC_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "transaction.view",
+    dataScopePolicyCode: "TRANSACTION_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "ai_chat.use",
+    dataScopePolicyCode: "AI_CHAT_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "app_integration.manage",
+    dataScopePolicyCode: "APP_INTEGRATION_ALL_COMPANY",
     fieldScopePolicyCode: null
   }
 ];

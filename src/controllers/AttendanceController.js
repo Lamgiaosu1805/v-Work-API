@@ -28,8 +28,7 @@ const {
 const { recordCheckIn } = require("../workflows/record-check-in.workflow");
 const { recordCheckOut } = require("../workflows/record-check-out.workflow");
 const { buildAttendanceContext } = require("../workflows/import-attendance.workflow");
-const { can } = require("../helpers/rbac");
-const { PERMISSION } = require("../constants");
+const { toMongoQuery } = require("../modules/permission");
 const { correctDayStatuses } = require("../helpers/attendanceHelper");
 const { getPayrollPeriodRange, calcStandardWorkUnits } = require("../helpers/payrollPeriod");
 const { sendExceptionResponse } = require("../core/http/handle-exception");
@@ -216,49 +215,28 @@ const AttendanceController = {
         : moment.tz("Asia/Ho_Chi_Minh").startOf("day").toDate();
       const nextDate = moment(targetDate).add(1, "day").toDate();
 
-      let userIds;
-
-      const hasViewAll =
-        req.account.role === "admin" ||
-        req.account.dept_scope === "all" ||
-        (await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL));
-
-      if (hasViewAll) {
-        const users = await UserInfoModel.find({ isDeleted: false }, "_id");
-        userIds = users.map((u) => u._id);
-      } else {
-        const myInfo = await UserInfoModel.findOne({
-          id_account: req.account._id
-        });
-        const myDeptIds = await UserDepartmentPositionModel.distinct("department", {
-          user: myInfo._id
-        });
-        userIds = await UserDepartmentPositionModel.distinct("user", {
-          department: { $in: myDeptIds }
-        });
-      }
+      const scopeConditions = [];
+      const scopeFilter = toMongoQuery(req.permissionAbility, "attendance.view", "Attendance");
+      if (Object.keys(scopeFilter).length > 0) scopeConditions.push(scopeFilter);
 
       if (req.query.department && mongoose.Types.ObjectId.isValid(req.query.department)) {
         const deptUserIds = await UserDepartmentPositionModel.distinct("user", {
           department: req.query.department
         });
-        const allowed = new Set(deptUserIds.map(String));
-        userIds = userIds.filter((id) => allowed.has(String(id)));
+        scopeConditions.push({ user_id: { $in: deptUserIds } });
       }
 
+      const baseQuery = {
+        date: { $gte: targetDate, $lt: nextDate },
+        ...(scopeConditions.length > 0 ? { $and: scopeConditions } : {})
+      };
+
       const [worksheets, statuses] = await Promise.all([
-        WorkSheetModel.find({
-          user_id: { $in: userIds },
-          date: { $gte: targetDate, $lt: nextDate }
-        })
+        WorkSheetModel.find(baseQuery)
           .populate("user_id", "full_name ma_nv employment_type")
           .populate("shifts", "name start_time end_time")
           .sort({ createdAt: 1 }),
-        WorkDayStatusModel.find({
-          user_id: { $in: userIds },
-          date: { $gte: targetDate, $lt: nextDate },
-          isDeleted: false
-        })
+        WorkDayStatusModel.find({ ...baseQuery, isDeleted: false })
       ]);
 
       const statusMap = statuses.reduce((acc, s) => {
@@ -378,31 +356,13 @@ const AttendanceController = {
       if (!userInfo) return res.status(404).json({ message: "Không tìm thấy nhân viên" });
 
       const isSelf = userInfo.id_account?.toString() === req.account._id.toString();
-      const hasViewAll =
-        isSelf ||
-        req.account.role === "admin" ||
-        req.account.dept_scope === "all" ||
-        (await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL));
 
-      if (!hasViewAll) {
-        const myInfo = await UserInfoModel.findOne({
-          id_account: req.account._id,
-          isDeleted: false
-        });
-        if (!myInfo) return res.status(404).json({ message: "Không tìm thấy thông tin quản lý" });
-
-        const [myDeptIds, targetDeptIds] = await Promise.all([
-          UserDepartmentPositionModel.distinct("department", {
-            user: myInfo._id
-          }),
-          UserDepartmentPositionModel.distinct("department", {
-            user: userInfo._id
-          })
-        ]);
-        const mySet = new Set(myDeptIds.map((id) => id.toString()));
-        const hasOverlap = targetDeptIds.some((id) => mySet.has(id.toString()));
-        if (!hasOverlap)
+      if (!isSelf) {
+        const scopeFilter = toMongoQuery(req.permissionAbility, "payroll.view", "Payroll");
+        const allowed = await UserInfoModel.exists({ $and: [{ _id: userInfo._id }, scopeFilter] });
+        if (!allowed) {
           return res.status(403).json({ message: "Bạn không có quyền xem nhân viên này" });
+        }
       }
 
       const [worksheets, dayStatuses, holidays, requests, forgotRequests] = await Promise.all([
@@ -720,39 +680,18 @@ const AttendanceController = {
       const periodEnd = refDate.clone().date(25).endOf("day");
 
       const userFilter = { isDeleted: false };
-      const hasViewAll =
-        req.account.role === "admin" ||
-        req.account.dept_scope === "all" ||
-        (await can(req.account, PERMISSION.HRM_REQUEST_VIEW_ALL));
-
-      if (!hasViewAll) {
-        const myInfo = await UserInfoModel.findOne({
-          id_account: req.account._id,
-          isDeleted: false
-        });
-        if (!myInfo) return res.status(404).json({ message: "Không tìm thấy thông tin quản lý" });
-        const myDeptIds = await UserDepartmentPositionModel.distinct("department", {
-          user: myInfo._id
-        });
-        const memberUserIds = await UserDepartmentPositionModel.distinct("user", {
-          department: { $in: myDeptIds }
-        });
-        userFilter._id = { $in: memberUserIds };
-      }
+      const scopeConditions = [];
+      const scopeFilter = toMongoQuery(req.permissionAbility, "payroll.view", "Payroll");
+      if (Object.keys(scopeFilter).length > 0) scopeConditions.push(scopeFilter);
 
       if (department && mongoose.Types.ObjectId.isValid(department)) {
         const deptUserIds = await UserDepartmentPositionModel.distinct("user", {
           department
         });
-        if (userFilter._id) {
-          const allowed = new Set(userFilter._id.$in.map(String));
-          userFilter._id = {
-            $in: deptUserIds.filter((id) => allowed.has(String(id)))
-          };
-        } else {
-          userFilter._id = { $in: deptUserIds };
-        }
+        scopeConditions.push({ _id: { $in: deptUserIds } });
       }
+
+      if (scopeConditions.length > 0) userFilter.$and = scopeConditions;
 
       if (q && q.trim()) {
         const kw = q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

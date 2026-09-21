@@ -8,6 +8,7 @@ export interface SaleOmicallProfileProps {
   sipPassword: string;
   omicallAgentId: string | null;
   omicallEmail: string;
+  hotlineNumbers: string[];
 }
 
 export interface CreateSaleOmicallProfileInput {
@@ -18,6 +19,7 @@ export interface CreateSaleOmicallProfileInput {
   sipPassword: string;
   omicallAgentId?: string | null;
   omicallEmail: string;
+  hotlineNumbers?: string[];
 }
 
 export interface UpdateSaleOmicallProfileInput {
@@ -26,6 +28,7 @@ export interface UpdateSaleOmicallProfileInput {
   sipPassword: string;
   omicallAgentId?: string | null;
   omicallEmail: string;
+  hotlineNumbers?: string[];
 }
 
 export class SaleOmicallProfileEntity extends Entity<SaleOmicallProfileProps> {
@@ -36,7 +39,8 @@ export class SaleOmicallProfileEntity extends Entity<SaleOmicallProfileProps> {
     omicallExtension,
     sipPassword,
     omicallAgentId,
-    omicallEmail
+    omicallEmail,
+    hotlineNumbers
   }: CreateSaleOmicallProfileInput): SaleOmicallProfileEntity {
     return new SaleOmicallProfileEntity({
       id,
@@ -46,7 +50,8 @@ export class SaleOmicallProfileEntity extends Entity<SaleOmicallProfileProps> {
         omicallExtension,
         sipPassword,
         omicallAgentId: omicallAgentId ?? null,
-        omicallEmail
+        omicallEmail,
+        hotlineNumbers: hotlineNumbers ?? []
       }
     });
   }
@@ -75,8 +80,16 @@ export class SaleOmicallProfileEntity extends Entity<SaleOmicallProfileProps> {
     return this.props.omicallEmail;
   }
 
+  get hotlineNumbers(): string[] {
+    return this.props.hotlineNumbers;
+  }
+
   update(input: UpdateSaleOmicallProfileInput): void {
-    this._setProps({ ...input, omicallAgentId: input.omicallAgentId ?? null });
+    this._setProps({
+      ...input,
+      omicallAgentId: input.omicallAgentId ?? null,
+      hotlineNumbers: input.hotlineNumbers ?? this.props.hotlineNumbers
+    });
   }
 
   validate(): void {
@@ -97,6 +110,9 @@ export class SaleOmicallProfileEntity extends Entity<SaleOmicallProfileProps> {
     }
     if (!this.props.omicallEmail || typeof this.props.omicallEmail !== "string") {
       throw new ArgumentInvalidException("SaleOmicallProfile thiếu omicallEmail hợp lệ");
+    }
+    if (!Array.isArray(this.props.hotlineNumbers)) {
+      throw new ArgumentInvalidException("SaleOmicallProfile.hotlineNumbers không hợp lệ");
     }
   }
 }

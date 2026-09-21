@@ -45,6 +45,20 @@ const ownDepartmentColleaguesCondition = (resourceUserPath: string): ConditionTr
   ]
 });
 
+// resource.<x> IN ${subject.departmentColleagueCustomerIds} — biến thể của
+// ownDepartmentColleaguesCondition, dùng khi resource gắn trực tiếp với khách hàng (customer_id)
+// thay vì gắn với user (sale) — vd Investment.customer_id.
+const ownDepartmentColleagueCustomersCondition = (resourceCustomerPath: string): ConditionTreeProps => ({
+  operator: "AND",
+  clauses: [
+    {
+      left: resourceCustomerPath,
+      operator: "IN",
+      right: { type: "SUBJECT_REF", path: "subject.departmentColleagueCustomerIds" }
+    }
+  ]
+});
+
 // resource.<x> IN ${subject.managedCustomerIds} — dùng cho entity gắn với khách hàng đang được
 // mình phụ trách hiện tại (customer.referred_by), không phải "do chính mình tạo ra bản ghi này".
 const managedCustomersCondition = (resourceCustomerPath: string): ConditionTreeProps => ({
@@ -64,10 +78,8 @@ const GENERIC_ALL_COMPANY_ENTITIES: Record<string, string> = {
   DEPARTMENT_ALL_COMPANY: "Department",
   POSITION_ALL_COMPANY: "Position",
   LABOR_CONTRACT_ALL_COMPANY: "LaborContract",
-  ATTENDANCE_ALL_COMPANY: "Attendance",
   WIFI_CONFIG_ALL_COMPANY: "WifiConfig",
   SHIFT_CONFIG_ALL_COMPANY: "ShiftConfig",
-  PAYROLL_ALL_COMPANY: "Payroll",
   DOCUMENT_ALL_COMPANY: "Document",
   DOCUMENT_TYPE_ALL_COMPANY: "DocumentType",
   INTERNAL_FILE_PERMISSION_ALL_COMPANY: "InternalFilePermission",
@@ -82,7 +94,6 @@ const GENERIC_ALL_COMPANY_ENTITIES: Record<string, string> = {
   KPI_METRIC_ALL_COMPANY: "KpiMetric",
   PRINT_JOB_ALL_COMPANY: "PrintJob",
   AGENT_ALL_COMPANY: "Agent",
-  INVESTMENT_ALL_COMPANY: "Investment",
   CLAIM_PERIOD_ALL_COMPANY: "ClaimPeriod",
   CUSTOMER_CLAIM_REQUEST_ALL_COMPANY: "CustomerClaimRequest",
   TRANSACTION_ALL_COMPANY: "Transaction",
@@ -108,6 +119,30 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     conditionTree: selfCondition("resource._id", "subject.userId")
   },
 
+  // ---- Attendance ----
+  { code: "ATTENDANCE_ALL_COMPANY", entity: "Attendance", label: "Toàn công ty", conditionTree: null },
+  {
+    code: "ATTENDANCE_OWN_DEPARTMENT",
+    entity: "Attendance",
+    label: "Cùng phòng ban",
+    conditionTree: ownDepartmentColleaguesCondition("resource.user_id")
+  },
+  {
+    code: "ATTENDANCE_SELF",
+    entity: "Attendance",
+    label: "Chỉ chính mình",
+    conditionTree: selfCondition("resource.user_id", "subject.userId")
+  },
+
+  // ---- Payroll ----
+  { code: "PAYROLL_ALL_COMPANY", entity: "Payroll", label: "Toàn công ty", conditionTree: null },
+  {
+    code: "PAYROLL_OWN_DEPARTMENT",
+    entity: "Payroll",
+    label: "Cùng phòng ban",
+    conditionTree: ownDepartmentColleaguesCondition("resource._id")
+  },
+
   // ---- Request ----
   { code: "REQUEST_ALL_COMPANY", entity: "Request", label: "Toàn công ty", conditionTree: null },
   {
@@ -115,6 +150,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     entity: "Request",
     label: "Chỉ đơn của chính mình",
     conditionTree: selfCondition("resource.user_id", "subject.userId")
+  },
+  {
+    code: "REQUEST_OWN_DEPARTMENT",
+    entity: "Request",
+    label: "Cùng phòng ban",
+    conditionTree: ownDepartmentColleaguesCondition("resource.user_id")
   },
 
   // ---- Customer ----
@@ -130,6 +171,21 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     entity: "Customer",
     label: "Cùng phòng ban",
     conditionTree: ownDepartmentColleaguesCondition("resource.referred_by")
+  },
+
+  // ---- Investment ----
+  { code: "INVESTMENT_ALL_COMPANY", entity: "Investment", label: "Toàn công ty", conditionTree: null },
+  {
+    code: "INVESTMENT_SELF_ASSIGNED",
+    entity: "Investment",
+    label: "Chỉ khách hàng do chính mình giới thiệu",
+    conditionTree: managedCustomersCondition("resource.customer_id")
+  },
+  {
+    code: "INVESTMENT_OWN_DEPARTMENT",
+    entity: "Investment",
+    label: "Cùng phòng ban (leaderboard)",
+    conditionTree: ownDepartmentColleagueCustomersCondition("resource.customer_id")
   },
 
   // ---- Commission (backed bởi collection investment) ----
@@ -195,6 +251,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     entity: "CustomerInteraction",
     label: "Chỉ tương tác do mình phụ trách",
     conditionTree: selfCondition("resource.sale_id", "subject.userId")
+  },
+  {
+    code: "CUSTOMER_INTERACTION_OWN_DEPARTMENT",
+    entity: "CustomerInteraction",
+    label: "Cùng phòng ban",
+    conditionTree: ownDepartmentColleaguesCondition("resource.sale_id")
   },
 
   // ---- CallLog ----

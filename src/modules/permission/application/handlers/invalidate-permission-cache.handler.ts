@@ -3,6 +3,7 @@ import { invalidatePermissionCache as invalidateEmployeeCaches } from "../../../
 import PermissionRoleModel from "../../../../models/PermissionRoleModel";
 import EmployeePermissionProfileModel from "../../../../models/EmployeePermissionProfileModel";
 import { RoleDeletedDomainEvent } from "../../domain/events/role-deleted.domain-event";
+import { RoleGrantsChangedDomainEvent } from "../../domain/events/role-grants-changed.domain-event";
 import { EmployeePermissionUpdatedDomainEvent } from "../../domain/events/employee-permission-updated.domain-event";
 import { DataScopePolicyChangedDomainEvent } from "../../domain/events/data-scope-policy-changed.domain-event";
 import { FieldScopePolicyChangedDomainEvent } from "../../domain/events/field-scope-policy-changed.domain-event";
@@ -34,6 +35,21 @@ async function onRoleDeleted(event: RoleDeletedDomainEvent): Promise<void> {
   await invalidateEmployeeCaches(event.affectedEmployeeIds);
 }
 
+async function findAffectedEmployeeIdsForRole(roleId: string): Promise<string[]> {
+  const profiles = await EmployeePermissionProfileModel.find({
+    roleIds: roleId,
+    isDeleted: false
+  })
+    .select("employeeId")
+    .lean();
+  return profiles.map((profile: any) => String(profile.employeeId));
+}
+
+async function onRoleGrantsChanged(event: RoleGrantsChangedDomainEvent): Promise<void> {
+  const employeeIds = await findAffectedEmployeeIdsForRole(event.roleId);
+  await invalidateEmployeeCaches(employeeIds);
+}
+
 async function onEmployeePermissionUpdated(
   event: EmployeePermissionUpdatedDomainEvent
 ): Promise<void> {
@@ -57,12 +73,14 @@ async function onFieldScopePolicyChanged(event: FieldScopePolicyChangedDomainEve
 }
 
 eventBus.on(RoleDeletedDomainEvent.name, onRoleDeleted);
+eventBus.on(RoleGrantsChangedDomainEvent.name, onRoleGrantsChanged);
 eventBus.on(EmployeePermissionUpdatedDomainEvent.name, onEmployeePermissionUpdated);
 eventBus.on(DataScopePolicyChangedDomainEvent.name, onDataScopePolicyChanged);
 eventBus.on(FieldScopePolicyChangedDomainEvent.name, onFieldScopePolicyChanged);
 
 export {
   onRoleDeleted,
+  onRoleGrantsChanged,
   onEmployeePermissionUpdated,
   onDataScopePolicyChanged,
   onFieldScopePolicyChanged

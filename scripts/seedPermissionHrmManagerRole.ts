@@ -70,11 +70,6 @@ const HRM_MANAGER_GRANTS: PermissionGrantDoc[] = [
     fieldScopePolicyCode: null
   },
   {
-    permissionCode: "document.view",
-    dataScopePolicyCode: "DOCUMENT_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
     permissionCode: "document_type.manage",
     dataScopePolicyCode: "DOCUMENT_TYPE_ALL_COMPANY",
     fieldScopePolicyCode: null
@@ -86,16 +81,6 @@ const HRM_MANAGER_GRANTS: PermissionGrantDoc[] = [
   },
   {
     permissionCode: "employee.set_status",
-    dataScopePolicyCode: "EMPLOYEE_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "employee.update",
-    dataScopePolicyCode: "EMPLOYEE_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "employee.view",
     dataScopePolicyCode: "EMPLOYEE_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
@@ -127,21 +112,6 @@ const HRM_MANAGER_GRANTS: PermissionGrantDoc[] = [
   {
     permissionCode: "holiday.view",
     dataScopePolicyCode: "HOLIDAY_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "internal_file.delete",
-    dataScopePolicyCode: "INTERNAL_FILE_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "internal_file.manage",
-    dataScopePolicyCode: "INTERNAL_FILE_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "internal_file.view",
-    dataScopePolicyCode: "INTERNAL_FILE_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
   {
@@ -180,16 +150,6 @@ const HRM_MANAGER_GRANTS: PermissionGrantDoc[] = [
     fieldScopePolicyCode: null
   },
   {
-    permissionCode: "request.review",
-    dataScopePolicyCode: "REQUEST_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "request.view",
-    dataScopePolicyCode: "REQUEST_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
     permissionCode: "shift_config.manage",
     dataScopePolicyCode: "SHIFT_CONFIG_ALL_COMPANY",
     fieldScopePolicyCode: null
@@ -197,16 +157,6 @@ const HRM_MANAGER_GRANTS: PermissionGrantDoc[] = [
   {
     permissionCode: "shift_config.view",
     dataScopePolicyCode: "SHIFT_CONFIG_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "weekly_report.submit",
-    dataScopePolicyCode: "WEEKLY_REPORT_OWN_DEPARTMENT",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "weekly_report.view",
-    dataScopePolicyCode: "WEEKLY_REPORT_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
   {

@@ -67,6 +67,7 @@ export interface OmicallExtensionDetail {
   full_name: string;
   mail: string;
   uuid: string;
+  hotlines: string[];
   pbx_account: {
     display_name: string;
     sip_user: string;
@@ -82,6 +83,28 @@ export interface OmicallExtensionDetail {
   };
 }
 
+export interface OmicallAgentItem {
+  id: string;
+  email: string;
+  phone?: string;
+  full_name: string;
+  is_active: boolean;
+  pbx_account: {
+    sip_user: string;
+    sip_password: string;
+  };
+}
+
+export interface SearchAgentsResult {
+  items: OmicallAgentItem[];
+  page_number: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+}
+
 export interface InviteAgentInput {
   identifyInfo: string;
   fullName: string;
@@ -94,6 +117,14 @@ export interface UpdateInternalPhoneInput {
   sipUser: string;
   password?: string;
   callTimeout?: string;
+}
+
+export type ExtensionHotlineDirection = "outbound" | "inbound";
+
+export interface SetExtensionHotlineInput {
+  hotline: string;
+  userEmail: string;
+  directions: ExtensionHotlineDirection[];
 }
 
 export interface HotlineWorkingDayTimeFrame {
@@ -352,6 +383,15 @@ export class OmicallClient {
     return data?.payload ?? data;
   }
 
+  async searchAgents(params: { page: number; size: number }): Promise<SearchAgentsResult> {
+    const { data } = await this.v1.post(
+      "/api/v3/agent/search",
+      {},
+      { params: { page: params.page, size: params.size } }
+    );
+    return data;
+  }
+
   async deleteAgent(email: string): Promise<Record<string, unknown>> {
     const { data } = await this.v1.get("/api/agent/delete", {
       params: { identify_info: email }
@@ -383,8 +423,17 @@ export class OmicallClient {
   }
 
   async updateHotlineConfig(input: UpdateHotlineConfigInput): Promise<boolean> {
-    const { data } = await this.v1.put("/api/call_center/hotline/update", input);
+    const { data } = await this.v1.post("/api/call_center/hotline/update", input);
     return Boolean(data?.payload);
+  }
+
+  async setExtensionHotline(input: SetExtensionHotlineInput): Promise<Record<string, unknown>> {
+    const { data } = await this.v1.post("/api/call_center/hotline/extension/update", {
+      hotline: input.hotline,
+      user_email: input.userEmail,
+      directions: input.directions
+    });
+    return data?.payload ?? data;
   }
 
   async listCallScripts(params: { page: number; size: number }): Promise<ListCallScriptsResult> {

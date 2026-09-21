@@ -281,8 +281,17 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
   },
   {
     entity: "Attendance",
-    subjectAttributes: [],
-    resourceAttributes: [],
+    subjectAttributes: [
+      { path: "subject.userId", label: "ID nhân viên (chính mình)", type: "reference" },
+      {
+        path: "subject.departmentColleagueUserIds",
+        label: "Danh sách user cùng phòng ban",
+        type: "reference"
+      }
+    ],
+    resourceAttributes: [
+      { path: "resource.user_id", label: "Nhân viên chấm công", type: "reference" }
+    ],
     fields: [
       { name: "date", label: "Ngày công" },
       { name: "shifts", label: "Ca làm việc" },
@@ -321,8 +330,16 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
   },
   {
     entity: "Payroll",
-    subjectAttributes: [],
-    resourceAttributes: [],
+    subjectAttributes: [
+      {
+        path: "subject.departmentColleagueUserIds",
+        label: "Danh sách user cùng phòng ban",
+        type: "reference"
+      }
+    ],
+    resourceAttributes: [
+      { path: "resource._id", label: "Nhân viên (bảng lương của ai)", type: "reference" }
+    ],
     fields: [
       { name: "work_unit_total", label: "Tổng công" },
       { name: "work_unit_official", label: "Công chính thức" },
@@ -515,8 +532,21 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
   },
   {
     entity: "Investment",
-    subjectAttributes: [],
-    resourceAttributes: [],
+    subjectAttributes: [
+      {
+        path: "subject.managedCustomerIds",
+        label: "Danh sách khách hàng do chính mình giới thiệu",
+        type: "reference"
+      },
+      {
+        path: "subject.departmentColleagueCustomerIds",
+        label: "Danh sách khách hàng do đồng nghiệp cùng phòng ban giới thiệu",
+        type: "reference"
+      }
+    ],
+    resourceAttributes: [
+      { path: "resource.customer_id", label: "Khách hàng của khoản đầu tư", type: "reference" }
+    ],
     fields: [
       { name: "product_name", label: "Tên sản phẩm đầu tư" },
       { name: "amount", label: "Số tiền" },

@@ -1,15 +1,25 @@
 const express = require("express");
-const { authenticate, hasModuleAccess } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
 const { requirePermission } = require("../core/authorization/require-permission.middleware");
 const CustomerClaimRequestController = require("../controllers/CustomerClaimRequestController");
 
 const router = express.Router();
 
-// Sale gửi yêu cầu nhận khách (CRM access)
-router.post("/", authenticate, hasModuleAccess("crm"), CustomerClaimRequestController.submit);
+// Sale gửi yêu cầu nhận khách (customer_claim_request.create)
+router.post(
+  "/",
+  authenticate,
+  requirePermission("customer_claim_request.create", "CustomerClaimRequest"),
+  CustomerClaimRequestController.submit
+);
 
-// Sale xem yêu cầu của mình (CRM access)
-router.get("/mine", authenticate, hasModuleAccess("crm"), CustomerClaimRequestController.listMine);
+// Sale xem yêu cầu của mình — dùng chung permission tạo (self-scoped, không cần quyền xem toàn bộ)
+router.get(
+  "/mine",
+  authenticate,
+  requirePermission("customer_claim_request.create", "CustomerClaimRequest"),
+  CustomerClaimRequestController.listMine
+);
 
 // Admin/Manager xem toàn bộ yêu cầu
 router.get(

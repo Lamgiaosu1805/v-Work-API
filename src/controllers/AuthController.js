@@ -26,19 +26,17 @@ const AuthController = {
             if (!isMatch)
                 return res.status(400).json({ message: "Sai tên đăng nhập hoặc mật khẩu" });
 
-            // 4️⃣ Kiểm tra đăng nhập lần đầu
-            if (account.isFirstLogin) {
-                const tempToken = jwt.sign(
-                    { id: account._id, purpose: "password_reset" },
-                    JWT_SECRET,
-                    { expiresIn: "10m" }
-                );
-                return res.status(200).json({
-                    message: "Đây là lần đầu đăng nhập, vui lòng đổi mật khẩu",
-                    isFirstLogin: true,
-                    tempToken,
-                });
-            }
+      // 4️⃣ Kiểm tra đăng nhập lần đầu
+      if (account.isFirstLogin) {
+        const tempToken = jwt.sign({ id: account._id, purpose: "password_reset" }, JWT_SECRET, {
+          expiresIn: "10m"
+        });
+        return res.status(200).json({
+          message: "Đây là lần đầu đăng nhập, vui lòng đổi mật khẩu",
+          is_first_login: true,
+          temp_token: tempToken
+        });
+      }
 
             // 5️⃣ Tạo access token & refresh token
             const accessToken = jwt.sign(
@@ -61,21 +59,16 @@ const AuthController = {
             });
             await account.save();
 
-            res.status(200).json({
-                message: "Đăng nhập thành công",
-                accessToken,
-                refreshToken,
-                account: {
-                    id: account._id,
-                    username: account.username,
-                    role: account.role,
-                    module_access: account.module_access || [],
-                    dept_scope: account.dept_scope,
-                },
-            });
-        } catch (err) {
-            console.error("Login Error:", err);
-            res.status(500).json({ message: "Internal server error", error: err.message });
+      res.status(200).json({
+        message: "Đăng nhập thành công",
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        account: {
+          id: account._id,
+          username: account.username,
+          role: account.role,
+          module_access: account.module_access || [],
+          dept_scope: account.dept_scope
         }
     },
 

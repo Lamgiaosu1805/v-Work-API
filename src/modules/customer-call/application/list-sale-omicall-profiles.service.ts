@@ -4,6 +4,7 @@ export interface SaleOmicallProfileSummary {
   saleId: string;
   omicallExtension: string;
   omicallEmail: string | null;
+  sipPassword: string;
 }
 
 export async function listSaleOmicallProfilesBySaleIds(
@@ -19,6 +20,7 @@ export async function listSaleOmicallProfilesBySaleIds(
   return profiles.map((profile) => ({
     saleId: String(profile.sale_id),
     omicallExtension: profile.omicall_extension,
-    omicallEmail: profile.omicall_email ?? null
+    omicallEmail: profile.omicall_email ?? null,
+    sipPassword: profile.sip_password
   }));
 }

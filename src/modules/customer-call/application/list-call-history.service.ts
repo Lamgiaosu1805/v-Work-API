@@ -50,7 +50,9 @@ export async function listCallHistory(
     andConditions.push({
       time_start_call: {
         ...(filters.fromDate ? { $gte: new Date(filters.fromDate) } : {}),
-        ...(filters.toDate ? { $lte: new Date(filters.toDate) } : {})
+        ...(filters.toDate
+          ? { $lte: new Date(new Date(filters.toDate).setHours(23, 59, 59, 999)) }
+          : {})
       }
     });
   }

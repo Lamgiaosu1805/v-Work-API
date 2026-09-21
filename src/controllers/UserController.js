@@ -21,6 +21,9 @@ const WorkScheduleModel = require("../models/WorkScheduleModel");
 const { sign, serializeUser } = require("../helpers/staticUrl");
 const { getEffectivePermissions, can } = require("../helpers/rbac");
 const AppModel = require("../models/AppModel");
+const {
+  resolveEmployeeScopeFilter
+} = require("../core/authorization/resolve-employee-scope-filter");
 
 const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 
@@ -440,26 +443,10 @@ const UserController = {
       const skip = (Number(page) - 1) * Number(limit);
 
       const filter = { isDeleted: false };
+      const scopeConditions = [];
 
-      const isFullAccess =
-        req.account.role === "admin" ||
-        req.account.module_access?.includes("hrm") ||
-        (await can(req.account, PERMISSION.HRM_EMPLOYEE_VIEW));
-
-      if (!isFullAccess) {
-        const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });
-        if (!myInfo) return res.status(404).json({ message: "Không tìm thấy thông tin nhân viên" });
-
-        const myDeptIds = await UserDepartmentPositionModel.distinct("department", {
-          user: myInfo._id,
-          isDeleted: false
-        });
-        const deptUserIds = await UserDepartmentPositionModel.distinct("user", {
-          department: { $in: myDeptIds },
-          isDeleted: false
-        });
-        filter._id = { $in: deptUserIds };
-      }
+      const scopeFilter = await resolveEmployeeScopeFilter(req.permissionAbility, "employee.view");
+      if (Object.keys(scopeFilter).length > 0) scopeConditions.push(scopeFilter);
 
       if (module) {
         const accountIds = await AccountModel.find({
@@ -492,13 +479,10 @@ const UserController = {
           isDeleted: false
         }).distinct("user");
 
-        if (filter._id) {
-          const deptSet = new Set(udpIds.map(String));
-          filter._id.$in = filter._id.$in.filter((id) => deptSet.has(String(id)));
-        } else {
-          filter._id = { $in: udpIds };
-        }
+        scopeConditions.push({ _id: { $in: udpIds } });
       }
+
+      if (scopeConditions.length > 0) filter.$and = scopeConditions;
 
       const [users, total] = await Promise.all([
         UserInfoModel.find(filter)
@@ -527,9 +511,20 @@ const UserController = {
         udpMap[uid].push({ department: item.department, position: item.position });
       }
 
+      const updateScopeFilter = await resolveEmployeeScopeFilter(
+        req.permissionAbility,
+        "employee.update"
+      );
+      const editableIds = new Set(
+        (
+          await UserInfoModel.find({ ...updateScopeFilter, _id: { $in: userIds } }).distinct("_id")
+        ).map(String)
+      );
+
       const data = users.map((u) => ({
         ...serializeUser(u),
-        departments: udpMap[u._id.toString()] || []
+        departments: udpMap[u._id.toString()] || [],
+        can_edit: editableIds.has(u._id.toString())
       }));
 
       return res.status(200).json({
@@ -603,28 +598,22 @@ const UserController = {
         return res.status(404).json({ message: "Không tìm thấy user" });
       }
 
-      const isFullAccess =
-        req.account.role === "admin" || req.account.module_access?.includes("hrm");
-
-      if (!isFullAccess) {
-        const myInfo = await UserInfoModel.findOne({ id_account: req.account._id });
-        if (myInfo && myInfo._id.equals(user._id)) {
-          // Xem hồ sơ chính mình — luôn cho phép
-        } else {
-          const myDeptIds = await UserDepartmentPositionModel.distinct("department", {
-            user: myInfo?._id,
-            isDeleted: false
-          });
-          const targetDeptIds = await UserDepartmentPositionModel.distinct("department", {
-            user: user._id,
-            isDeleted: false
-          });
-          const sameDept = myDeptIds.some((d) => targetDeptIds.some((t) => t.equals(d)));
-          if (!sameDept) {
-            return res.status(403).json({ message: "Bạn không có quyền xem hồ sơ nhân viên này" });
-          }
+      const scopeFilter = await resolveEmployeeScopeFilter(req.permissionAbility, "employee.view");
+      if (Object.keys(scopeFilter).length > 0) {
+        const allowed = await UserInfoModel.exists({ $and: [{ _id: user._id }, scopeFilter] });
+        if (!allowed) {
+          return res.status(403).json({ message: "Bạn không có quyền xem hồ sơ nhân viên này" });
         }
       }
+
+      const updateScopeFilter = await resolveEmployeeScopeFilter(
+        req.permissionAbility,
+        "employee.update"
+      );
+      const canEdit =
+        Object.keys(updateScopeFilter).length === 0
+          ? true
+          : Boolean(await UserInfoModel.exists({ $and: [{ _id: user._id }, updateScopeFilter] }));
 
       const [userDepartments, userDocuments, laborContracts, workSchedules] = await Promise.all([
         UserDepartmentPositionModel.find({ user: user._id })
@@ -639,6 +628,7 @@ const UserController = {
 
       return res.status(200).json({
         ...user.toObject(),
+        can_edit: canEdit,
         avatar: sign(user.avatar),
         cover_photo: sign(user.cover_photo),
         departments: userDepartments.map((item) => ({

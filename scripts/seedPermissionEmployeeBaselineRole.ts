@@ -27,6 +27,11 @@ const BASELINE_GRANTS: PermissionGrantDoc[] = [
     fieldScopePolicyCode: null
   },
   {
+    permissionCode: "attendance.view",
+    dataScopePolicyCode: "ATTENDANCE_SELF",
+    fieldScopePolicyCode: null
+  },
+  {
     permissionCode: "post.view",
     dataScopePolicyCode: "POST_ALL_COMPANY",
     fieldScopePolicyCode: null
@@ -34,6 +39,31 @@ const BASELINE_GRANTS: PermissionGrantDoc[] = [
   {
     permissionCode: "post_comment.create",
     dataScopePolicyCode: "POST_COMMENT_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "post.create",
+    dataScopePolicyCode: "POST_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "post.edit",
+    dataScopePolicyCode: "POST_SELF_ASSIGNED",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "print_job.create",
+    dataScopePolicyCode: "PRINT_JOB_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "print_job.view",
+    dataScopePolicyCode: "PRINT_JOB_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "shared_folder.view",
+    dataScopePolicyCode: "SHARED_FOLDER_ALL_COMPANY",
     fieldScopePolicyCode: null
   }
 ];
@@ -43,7 +73,7 @@ async function upsertRole(): Promise<void> {
   const payload = {
     name: "Nhân viên (mặc định)",
     description:
-      "Role hệ thống — quyền tự-phục-vụ tối thiểu mà mọi nhân viên đều cần, không phụ thuộc module_access: tạo/xem/huỷ đơn từ của chính mình, xem hồ sơ chính mình, xem/bình luận bảng tin công ty.",
+      "Role hệ thống — quyền tự-phục-vụ tối thiểu mà mọi nhân viên đều cần, không phụ thuộc module_access: tạo/xem/huỷ đơn từ của chính mình, xem hồ sơ chính mình, xem bảng công của chính mình, xem/bình luận bảng tin công ty.",
     isSystemRole: true,
     grants: BASELINE_GRANTS,
     isDeleted: false

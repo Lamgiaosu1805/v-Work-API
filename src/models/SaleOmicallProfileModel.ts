@@ -8,6 +8,7 @@ export interface SaleOmicallProfileDoc extends Document {
   sip_password: string;
   omicall_agent_id: string | null;
   omicall_email: string;
+  hotline_numbers: string[];
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -21,6 +22,7 @@ const SaleOmicallProfileSchema = new Schema<SaleOmicallProfileDoc>(
     sip_password: { type: String, required: true },
     omicall_agent_id: { type: String, default: null },
     omicall_email: { type: String, required: true },
+    hotline_numbers: { type: [String], default: [] },
 
     ...BaseSchema.obj
   },

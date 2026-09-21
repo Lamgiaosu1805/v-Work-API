@@ -12,11 +12,6 @@ const ROLE_CODE = "HRM_STAFF";
 // docs/DEFAULT-PERMISSION-ROLES-PLAN.md mục 2.2.
 const HRM_STAFF_GRANTS: PermissionGrantDoc[] = [
   {
-    permissionCode: "employee.view",
-    dataScopePolicyCode: "EMPLOYEE_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
     permissionCode: "department.view",
     dataScopePolicyCode: "DEPARTMENT_ALL_COMPANY",
     fieldScopePolicyCode: null
@@ -44,21 +39,6 @@ const HRM_STAFF_GRANTS: PermissionGrantDoc[] = [
   {
     permissionCode: "branch.view",
     dataScopePolicyCode: "BRANCH_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "document.view",
-    dataScopePolicyCode: "DOCUMENT_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "weekly_report.view",
-    dataScopePolicyCode: "WEEKLY_REPORT_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "request.view",
-    dataScopePolicyCode: "REQUEST_ALL_COMPANY",
     fieldScopePolicyCode: null
   }
 ];

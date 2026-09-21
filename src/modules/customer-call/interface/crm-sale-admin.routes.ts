@@ -68,6 +68,20 @@ router.post(
   asyncHandler(crmSaleAdminHttpController.syncCrmSaleSipCredentials)
 );
 
+router.get(
+  "/admin/employees/:employeeId/sip-profile",
+  authenticate,
+  isAdmin,
+  asyncHandler(crmSaleAdminHttpController.getCrmSaleSipProfileStatus)
+);
+
+router.post(
+  "/admin/employees/:employeeId/sip-profile/refresh",
+  authenticate,
+  isAdmin,
+  asyncHandler(crmSaleAdminHttpController.refreshCrmSaleSipProfile)
+);
+
 router.patch(
   "/admin/employees/:employeeId/outbound-hotline",
   authenticate,

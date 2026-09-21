@@ -12,6 +12,8 @@ import { configureCrmSaleSipPassword } from "../../../workflows/configure-crm-sa
 import { setCrmSaleEmployeeEmail } from "../../../workflows/set-crm-sale-employee-email.workflow";
 import { CRM_SALE_ROLE_CODES, CrmSaleRoleCode } from "../../../workflows/crm-sale-roles.constants";
 import { assignExtensionOutboundHotline } from "../application/assign-extension-outbound-hotline.service";
+import { getSaleOmicallProfileStatus } from "../application/get-sale-omicall-profile-status.service";
+import { getSipCredentials } from "../application/get-sip-credentials.service";
 
 function assertValidCrmSaleRoleCode(roleCode: unknown): asserts roleCode is CrmSaleRoleCode {
   if (!CRM_SALE_ROLE_CODES.includes(roleCode as CrmSaleRoleCode)) {
@@ -74,6 +76,17 @@ export const crmSaleAdminHttpController = {
   async syncCrmSaleSipCredentials(req: Request, res: Response) {
     const data = await syncCrmSaleSipCredentials(req.params.employeeId);
     return res.status(200).json({ message: "Đồng bộ SIP thành công", data });
+  },
+
+  async getCrmSaleSipProfileStatus(req: Request, res: Response) {
+    const data = await getSaleOmicallProfileStatus(req.params.employeeId);
+    return res.status(200).json({ message: "OK", data });
+  },
+
+  async refreshCrmSaleSipProfile(req: Request, res: Response) {
+    await getSipCredentials(req.params.employeeId, true);
+    const data = await getSaleOmicallProfileStatus(req.params.employeeId);
+    return res.status(200).json({ message: "Đã đồng bộ lại dữ liệu SIP", data });
   },
 
   async assignExtensionOutboundHotline(req: Request, res: Response) {

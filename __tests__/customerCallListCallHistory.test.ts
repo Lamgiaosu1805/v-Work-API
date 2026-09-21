@@ -317,6 +317,38 @@ describe("listCallHistory (integration, MongoMemoryServer)", () => {
     expect(result.total).toBe(1);
     expect((result.data[0] as any).phone_number).toBe("0922222222");
   });
+
+  test("lọc toDate -> vẫn lấy được cuộc gọi trong ngày đó (không cắt ở 00:00 đầu ngày)", async () => {
+    const saleA = await createSale("saleCallI", "Sale Call I", "NV-CALL-I");
+    await seedCallLogPermission(saleA.employeeId);
+
+    const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
+    const customer = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0911111111",
+      referred_by: saleA.employeeId
+    });
+
+    await CallLogModel.create(
+      baseCallLog({
+        sale_id: saleA.employeeId,
+        customer_id: customer._id,
+        phone_number: "0911111111",
+        time_start_call: new Date("2026-08-08T15:30:00.000Z")
+      })
+    );
+
+    const abilityA = await resolveEffectiveAbility(saleA.employeeId);
+    const result = await listCallHistory(abilityA, {
+      page: 1,
+      limit: 20,
+      fromDate: "2026-08-07",
+      toDate: "2026-08-08"
+    });
+
+    expect(result.total).toBe(1);
+    expect((result.data[0] as any).phone_number).toBe("0911111111");
+  });
 });
 
 describe("listCallHistorySaleOptions (integration, MongoMemoryServer)", () => {

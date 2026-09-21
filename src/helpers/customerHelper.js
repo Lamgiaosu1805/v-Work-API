@@ -2,9 +2,9 @@ const crypto = require("crypto");
 const { default: mongoose } = require("mongoose");
 const AppModel = require("../models/AppModel");
 const UserInfoModel = require("../models/UserInfoModel");
-const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const InvestmentModel = require("../models/InvestmentModel");
 const AgentModel = require("../models/AgentModel");
+const { toMongoQuery } = require("../modules/permission");
 
 const decrypt = (encryptedText) => {
   if (!encryptedText) return null;
@@ -76,28 +76,8 @@ async function buildCustomerPipeline(req, query) {
     ];
   }
 
-  let scopedSaleIds = null;
-  if (req.account.role !== "admin" && req.account.dept_scope !== "all") {
-    const manager = await UserInfoModel.findOne({
-      id_account: req.account._id,
-      isDeleted: false
-    })
-      .select("_id")
-      .lean();
-    if (!manager) {
-      const err = new Error("Không tìm thấy thông tin người quản lý");
-      err.statusCode = 404;
-      throw err;
-    }
-    const departmentIds = await UserDepartmentPositionModel.distinct("department", {
-      user: manager._id,
-      isDeleted: false
-    });
-    scopedSaleIds = await UserDepartmentPositionModel.distinct("user", {
-      department: { $in: departmentIds },
-      isDeleted: false
-    });
-  }
+  const scopeFilter = toMongoQuery(req.permissionAbility, "customer.view", "Customer");
+  const scopedSaleId = scopeFilter.referred_by?.$eq ?? null;
 
   const pipeline = [
     { $match: initialMatch },
@@ -243,8 +223,8 @@ async function buildCustomerPipeline(req, query) {
   if (branch_id && mongoose.Types.ObjectId.isValid(branch_id))
     advancedMatch["referred_by.branch_id"] = new mongoose.Types.ObjectId(branch_id);
   if (selectedSaleIds.length) advancedMatch["referred_by._id"] = { $in: selectedSaleIds };
-  if (scopedSaleIds) {
-    advancedMatch.$or = [{ "referred_by._id": { $in: scopedSaleIds } }, { referred_by: null }];
+  if (scopedSaleId) {
+    advancedMatch.$or = [{ "referred_by._id": scopedSaleId }, { referred_by: null }];
   }
   if (Object.keys(advancedMatch).length) pipeline.push({ $match: advancedMatch });
 

@@ -50,13 +50,26 @@ async function resolveSubjectContext(employeeId: string): Promise<Record<string,
 
   const managedCustomerIds = managedCustomers.map((customer: any) => String(customer._id));
 
+  const departmentColleagueCustomers = departmentColleagueUserIds.length
+    ? await CustomerModel.find({
+        referred_by: { $in: departmentColleagueUserIds },
+        isDeleted: false
+      })
+        .select("_id")
+        .lean()
+    : [];
+  const departmentColleagueCustomerIds = departmentColleagueCustomers.map((customer: any) =>
+    String(customer._id)
+  );
+
   return {
     userId: employeeId,
     accountId: userInfo ? String((userInfo as { id_account: unknown }).id_account) : null,
     departmentId: departmentIds[0] ?? null,
     departmentIds,
     departmentColleagueUserIds,
-    managedCustomerIds
+    managedCustomerIds,
+    departmentColleagueCustomerIds
   };
 }
 

@@ -1,24 +1,11 @@
-import redis from "../../../../config/redis";
-import { logger } from "../../../../config/logger";
 import { eventBus } from "../../../../core/events/event-bus";
-import { buildPermissionCacheKey } from "../../../../core/authorization/permission-cache-key";
+import { invalidatePermissionCache as invalidateEmployeeCaches } from "../../../../core/authorization/invalidate-permission-cache";
 import PermissionRoleModel from "../../../../models/PermissionRoleModel";
 import EmployeePermissionProfileModel from "../../../../models/EmployeePermissionProfileModel";
 import { RoleDeletedDomainEvent } from "../../domain/events/role-deleted.domain-event";
 import { EmployeePermissionUpdatedDomainEvent } from "../../domain/events/employee-permission-updated.domain-event";
 import { DataScopePolicyChangedDomainEvent } from "../../domain/events/data-scope-policy-changed.domain-event";
 import { FieldScopePolicyChangedDomainEvent } from "../../domain/events/field-scope-policy-changed.domain-event";
-
-async function invalidateEmployeeCaches(employeeIds: string[]): Promise<void> {
-  if (!employeeIds.length) return;
-  try {
-    await Promise.all(
-      employeeIds.map((employeeId) => redis.del(buildPermissionCacheKey(employeeId)))
-    );
-  } catch (error) {
-    logger.error("Không xóa được cache quyền nhân viên", { error, employeeIds });
-  }
-}
 
 async function findAffectedEmployeeIdsForPolicy(
   policyCode: string,

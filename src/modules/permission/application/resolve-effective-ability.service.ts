@@ -1,5 +1,6 @@
 import UserDepartmentPositionModel from "../../../models/UserDepartmentPositionModel";
 import UserInfoModel from "../../../models/UserInfoModel";
+import CustomerModel from "../../../models/CustomerModel";
 import PermissionCatalogModel from "../../../models/PermissionCatalogModel";
 import { EmployeePermissionProfileRepository } from "../infrastructure/employee-permission-profile.repository";
 import { RoleRepository } from "../infrastructure/role.repository";
@@ -26,12 +27,13 @@ const dataScopePolicyRepository = new DataScopePolicyRepository();
 const fieldScopePolicyRepository = new FieldScopePolicyRepository();
 
 async function resolveSubjectContext(employeeId: string): Promise<Record<string, unknown>> {
-  const [memberships, userInfo] = await Promise.all([
+  const [memberships, userInfo, managedCustomers] = await Promise.all([
     UserDepartmentPositionModel.find({
       user: employeeId,
       isDeleted: false
     }).lean(),
-    UserInfoModel.findById(employeeId).select("id_account").lean()
+    UserInfoModel.findById(employeeId).select("id_account").lean(),
+    CustomerModel.find({ referred_by: employeeId, isDeleted: false }).select("_id").lean()
   ]);
 
   const departmentIds = memberships.map((membership: any) => String(membership.department));
@@ -46,12 +48,15 @@ async function resolveSubjectContext(employeeId: string): Promise<Record<string,
     new Set(colleagueMemberships.map((membership: any) => String(membership.user)))
   );
 
+  const managedCustomerIds = managedCustomers.map((customer: any) => String(customer._id));
+
   return {
     userId: employeeId,
     accountId: userInfo ? String((userInfo as { id_account: unknown }).id_account) : null,
     departmentId: departmentIds[0] ?? null,
     departmentIds,
-    departmentColleagueUserIds
+    departmentColleagueUserIds,
+    managedCustomerIds
   };
 }
 

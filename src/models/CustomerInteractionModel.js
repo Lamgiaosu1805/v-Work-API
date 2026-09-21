@@ -50,13 +50,13 @@ const CustomerInteractionModel = new mongoose.Schema(
             confirm_sale_source: { type: Boolean, default: null },
         },
 
-        ...BaseSchema.obj,
-    },
-    {
-        timestamps: BaseSchema.options.timestamps,
-        toJSON: BaseSchema.options.toJSON,
-        toObject: BaseSchema.options.toObject,
-    }
+    ...BaseSchema.obj
+  },
+  {
+    timestamps: BaseSchema.options.timestamps,
+    toJSON: BaseSchema.options.toJSON,
+    toObject: BaseSchema.options.toObject
+  }
 );
 
 // Index để query nhanh theo app + sale hoặc app + customer

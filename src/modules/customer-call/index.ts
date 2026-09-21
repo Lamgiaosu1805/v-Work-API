@@ -7,8 +7,3 @@ export type { SipCredentials } from "./application/get-sip-credentials.service";
 export { removeSaleOmicallProfile } from "./application/remove-sale-omicall-profile.service";
 
 export { updateSaleOmicallPassword } from "./application/update-sale-omicall-password.service";
-
-export { beginSaleOmicallProfileTransfer } from "./application/begin-sale-omicall-profile-transfer.service";
-
-export { completeSaleOmicallProfileTransferFromWebhook } from "./application/complete-sale-omicall-profile-transfer.service";
-export type { CompleteSaleOmicallProfileTransferResult } from "./application/complete-sale-omicall-profile-transfer.service";

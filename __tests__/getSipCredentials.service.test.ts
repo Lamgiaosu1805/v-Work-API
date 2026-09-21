@@ -111,4 +111,59 @@ describe("getSipCredentials", () => {
     const result = await getSipCredentials(employeeId, true);
     expect(result).toEqual({ sipRealm: "realm-x", sipUser: "110", sipPassword: "pass123" });
   });
+
+  test("extension đã gán cho nhân viên khác -> xoá profile cũ, gán extension cho nhân viên đang đồng bộ", async () => {
+    const oldEmployeeId = await createEmployee(
+      "sipEmpD",
+      "Sip Employee D (cũ)",
+      "NV-SIP-D",
+      "sip-d@x.test"
+    );
+    await SaleOmicallProfileModel.create({
+      sale_id: oldEmployeeId,
+      sip_realm: "realm-old",
+      omicall_extension: "111",
+      sip_password: "pass-old",
+      omicall_email: "sip-d@x.test"
+    });
+
+    const newEmployeeId = await createEmployee(
+      "sipEmpE",
+      "Sip Employee E (mới)",
+      "NV-SIP-E",
+      "sip-e@x.test"
+    );
+
+    jest.spyOn(OmicallClient.prototype, "getExtensionDetail").mockResolvedValue({
+      extension: "111",
+      full_name: "Sip Employee E",
+      mail: "sip-e@x.test",
+      uuid: "uuid-2",
+      pbx_account: {
+        display_name: "Sip Employee E",
+        sip_user: "111",
+        sip_password: "pass-new",
+        sip_web_socket_server: "wss://x",
+        sip_realm: "realm-new",
+        sip_proxy: "proxy",
+        sip_proxy_port: "5060",
+        stun_servers: [],
+        transport: ["udp"],
+        use_opus: true,
+        opus_quality: 1
+      }
+    } as any);
+
+    const result = await getSipCredentials(newEmployeeId, true);
+    expect(result).toEqual({ sipRealm: "realm-new", sipUser: "111", sipPassword: "pass-new" });
+
+    const oldProfile = await SaleOmicallProfileModel.findOne({ sale_id: oldEmployeeId }).lean();
+    expect((oldProfile as any).isDeleted).toBe(true);
+
+    const newProfile = await SaleOmicallProfileModel.findOne({
+      sale_id: newEmployeeId,
+      isDeleted: false
+    }).lean();
+    expect((newProfile as any).omicall_extension).toBe("111");
+  });
 });

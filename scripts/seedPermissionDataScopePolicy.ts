@@ -1,12 +1,3 @@
-// Chạy: npx ts-node --transpile-only scripts/seedPermissionDataScopePolicy.ts
-//
-// 7 entity có Data Scope thật (Employee/Request/Customer/Commission/WeeklyReport/InternalFile/Post) +
-// 1 Policy generic "<ENTITY>_ALL_COMPANY" (conditionTree: null) cho từng entity còn lại trong
-// permission_catalog. Toàn bộ đánh isSystemPolicy: true (không xoá/sửa được qua UI thường).
-//
-// InternalFile CHỈ có ALL_COMPANY/OWN_DEPARTMENT — thiếu tier ACL (DeptFolderPermission
-// grantedUsers/grantedDepts), tạm bỏ qua theo yêu cầu, xem docs/PERMISSION-MODULE-PLAN.md mục
-// "Ngoại lệ kiến trúc". Request KHÔNG có DIRECT_REPORTS — getApprovalChain() xử lý riêng (quyết định A).
 import "dotenv/config";
 import mongoose from "mongoose";
 import isEqual from "lodash/isEqual";
@@ -20,7 +11,6 @@ interface DataScopePolicyDef {
   conditionTree: ConditionTreeProps | null;
 }
 
-// resource.<x> IN ${subject.departmentIds} — dùng chung cho mọi entity scope "cùng phòng ban".
 const ownDepartmentCondition = (resourceDeptPath: string): ConditionTreeProps => ({
   operator: "AND",
   clauses: [
@@ -51,6 +41,19 @@ const ownDepartmentColleaguesCondition = (resourceUserPath: string): ConditionTr
       left: resourceUserPath,
       operator: "IN",
       right: { type: "SUBJECT_REF", path: "subject.departmentColleagueUserIds" }
+    }
+  ]
+});
+
+// resource.<x> IN ${subject.managedCustomerIds} — dùng cho entity gắn với khách hàng đang được
+// mình phụ trách hiện tại (customer.referred_by), không phải "do chính mình tạo ra bản ghi này".
+const managedCustomersCondition = (resourceCustomerPath: string): ConditionTreeProps => ({
+  operator: "AND",
+  clauses: [
+    {
+      left: resourceCustomerPath,
+      operator: "IN",
+      right: { type: "SUBJECT_REF", path: "subject.managedCustomerIds" }
     }
   ]
 });
@@ -199,8 +202,8 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
   {
     code: "CALL_LOG_SELF_ASSIGNED",
     entity: "CallLog",
-    label: "Chỉ cuộc gọi của chính mình",
-    conditionTree: selfCondition("resource.sale_id", "subject.userId")
+    label: "Chỉ cuộc gọi của khách hàng mình đang phụ trách",
+    conditionTree: managedCustomersCondition("resource.customer_id")
   },
   {
     code: "CALL_LOG_OWN_DEPARTMENT",

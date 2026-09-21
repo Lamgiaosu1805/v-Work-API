@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import UserInfoModel from "../models/UserInfoModel";
 import { findRolesByCodes } from "../modules/permission";
 import { getSipCredentials, SipCredentials } from "../modules/customer-call";
@@ -11,16 +10,9 @@ import {
 } from "../core/exceptions/exceptions";
 import { setCrmSaleRoleId } from "./set-crm-sale-role.workflow";
 import { CrmSaleRoleCode, OMICALL_ROLE_NAME_BY_CODE } from "./crm-sale-roles.constants";
+import { generateOmicallPassword } from "./generate-omicall-password.util";
 
 const omicallClient = new OmicallClient();
-
-function generateOmicallPassword(): string {
-  const random = crypto
-    .randomBytes(9)
-    .toString("base64")
-    .replace(/[^A-Za-z0-9]/g, "");
-  return `Om1${random}!`;
-}
 
 export async function inviteCrmSaleEmployee(
   employeeId: string,

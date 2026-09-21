@@ -1,5 +1,4 @@
 import axios, { AxiosInstance } from "axios";
-import { logger } from "../config/logger";
 
 export interface SearchCallTransactionsFilter {
   fromDate: number;
@@ -89,13 +88,6 @@ export interface InviteAgentInput {
   roleName: string;
   password: string;
   ownerEmail?: string;
-}
-
-export interface TransferAgentInput {
-  sourceEmail: string;
-  targetEmail: string;
-  targetInfo?: { fullName?: string; phoneNumber?: string };
-  callbackResultConfig?: { url: string; headers?: Record<string, string> };
 }
 
 export interface UpdateInternalPhoneInput {
@@ -358,32 +350,6 @@ export class OmicallClient {
       ...(input.ownerEmail ? { owner_email: input.ownerEmail } : {})
     });
     return data?.payload ?? data;
-  }
-
-  async transferAgent(input: TransferAgentInput): Promise<{ requestId: string | null }> {
-    const { data } = await this.v3.post("/api/v3/agent/transfer", {
-      sourceEmail: input.sourceEmail,
-      targetEmail: input.targetEmail,
-      ...(input.targetInfo ? { targetInfo: input.targetInfo } : {}),
-      ...(input.callbackResultConfig ? { callbackResultConfig: input.callbackResultConfig } : {})
-    });
-
-    const requestId: string | null =
-      data?.payload?.requestId ??
-      data?.payload?.request_id ??
-      data?.requestId ??
-      data?.request_id ??
-      null;
-
-    if (!requestId) {
-      logger.warn("Omicall transfer agent: response không có requestId theo shape đã biết", {
-        sourceEmail: input.sourceEmail,
-        targetEmail: input.targetEmail,
-        data
-      });
-    }
-
-    return { requestId };
   }
 
   async deleteAgent(email: string): Promise<Record<string, unknown>> {

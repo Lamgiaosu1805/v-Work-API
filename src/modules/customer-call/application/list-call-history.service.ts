@@ -32,7 +32,8 @@ export async function listCallHistory(
 ): Promise<ListCallHistoryResult> {
   const { page, limit, skip } = parsePagination(filters);
   const scopeFilter = castObjectIdFields(toMongoQuery(ability, "call_log.view", "CallLog"), [
-    "sale_id"
+    "sale_id",
+    "customer_id"
   ]);
 
   const andConditions: Record<string, unknown>[] = [scopeFilter, { isDeleted: false }];
@@ -157,7 +158,8 @@ export async function listCallHistorySaleOptions(
   ability: Ability
 ): Promise<CallHistorySaleOption[]> {
   const scopeFilter = castObjectIdFields(toMongoQuery(ability, "call_log.view", "CallLog"), [
-    "sale_id"
+    "sale_id",
+    "customer_id"
   ]);
 
   const pipeline: mongoose.PipelineStage[] = [

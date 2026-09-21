@@ -50,6 +50,13 @@ export async function getSipCredentials(
     sipPassword: detail.pbx_account.sip_password
   };
 
+  const conflictingProfile = await saleOmicallProfileRepository.findByExtension(
+    credentials.sipUser
+  );
+  if (conflictingProfile && conflictingProfile.saleId !== employeeId) {
+    await saleOmicallProfileRepository.delete(conflictingProfile);
+  }
+
   if (existing) {
     existing.update({
       sipRealm: credentials.sipRealm,

@@ -48,39 +48,54 @@ async function createSale(username: string, fullName: string, maNv: string) {
   return { account, employeeId: String(userInfo._id) };
 }
 
+// Policy cục bộ khớp đúng semantic thật đang seed (CALL_LOG_SELF_ASSIGNED, quyền xem đi theo
+// customer.referred_by hiện tại, không phải theo ai đã thực hiện cuộc gọi).
 async function seedCallLogPermission(employeeId: string) {
-  await PermissionCatalogModel.create({
-    code: "call_log.view",
-    module: "crm",
-    name: "Xem lịch sử cuộc gọi",
-    entity: "CallLog",
-    actionKind: "READ",
-    supportsFieldScope: false,
-    validDataScopePolicies: ["CALL_LOG_SELF_ASSIGNED_TEST"],
-    validFieldScopePolicies: []
+  const existingCatalog = await PermissionCatalogModel.findOne({ code: "call_log.view" });
+  if (!existingCatalog) {
+    await PermissionCatalogModel.create({
+      code: "call_log.view",
+      module: "crm",
+      name: "Xem lịch sử cuộc gọi",
+      entity: "CallLog",
+      actionKind: "READ",
+      supportsFieldScope: false,
+      validDataScopePolicies: ["CALL_LOG_SELF_ASSIGNED_TEST"],
+      validFieldScopePolicies: []
+    });
+  }
+
+  const existingPolicy = await DataScopePolicyModel.findOne({
+    code: "CALL_LOG_SELF_ASSIGNED_TEST"
   });
-  await DataScopePolicyModel.create({
-    code: "CALL_LOG_SELF_ASSIGNED_TEST",
-    entity: "CallLog",
-    label: "Chỉ cuộc gọi của chính mình",
-    conditionTree: {
-      operator: "AND",
-      clauses: [
-        {
-          left: "resource.sale_id",
-          operator: "EQ",
-          right: { type: "SUBJECT_REF", path: "subject.userId" }
-        }
+  if (!existingPolicy) {
+    await DataScopePolicyModel.create({
+      code: "CALL_LOG_SELF_ASSIGNED_TEST",
+      entity: "CallLog",
+      label: "Chỉ cuộc gọi của khách hàng mình đang phụ trách",
+      conditionTree: {
+        operator: "AND",
+        clauses: [
+          {
+            left: "resource.customer_id",
+            operator: "IN",
+            right: { type: "SUBJECT_REF", path: "subject.managedCustomerIds" }
+          }
+        ]
+      }
+    });
+  }
+
+  let role = await PermissionRoleModel.findOne({ code: "CRM_SALE_CALL_LOG_TEST" });
+  if (!role) {
+    role = await PermissionRoleModel.create({
+      name: "Sale CRM (test)",
+      code: "CRM_SALE_CALL_LOG_TEST",
+      grants: [
+        { permissionCode: "call_log.view", dataScopePolicyCode: "CALL_LOG_SELF_ASSIGNED_TEST" }
       ]
-    }
-  });
-  const role = await PermissionRoleModel.create({
-    name: "Sale CRM (test)",
-    code: "CRM_SALE_CALL_LOG_TEST",
-    grants: [
-      { permissionCode: "call_log.view", dataScopePolicyCode: "CALL_LOG_SELF_ASSIGNED_TEST" }
-    ]
-  });
+    });
+  }
   await EmployeePermissionProfileModel.create({ employeeId, roleIds: [role._id], overrides: [] });
 }
 
@@ -114,14 +129,34 @@ beforeEach(async () => {
 });
 
 describe("listCallHistory (integration, MongoMemoryServer)", () => {
-  test("scope SELF_ASSIGNED khớp đúng qua aggregate với sale_id là ObjectId thật -> chỉ thấy cuộc gọi của mình", async () => {
+  test("chỉ thấy cuộc gọi của khách hàng mình đang phụ trách (theo customer.referred_by hiện tại)", async () => {
     const saleA = await createSale("saleCallA", "Sale Call A", "NV-CALL-A");
     const saleB = await createSale("saleCallB", "Sale Call B", "NV-CALL-B");
     await seedCallLogPermission(saleA.employeeId);
 
+    const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
+    const customerOfA = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0911111111",
+      referred_by: saleA.employeeId
+    });
+    const customerOfB = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0922222222",
+      referred_by: saleB.employeeId
+    });
+
     await CallLogModel.create([
-      baseCallLog({ sale_id: saleA.employeeId, phone_number: "0911111111" }),
-      baseCallLog({ sale_id: saleB.employeeId, phone_number: "0922222222" })
+      baseCallLog({
+        sale_id: saleA.employeeId,
+        customer_id: customerOfA._id,
+        phone_number: "0911111111"
+      }),
+      baseCallLog({
+        sale_id: saleB.employeeId,
+        customer_id: customerOfB._id,
+        phone_number: "0922222222"
+      })
     ]);
 
     const abilityA = await resolveEffectiveAbility(saleA.employeeId);
@@ -129,6 +164,45 @@ describe("listCallHistory (integration, MongoMemoryServer)", () => {
 
     expect(result.total).toBe(1);
     expect((result.data[0] as any).phone_number).toBe("0911111111");
+  });
+
+  test("chuyển khách hàng sang sale khác -> sale mới xem được cuộc gọi cũ, sale cũ hết thấy", async () => {
+    const saleA = await createSale("saleCallReassignA", "Sale Reassign A", "NV-CALL-REA");
+    const saleB = await createSale("saleCallReassignB", "Sale Reassign B", "NV-CALL-REB");
+    await seedCallLogPermission(saleA.employeeId);
+    await seedCallLogPermission(saleB.employeeId);
+
+    const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
+    const customer = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0911111111",
+      referred_by: saleA.employeeId
+    });
+
+    // Cuộc gọi do sale A thực hiện lúc còn phụ trách khách này (sale_id giữ nguyên, không đổi).
+    await CallLogModel.create(
+      baseCallLog({ sale_id: saleA.employeeId, customer_id: customer._id })
+    );
+
+    const abilityABefore = await resolveEffectiveAbility(saleA.employeeId);
+    const resultABefore = await listCallHistory(abilityABefore, { page: 1, limit: 20 });
+    expect(resultABefore.total).toBe(1);
+
+    // Chuyển khách sang sale B (giống hiệu ứng của reassignSaleCustomers).
+    await CustomerModel.updateOne(
+      { _id: customer._id },
+      { $set: { referred_by: saleB.employeeId } }
+    );
+
+    const abilityAAfter = await resolveEffectiveAbility(saleA.employeeId);
+    const resultAAfter = await listCallHistory(abilityAAfter, { page: 1, limit: 20 });
+    expect(resultAAfter.total).toBe(0);
+
+    const abilityB = await resolveEffectiveAbility(saleB.employeeId);
+    const resultB = await listCallHistory(abilityB, { page: 1, limit: 20 });
+    expect(resultB.total).toBe(1);
+    // sale_id trên bản ghi gốc vẫn là A — vẫn biết chính xác ai đã thực hiện cuộc gọi này.
+    expect(String((resultB.data[0] as any).sale_id)).toBe(saleA.employeeId);
   });
 
   test("lọc theo appCode qua customer_id -> Customer.app_id, cuộc gọi chưa khớp khách hàng (customer_id null) bị loại", async () => {
@@ -141,12 +215,14 @@ describe("listCallHistory (integration, MongoMemoryServer)", () => {
     const customerTikluy = await CustomerModel.create({
       app_id: appTikluy._id,
       phone_number: "0911111111",
-      identity: { full_name: "Khach Tikluy" }
+      identity: { full_name: "Khach Tikluy" },
+      referred_by: saleA.employeeId
     });
     const customerVnfite = await CustomerModel.create({
       app_id: appVnfite._id,
       phone_number: "0922222222",
-      identity: { full_name: "Khach Vnfite" }
+      identity: { full_name: "Khach Vnfite" },
+      referred_by: saleA.employeeId
     });
 
     await CallLogModel.create([
@@ -179,12 +255,14 @@ describe("listCallHistory (integration, MongoMemoryServer)", () => {
     const customerA = await CustomerModel.create({
       app_id: app._id,
       phone_number: "0911111111",
-      identity: { full_name: "Nguyen Van Mot" }
+      identity: { full_name: "Nguyen Van Mot" },
+      referred_by: saleA.employeeId
     });
     const customerB = await CustomerModel.create({
       app_id: app._id,
       phone_number: "0922222222",
-      identity: { full_name: "Nguyen Van Hai" }
+      identity: { full_name: "Nguyen Van Hai" },
+      referred_by: saleB.employeeId
     });
 
     await CallLogModel.create([
@@ -211,9 +289,26 @@ describe("listCallHistory (integration, MongoMemoryServer)", () => {
     const saleA = await createSale("saleCallF", "Sale Call F", "NV-CALL-F");
     await seedCallLogPermission(saleA.employeeId);
 
+    const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
+    const customer = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0911111111",
+      referred_by: saleA.employeeId
+    });
+
     await CallLogModel.create([
-      baseCallLog({ sale_id: saleA.employeeId, direction: "outbound", phone_number: "0911111111" }),
-      baseCallLog({ sale_id: saleA.employeeId, direction: "inbound", phone_number: "0922222222" })
+      baseCallLog({
+        sale_id: saleA.employeeId,
+        customer_id: customer._id,
+        direction: "outbound",
+        phone_number: "0911111111"
+      }),
+      baseCallLog({
+        sale_id: saleA.employeeId,
+        customer_id: customer._id,
+        direction: "inbound",
+        phone_number: "0922222222"
+      })
     ]);
 
     const abilityA = await resolveEffectiveAbility(saleA.employeeId);
@@ -230,10 +325,39 @@ describe("listCallHistorySaleOptions (integration, MongoMemoryServer)", () => {
     const saleB = await createSale("saleCallH", "Sale Call H", "NV-CALL-H");
     await seedCallLogPermission(saleA.employeeId);
 
+    const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
+    const customer1 = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0911111111",
+      referred_by: saleA.employeeId
+    });
+    const customer2 = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0911111112",
+      referred_by: saleA.employeeId
+    });
+    const customer3 = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0922222222",
+      referred_by: saleB.employeeId
+    });
+
     await CallLogModel.create([
-      baseCallLog({ sale_id: saleA.employeeId, phone_number: "0911111111" }),
-      baseCallLog({ sale_id: saleA.employeeId, phone_number: "0911111112" }),
-      baseCallLog({ sale_id: saleB.employeeId, phone_number: "0922222222" })
+      baseCallLog({
+        sale_id: saleA.employeeId,
+        customer_id: customer1._id,
+        phone_number: "0911111111"
+      }),
+      baseCallLog({
+        sale_id: saleA.employeeId,
+        customer_id: customer2._id,
+        phone_number: "0911111112"
+      }),
+      baseCallLog({
+        sale_id: saleB.employeeId,
+        customer_id: customer3._id,
+        phone_number: "0922222222"
+      })
     ]);
 
     const abilityA = await resolveEffectiveAbility(saleA.employeeId);

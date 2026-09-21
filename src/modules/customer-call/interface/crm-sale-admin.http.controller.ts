@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
-import { getSipCredentials } from "../application/get-sip-credentials.service";
+import { syncCrmSaleSipCredentials } from "../../../workflows/sync-crm-sale-sip-credentials.workflow";
 import { listCrmSaleEmployees } from "../../../workflows/list-crm-sale-employees.workflow";
 import { listCrmSaleCandidateEmployees } from "../../../workflows/list-crm-sale-candidate-employees.workflow";
 import { listCrmSaleInviteCandidateEmployees } from "../../../workflows/list-crm-sale-invite-candidate-employees.workflow";
@@ -61,7 +61,7 @@ export const crmSaleAdminHttpController = {
     }
     const data = await transferCrmSaleEmployee(req.params.employeeId, targetEmployeeId);
     return res.status(200).json({
-      message: "Đã gửi yêu cầu chuyển giao — kết quả sẽ báo qua webhook khi Omicall xử lý xong",
+      message: `Đã chuyển giao ${data.reassignedCustomerCount} khách hàng`,
       data
     });
   },
@@ -72,7 +72,7 @@ export const crmSaleAdminHttpController = {
   },
 
   async syncCrmSaleSipCredentials(req: Request, res: Response) {
-    const data = await getSipCredentials(req.params.employeeId, true);
+    const data = await syncCrmSaleSipCredentials(req.params.employeeId);
     return res.status(200).json({ message: "Đồng bộ SIP thành công", data });
   },
 

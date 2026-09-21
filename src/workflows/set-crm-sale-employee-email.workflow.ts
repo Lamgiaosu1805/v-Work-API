@@ -14,5 +14,16 @@ export async function setCrmSaleEmployeeEmail(employeeId: string, email: string)
     throw new NotFoundException("Không tìm thấy nhân viên", { metadata: { employeeId } });
   }
 
+  const duplicateOwner = await UserInfoModel.findOne({
+    email: trimmedEmail,
+    isDeleted: false,
+    _id: { $ne: employeeId }
+  }).select("full_name");
+  if (duplicateOwner) {
+    throw new ArgumentInvalidException(
+      `Email này đã được dùng bởi nhân viên khác (${(duplicateOwner as { full_name?: string }).full_name || "không rõ tên"})`
+    );
+  }
+
   await UserInfoModel.updateOne({ _id: employeeId }, { email: trimmedEmail });
 }

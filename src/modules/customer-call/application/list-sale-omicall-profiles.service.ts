@@ -4,7 +4,6 @@ export interface SaleOmicallProfileSummary {
   saleId: string;
   omicallExtension: string;
   omicallEmail: string | null;
-  status: "active" | "transferring";
 }
 
 export async function listSaleOmicallProfilesBySaleIds(
@@ -20,7 +19,6 @@ export async function listSaleOmicallProfilesBySaleIds(
   return profiles.map((profile) => ({
     saleId: String(profile.sale_id),
     omicallExtension: profile.omicall_extension,
-    omicallEmail: profile.omicall_email ?? null,
-    status: profile.status ?? "active"
+    omicallEmail: profile.omicall_email ?? null
   }));
 }

@@ -68,4 +68,30 @@ describe("setCrmSaleEmployeeEmail", () => {
       statusCode: 404
     });
   });
+
+  test("email đã được dùng bởi nhân viên khác -> ném ArgumentInvalidException, KHÔNG cập nhật", async () => {
+    const employeeAId = await createEmployee("emailSaleC", "Email Sale C", "NV-EMAIL-C");
+    const employeeBId = await createEmployee("emailSaleD", "Email Sale D", "NV-EMAIL-D");
+    await setCrmSaleEmployeeEmail(employeeAId, "trung@vnfite.test");
+
+    await expect(setCrmSaleEmployeeEmail(employeeBId, "trung@vnfite.test")).rejects.toMatchObject({
+      statusCode: 400,
+      message: "Email này đã được dùng bởi nhân viên khác (Email Sale C)"
+    });
+
+    const userInfoB = await UserInfoModel.findById(employeeBId).lean();
+    expect((userInfoB as any).email).toBeNull();
+  });
+
+  test("cập nhật lại đúng email hiện tại của chính mình -> không bị coi là trùng", async () => {
+    const employeeId = await createEmployee("emailSaleE", "Email Sale E", "NV-EMAIL-E");
+    await setCrmSaleEmployeeEmail(employeeId, "email-e@vnfite.test");
+
+    await expect(
+      setCrmSaleEmployeeEmail(employeeId, "email-e@vnfite.test")
+    ).resolves.toBeUndefined();
+
+    const userInfo = await UserInfoModel.findById(employeeId).lean();
+    expect((userInfo as any).email).toBe("email-e@vnfite.test");
+  });
 });

@@ -17,6 +17,8 @@ import CallLogModel from "../src/models/CallLogModel";
 const AccountModel = require("../src/models/AccountModel");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const UserInfoModel = require("../src/models/UserInfoModel");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const CustomerModel = require("../src/models/CustomerModel");
 
 let mongod: MongoMemoryServer;
 
@@ -47,6 +49,8 @@ async function createSale(username: string, fullName: string, maNv: string) {
   return { account, employeeId: String(userInfo._id) };
 }
 
+// Policy cục bộ khớp đúng semantic thật: sửa ghi chú theo khách hàng đang phụ trách hiện tại
+// (customer.referred_by), chia sẻ chung policy code CALL_LOG_SELF_ASSIGNED với call_log.view.
 async function seedCallLogUpdateNotePermission(employeeId: string) {
   await PermissionCatalogModel.create({
     code: "call_log.update_note",
@@ -61,14 +65,14 @@ async function seedCallLogUpdateNotePermission(employeeId: string) {
   await DataScopePolicyModel.create({
     code: "CALL_LOG_SELF_ASSIGNED_NOTE_TEST",
     entity: "CallLog",
-    label: "Chỉ cuộc gọi của chính mình",
+    label: "Chỉ cuộc gọi của khách hàng mình đang phụ trách",
     conditionTree: {
       operator: "AND",
       clauses: [
         {
-          left: "resource.sale_id",
-          operator: "EQ",
-          right: { type: "SUBJECT_REF", path: "subject.userId" }
+          left: "resource.customer_id",
+          operator: "IN",
+          right: { type: "SUBJECT_REF", path: "subject.managedCustomerIds" }
         }
       ]
     }
@@ -84,6 +88,15 @@ async function seedCallLogUpdateNotePermission(employeeId: string) {
     ]
   });
   await EmployeePermissionProfileModel.create({ employeeId, roleIds: [role._id], overrides: [] });
+}
+
+async function createCustomer(appId: mongoose.Types.ObjectId, phone: string, referredBy: string) {
+  const customer = await CustomerModel.create({
+    app_id: appId,
+    phone_number: phone,
+    referred_by: referredBy
+  });
+  return String(customer._id);
 }
 
 function baseCallLog(overrides: Record<string, unknown>) {
@@ -107,15 +120,20 @@ beforeEach(async () => {
     EmployeePermissionProfileModel.deleteMany({}),
     CallLogModel.deleteMany({}),
     AccountModel.deleteMany({}),
-    UserInfoModel.deleteMany({})
+    UserInfoModel.deleteMany({}),
+    CustomerModel.deleteMany({})
   ]);
 });
 
 describe("updateCallLogNote (integration, MongoMemoryServer)", () => {
-  test("sale trong scope -> gọi Omicall đúng transaction_id + cập nhật note local thành công", async () => {
+  test("sale trong scope (khách hàng mình đang phụ trách) -> gọi Omicall đúng transaction_id + cập nhật note local thành công", async () => {
     const saleA = await createSale("saleNoteA", "Sale Note A", "NV-NOTE-A");
     await seedCallLogUpdateNotePermission(saleA.employeeId);
-    const callLog = await CallLogModel.create(baseCallLog({ sale_id: saleA.employeeId }));
+    const appId = new mongoose.Types.ObjectId();
+    const customerId = await createCustomer(appId, "0911111111", saleA.employeeId);
+    const callLog = await CallLogModel.create(
+      baseCallLog({ sale_id: saleA.employeeId, customer_id: customerId })
+    );
 
     const spy = jest.spyOn(OmicallClient.prototype, "updateCallTransaction").mockResolvedValue({});
 
@@ -129,12 +147,14 @@ describe("updateCallLogNote (integration, MongoMemoryServer)", () => {
     expect(updated!.note).toBe("Khách quan tâm gói 6 tháng");
   });
 
-  test("sale ngoài scope (cuộc gọi của sale khác) -> ForbiddenException, KHÔNG gọi Omicall, không đổi note", async () => {
+  test("sale ngoài scope (khách hàng đang thuộc sale khác) -> ForbiddenException, KHÔNG gọi Omicall, không đổi note", async () => {
     const saleA = await createSale("saleNoteB", "Sale Note B", "NV-NOTE-B");
     const saleB = await createSale("saleNoteC", "Sale Note C", "NV-NOTE-C");
     await seedCallLogUpdateNotePermission(saleA.employeeId);
+    const appId = new mongoose.Types.ObjectId();
+    const customerId = await createCustomer(appId, "0922222222", saleB.employeeId);
     const callLog = await CallLogModel.create(
-      baseCallLog({ sale_id: saleB.employeeId, note: "note gốc" })
+      baseCallLog({ sale_id: saleB.employeeId, customer_id: customerId, note: "note gốc" })
     );
 
     const spy = jest.spyOn(OmicallClient.prototype, "updateCallTransaction").mockResolvedValue({});
@@ -162,8 +182,10 @@ describe("updateCallLogNote (integration, MongoMemoryServer)", () => {
   test("Omicall API lỗi -> ConflictException, note local GIỮ NGUYÊN (không lưu nửa vời)", async () => {
     const saleA = await createSale("saleNoteE", "Sale Note E", "NV-NOTE-E");
     await seedCallLogUpdateNotePermission(saleA.employeeId);
+    const appId = new mongoose.Types.ObjectId();
+    const customerId = await createCustomer(appId, "0933333333", saleA.employeeId);
     const callLog = await CallLogModel.create(
-      baseCallLog({ sale_id: saleA.employeeId, note: "note cũ" })
+      baseCallLog({ sale_id: saleA.employeeId, customer_id: customerId, note: "note cũ" })
     );
 
     jest

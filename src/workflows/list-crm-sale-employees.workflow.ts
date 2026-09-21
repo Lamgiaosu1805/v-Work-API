@@ -11,7 +11,6 @@ export interface CrmSaleEmployeeItem {
   roleName: string;
   omicallExtension: string | null;
   isActive: boolean;
-  transferStatus: "active" | "transferring";
 }
 
 export async function listCrmSaleEmployees(): Promise<CrmSaleEmployeeItem[]> {
@@ -29,7 +28,6 @@ export async function listCrmSaleEmployees(): Promise<CrmSaleEmployeeItem[]> {
     roleCode: employee.roleCode,
     roleName: employee.roleName,
     omicallExtension: profileBySaleId.get(employee.employeeId)?.omicallExtension ?? null,
-    isActive: !employee.accountIsDeleted,
-    transferStatus: profileBySaleId.get(employee.employeeId)?.status ?? "active"
+    isActive: !employee.accountIsDeleted
   }));
 }

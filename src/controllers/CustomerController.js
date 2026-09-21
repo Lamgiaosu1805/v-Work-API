@@ -19,6 +19,7 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const { tikluyClient } = require("../utils/tikluyClient");
 const { decrypt, buildCustomerPipeline } = require("../helpers/customerHelper");
 const { canAccessCustomer, canManageSale } = require("../helpers/crmScope");
+const { invalidatePermissionCache } = require("../core/authorization/invalidate-permission-cache");
 
 const GENDER_LABELS = {
   male: "Nam",
@@ -244,6 +245,10 @@ const CustomerController = {
         await session.commitTransaction();
         session.endSession();
 
+        if (referred_by) {
+          await invalidatePermissionCache([String(referred_by)]);
+        }
+
         return res.status(201).json({
           message: "Tạo khách hàng thành công",
           customer
@@ -365,6 +370,10 @@ const CustomerController = {
 
       await session.commitTransaction();
       session.endSession();
+
+      if (updateData.referred_by) {
+        await invalidatePermissionCache([String(updateData.referred_by)]);
+      }
 
       return res.status(200).json({
         message: "Cập nhật khách hàng thành công",
@@ -1403,6 +1412,8 @@ const CustomerController = {
       await session.commitTransaction();
       session.endSession();
 
+      await invalidatePermissionCache([oldSaleId ? String(oldSaleId) : null, String(newSale._id)]);
+
       return res.status(200).json({
         message: "Chuyển sale thành công",
         data: {
@@ -1509,6 +1520,9 @@ const CustomerController = {
 
       await session.commitTransaction();
       session.endSession();
+
+      await invalidatePermissionCache([String(oldSaleId)]);
+
       return res
         .status(200)
         .json({ message: "Đã xóa phân công sale. Khách hàng trở về trạng thái chưa được nhận." });
@@ -1662,6 +1676,8 @@ const CustomerController = {
 
       await session.commitTransaction();
       session.endSession();
+
+      await invalidatePermissionCache([String(sale._id)]);
 
       return res.status(200).json({
         message: "Phân khách thành công",
@@ -1835,6 +1851,8 @@ const CustomerController = {
 
       await session.commitTransaction();
       session.endSession();
+
+      await invalidatePermissionCache([String(sale._id)]);
 
       return res.status(200).json({
         message: `Đã phân ${assigned.length}/${customer_ids.length} khách hàng cho sale ${sale.full_name}`,

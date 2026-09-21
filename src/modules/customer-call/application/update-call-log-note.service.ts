@@ -23,7 +23,8 @@ export async function updateCallLogNote(
   }
 
   const scopeFilter = castObjectIdFields(toMongoQuery(ability, "call_log.update_note", "CallLog"), [
-    "sale_id"
+    "sale_id",
+    "customer_id"
   ]);
   const inScope = await CallLogModel.exists({
     $and: [scopeFilter, { _id: callLogId, isDeleted: false }]

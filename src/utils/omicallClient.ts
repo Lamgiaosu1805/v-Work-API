@@ -238,6 +238,33 @@ export interface ListInternalPhonesResult {
   has_previous: boolean;
 }
 
+export interface InternalGroupMember {
+  agent_id: string;
+}
+
+export interface InternalGroupItem {
+  _id: string;
+  group_name: string;
+  group_number: string;
+  members: InternalGroupMember[];
+}
+
+export interface ListInternalGroupsParams {
+  keyword?: string;
+  page?: number;
+  size?: number;
+}
+
+export interface ListInternalGroupsResult {
+  items: InternalGroupItem[];
+  page_number: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+}
+
 interface CachedOmicallToken {
   accessToken: string;
   expiresAt: number;
@@ -443,6 +470,11 @@ export class OmicallClient {
 
   async listInternalPhones(params: ListInternalPhonesParams): Promise<ListInternalPhonesResult> {
     const { data } = await this.v1.get("/api/call_center/internal_phone/list", { params });
+    return data?.payload;
+  }
+
+  async listInternalGroups(params: ListInternalGroupsParams): Promise<ListInternalGroupsResult> {
+    const { data } = await this.v1.get("/api/call_center/internal_group/list", { params });
     return data?.payload;
   }
 }

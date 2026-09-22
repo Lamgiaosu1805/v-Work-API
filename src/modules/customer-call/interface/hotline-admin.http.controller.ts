@@ -8,6 +8,7 @@ import {
 } from "../application/update-hotline-config.service";
 import { listHotlineCallScripts } from "../application/list-hotline-call-scripts.service";
 import { listHotlineExtensions } from "../application/list-hotline-extensions.service";
+import { listHotlineRingGroups } from "../application/list-hotline-ring-groups.service";
 import { syncHotlineExtensionAssignments } from "../application/sync-hotline-extension-assignments.service";
 
 export const hotlineAdminHttpController = {
@@ -49,6 +50,11 @@ export const hotlineAdminHttpController = {
 
   async getHotlineExtensions(req: Request, res: Response) {
     const data = await listHotlineExtensions({ keyword: req.query.keyword as string | undefined });
+    return res.status(200).json({ message: "OK", data });
+  },
+
+  async getHotlineRingGroups(req: Request, res: Response) {
+    const data = await listHotlineRingGroups({ keyword: req.query.keyword as string | undefined });
     return res.status(200).json({ message: "OK", data });
   },
 

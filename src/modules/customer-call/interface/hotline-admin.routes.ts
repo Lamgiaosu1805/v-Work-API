@@ -28,6 +28,13 @@ router.get(
 );
 
 router.get(
+  "/admin/hotline-ring-groups",
+  authenticate,
+  requirePermission("hotline.manage", "HotlineAdmin"),
+  asyncHandler(hotlineAdminHttpController.getHotlineRingGroups)
+);
+
+router.get(
   "/admin/hotlines/:phone",
   authenticate,
   requirePermission("hotline.manage", "HotlineAdmin"),

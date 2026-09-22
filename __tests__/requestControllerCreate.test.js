@@ -886,10 +886,6 @@ test("duyệt đơn nghỉ phép đè lên ngày đã CHẤM CÔNG THẬT: giữ
   const realCheckIn = moment.tz(`${targetDate} 08:00`, "YYYY-MM-DD HH:mm", TZ).toDate();
   const realCheckOut = moment.tz(`${targetDate} 17:00`, "YYYY-MM-DD HH:mm", TZ).toDate();
 
-  // resolveLeaveConflictOnAttendance cần lastShiftEnd (từ shift gắn trên worksheet)
-  // để tính coversAfternoon — worksheet thật luôn có shift (cron gán mỗi ngày),
-  // test phải mô phỏng đúng, nếu không coversAfternoon luôn false, không bao giờ
-  // ghi đè được.
   const shift = await ShiftModel.create({
     name: "Ca hành chính test",
     start_time: "08:00",

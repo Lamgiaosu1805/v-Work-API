@@ -122,6 +122,19 @@ async function assignRole(employeeId, roleCode) {
   }
 }
 
+async function setOverride(employeeId, permissionCode, status) {
+  const existing = await EmployeePermissionProfileModel.findOne({ employeeId });
+  const override = { permissionCode, status, dataScopePolicyCode: null, fieldScopePolicyCode: null };
+  if (existing) {
+    await EmployeePermissionProfileModel.updateOne(
+      { employeeId },
+      { $push: { overrides: override } }
+    );
+  } else {
+    await EmployeePermissionProfileModel.create({ employeeId, roleIds: [], overrides: [override] });
+  }
+}
+
 afterEach(async () => {
   await AccountModel.deleteMany({});
   await UserInfoModel.deleteMany({});
@@ -296,6 +309,38 @@ test("9. chính chủ đơn không tự xuất hiện trong danh sách duyệt c
 
   const chain = await getApprovalChain(employee._id);
   expect(chain).toEqual([]);
+});
+
+test("11. quản lý gián tiếp qua department.manager NHƯNG cũng giữ quyền admin toàn công ty — vẫn xếp rank 1 (đứng trước admin không liên quan), không tụt xuống rank 2", async () => {
+  const dept = await createDept("Phòng Kế toán");
+  const { userInfo: employee } = await createEmployee();
+  await assignDept(employee._id, dept._id);
+
+  const { userInfo: unrelatedAdmin } = await createEmployee();
+  await assignRole(unrelatedAdmin._id, "TEST_ADMIN");
+
+  const { userInfo: tier2ManagerAlsoAdmin } = await createEmployee();
+  await assignRole(tier2ManagerAlsoAdmin._id, "TEST_ADMIN");
+  await DepartmentModel.updateOne({ _id: dept._id }, { manager: tier2ManagerAlsoAdmin._id });
+
+  const chain = await getApprovalChain(employee._id);
+  expect(chain.map((c) => c.userInfoId.toString())).toEqual([
+    tier2ManagerAlsoAdmin._id.toString(),
+    unrelatedAdmin._id.toString()
+  ]);
+});
+
+test("12. không giữ role review nào nhưng có override ALLOW request.review — vẫn được tính là ứng viên duyệt", async () => {
+  const dept = await createDept("Phòng Kế toán");
+  const { userInfo: employee } = await createEmployee();
+  await assignDept(employee._id, dept._id);
+
+  const { userInfo: overrideOnly } = await createEmployee();
+  await setOverride(overrideOnly._id, "request.review", "ALLOW");
+
+  const chain = await getApprovalChain(employee._id);
+  expect(chain).toHaveLength(1);
+  expect(chain[0].userInfoId.toString()).toBe(overrideOnly._id.toString());
 });
 
 test("10. giữ cả 2 role (DEPT_LEAD + ADMIN) chỉ xuất hiện đúng 1 lần (dedupe)", async () => {

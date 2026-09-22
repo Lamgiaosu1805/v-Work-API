@@ -39,8 +39,7 @@ describe("applyLeaveConflictOverride — dùng độc lập, không qua persistA
       worksheetId: worksheetId.toString(),
       dateKey: DATE_KEY,
       checkInTime: new Date(`${DATE_KEY}T01:00:00.000Z`), // 08:00 giờ VN
-      checkOutTime: new Date(`${DATE_KEY}T10:31:00.000Z`), // 17:31 giờ VN
-      lastShiftEnd: "17:30"
+      checkOutTime: new Date(`${DATE_KEY}T10:31:00.000Z`) // 17:31 giờ VN
     });
 
     expect(result.leaveRefundAmount).toBe(1);
@@ -56,8 +55,7 @@ describe("applyLeaveConflictOverride — dùng độc lập, không qua persistA
       worksheetId: new mongoose.Types.ObjectId().toString(),
       dateKey: DATE_KEY,
       checkInTime: null,
-      checkOutTime: new Date(`${DATE_KEY}T10:31:00.000Z`),
-      lastShiftEnd: "17:30"
+      checkOutTime: new Date(`${DATE_KEY}T10:31:00.000Z`)
     });
     expect(result.leaveRefundAmount).toBe(0);
   });

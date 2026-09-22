@@ -15,7 +15,6 @@ describe("resolveLeaveConflict", () => {
         dateKey: DATE_KEY,
         checkInTime: null,
         checkOutTime: at(DATE_KEY, "17:00"),
-        lastShiftEnd: "17:30",
         leaveStatuses: [
           { id: "a", period: "full", status: "leave_paid", date: at(DATE_KEY, "00:00") }
         ]
@@ -29,7 +28,6 @@ describe("resolveLeaveConflict", () => {
         dateKey: DATE_KEY,
         checkInTime: at(DATE_KEY, "08:00"),
         checkOutTime: at(DATE_KEY, "17:00"),
-        lastShiftEnd: "17:30",
         leaveStatuses: []
       })
     ).toEqual({ overriddenStatusIds: [], refundAmount: 0 });
@@ -40,7 +38,6 @@ describe("resolveLeaveConflict", () => {
       dateKey: DATE_KEY,
       checkInTime: at(DATE_KEY, "08:00"),
       checkOutTime: null,
-      lastShiftEnd: null,
       leaveStatuses: [
         { id: "morning-1", period: "morning", status: "leave_paid", date: at(DATE_KEY, "00:00") }
       ]
@@ -48,12 +45,11 @@ describe("resolveLeaveConflict", () => {
     expect(result).toEqual({ overriddenStatusIds: [], refundAmount: 0 });
   });
 
-  test("có đủ check-in (trước 12h) + check-out: đè leave_paid buổi sáng, hoàn 0.5", () => {
+  test("check-in trước 10h + check-out: đè leave_paid buổi sáng, hoàn 0.5", () => {
     const result = resolveLeaveConflict({
       dateKey: DATE_KEY,
       checkInTime: at(DATE_KEY, "08:00"),
-      checkOutTime: at(DATE_KEY, "12:30"), // không cần cover afternoon để test riêng morning
-      lastShiftEnd: null, // không có lastShiftEnd -> coversAfternoon luôn false
+      checkOutTime: at(DATE_KEY, "12:30"), // trước 14h -> không cover afternoon
       leaveStatuses: [
         { id: "morning-1", period: "morning", status: "leave_paid", date: at(DATE_KEY, "00:00") }
       ]
@@ -62,12 +58,11 @@ describe("resolveLeaveConflict", () => {
     expect(result.refundAmount).toBe(0.5);
   });
 
-  test("check-in sau 12h -> KHÔNG đè leave_paid buổi sáng", () => {
+  test("check-in sau 10h -> KHÔNG đè leave_paid buổi sáng", () => {
     const result = resolveLeaveConflict({
       dateKey: DATE_KEY,
-      checkInTime: at(DATE_KEY, "13:00"),
+      checkInTime: at(DATE_KEY, "11:00"),
       checkOutTime: at(DATE_KEY, "17:00"),
-      lastShiftEnd: "17:30",
       leaveStatuses: [
         { id: "morning-1", period: "morning", status: "leave_paid", date: at(DATE_KEY, "00:00") }
       ]
@@ -75,12 +70,11 @@ describe("resolveLeaveConflict", () => {
     expect(result).toEqual({ overriddenStatusIds: [], refundAmount: 0 });
   });
 
-  test("check-out trong vòng 60 phút trước giờ tan ca -> đè leave_paid buổi chiều, hoàn 0.5", () => {
+  test("check-out sau 14h -> đè leave_paid buổi chiều, hoàn 0.5", () => {
     const result = resolveLeaveConflict({
       dateKey: DATE_KEY,
-      checkInTime: at(DATE_KEY, "13:00"), // sau 12h -> không cover morning
-      checkOutTime: at(DATE_KEY, "17:00"), // 17:30 - 60p = 16:30, 17:00 >= 16:30 -> cover afternoon
-      lastShiftEnd: "17:30",
+      checkInTime: at(DATE_KEY, "13:00"), // sau 10h -> không cover morning
+      checkOutTime: at(DATE_KEY, "15:00"), // sau 14h -> cover afternoon
       leaveStatuses: [
         {
           id: "afternoon-1",
@@ -94,12 +88,11 @@ describe("resolveLeaveConflict", () => {
     expect(result.refundAmount).toBe(0.5);
   });
 
-  test("check-out quá sớm (trước ngưỡng 60 phút) -> KHÔNG đè leave_paid buổi chiều", () => {
+  test("check-out trước/đúng 14h -> KHÔNG đè leave_paid buổi chiều", () => {
     const result = resolveLeaveConflict({
       dateKey: DATE_KEY,
       checkInTime: at(DATE_KEY, "13:00"),
-      checkOutTime: at(DATE_KEY, "16:00"), // 16:00 < 16:30 threshold
-      lastShiftEnd: "17:30",
+      checkOutTime: at(DATE_KEY, "14:00"), // đúng 14h -> chưa "sau 14h"
       leaveStatuses: [
         {
           id: "afternoon-1",
@@ -117,7 +110,6 @@ describe("resolveLeaveConflict", () => {
       dateKey: DATE_KEY,
       checkInTime: at(DATE_KEY, "08:00"),
       checkOutTime: at(DATE_KEY, "17:00"),
-      lastShiftEnd: "17:30",
       leaveStatuses: [
         { id: "full-1", period: "full", status: "leave_paid", date: at(DATE_KEY, "00:00") }
       ]
@@ -131,7 +123,6 @@ describe("resolveLeaveConflict", () => {
       dateKey: DATE_KEY,
       checkInTime: at(DATE_KEY, "08:00"),
       checkOutTime: at(DATE_KEY, "12:30"),
-      lastShiftEnd: null,
       leaveStatuses: [
         { id: "full-1", period: "full", status: "leave_paid", date: at(DATE_KEY, "00:00") }
       ]
@@ -144,7 +135,6 @@ describe("resolveLeaveConflict", () => {
       dateKey: DATE_KEY,
       checkInTime: at(DATE_KEY, "08:00"),
       checkOutTime: at(DATE_KEY, "12:30"),
-      lastShiftEnd: null,
       leaveStatuses: [
         { id: "morning-1", period: "morning", status: "leave_unpaid", date: at(DATE_KEY, "00:00") }
       ]
@@ -153,18 +143,18 @@ describe("resolveLeaveConflict", () => {
     expect(result.refundAmount).toBe(0);
   });
 
-  test("thứ 7, leave_paid 'full' bị đè: hoàn 0.5 (không phải 1, vì thứ 7 chỉ nửa công)", () => {
+  test("thứ 7, đi làm cả ngày (08h-12h) nhưng leave_paid 'full' KHÔNG bị đè vì checkout 12h chưa qua ngưỡng 14h cố định", () => {
     const result = resolveLeaveConflict({
       dateKey: SATURDAY_KEY,
       checkInTime: at(SATURDAY_KEY, "08:00"),
       checkOutTime: at(SATURDAY_KEY, "12:00"),
-      lastShiftEnd: "12:00",
       leaveStatuses: [
         { id: "full-1", period: "full", status: "leave_paid", date: at(SATURDAY_KEY, "00:00") }
       ]
     });
-    expect(result.overriddenStatusIds).toEqual(["full-1"]);
-    expect(result.refundAmount).toBe(0.5);
+    // Chỉ buổi sáng bị đè (checkIn 08:00 < 10:00), buổi chiều không đủ điều kiện (checkout 12:00 < 14:00)
+    // -> period "full" cần CẢ 2 buổi mới bị đè, nên không override.
+    expect(result).toEqual({ overriddenStatusIds: [], refundAmount: 0 });
   });
 
   test("nhiều leave status cùng lúc, cộng dồn refund đúng", () => {
@@ -172,7 +162,6 @@ describe("resolveLeaveConflict", () => {
       dateKey: DATE_KEY,
       checkInTime: at(DATE_KEY, "08:00"),
       checkOutTime: at(DATE_KEY, "17:00"),
-      lastShiftEnd: "17:30",
       leaveStatuses: [
         { id: "morning-1", period: "morning", status: "leave_paid", date: at(DATE_KEY, "00:00") },
         {

@@ -3,6 +3,7 @@ import PermissionRoleModel from "../../models/PermissionRoleModel";
 import EmployeePermissionProfileModel from "../../models/EmployeePermissionProfileModel";
 import UserInfoModel from "../../models/UserInfoModel";
 import UserDepartmentPositionModel from "../../models/UserDepartmentPositionModel";
+import DepartmentModel from "../../models/DepartmentModel";
 import { resolveEffectiveRules, buildAbility, toMongoQuery } from "../../modules/permission";
 
 function isUnconditioned(filter: Record<string, unknown>): boolean {
@@ -31,17 +32,30 @@ export async function resolveRequestApprovalCandidates(
     { _id: 1 }
   ).lean();
   const roleIds = roles.map((role: any) => role._id);
-  if (!roleIds.length) return [];
 
-  const profiles = await EmployeePermissionProfileModel.find(
-    { roleIds: { $in: roleIds }, isDeleted: false, employeeId: { $ne: targetEmployeeId } },
-    { employeeId: 1 }
-  ).lean();
-  if (!profiles.length) return [];
+  const [roleProfiles, overrideProfiles] = await Promise.all([
+    roleIds.length
+      ? EmployeePermissionProfileModel.find(
+          { roleIds: { $in: roleIds }, isDeleted: false, employeeId: { $ne: targetEmployeeId } },
+          { employeeId: 1 }
+        ).lean()
+      : Promise.resolve([]),
+    EmployeePermissionProfileModel.find(
+      {
+        overrides: { $elemMatch: { permissionCode: "request.review", status: "ALLOW" } },
+        isDeleted: false,
+        employeeId: { $ne: targetEmployeeId }
+      },
+      { employeeId: 1 }
+    ).lean()
+  ]);
 
   const candidateIds = Array.from(
-    new Set(profiles.map((profile: any) => String(profile.employeeId)))
+    new Set(
+      [...roleProfiles, ...overrideProfiles].map((profile: any) => String(profile.employeeId))
+    )
   );
+  if (!candidateIds.length) return [];
 
   const targetDepartmentIds = new Set(
     (
@@ -50,6 +64,17 @@ export async function resolveRequestApprovalCandidates(
         isDeleted: false
       }).distinct("department")
     ).map(String)
+  );
+
+  const targetDepartments = await DepartmentModel.find(
+    { _id: { $in: Array.from(targetDepartmentIds) }, isDeleted: false },
+    { manager: 1 }
+  ).lean();
+  const tier2ManagerIds = new Set(
+    targetDepartments
+      .map((department: any) => department.manager)
+      .filter(Boolean)
+      .map(String)
   );
 
   const evaluated = await Promise.all(
@@ -95,6 +120,7 @@ export async function resolveRequestApprovalCandidates(
     for (const deptId of candidateDepartmentIds) {
       if (targetDepartmentIds.has(deptId)) return 0;
     }
+    if (tier2ManagerIds.has(candidateId)) return 1;
     return isCompanyWide ? 2 : 1;
   }
 

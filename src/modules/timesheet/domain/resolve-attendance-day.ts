@@ -140,6 +140,8 @@ export interface ResolveAttendanceDayComputed {
   penalty_amount: number;
   morning_absent: boolean;
   afternoon_absent: boolean;
+  leaveMorning: boolean;
+  leaveAfternoon: boolean;
   hasIn: boolean;
   hasOut: boolean;
   missedIn: boolean;
@@ -328,6 +330,8 @@ export function resolveAttendanceDay({
     penalty_amount,
     morning_absent,
     afternoon_absent,
+    leaveMorning,
+    leaveAfternoon,
     hasIn,
     hasOut,
     missedIn,

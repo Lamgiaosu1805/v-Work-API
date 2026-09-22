@@ -34,6 +34,15 @@ export function toMongoQuery(
   return accessibleBy(ability, action).ofType(entity);
 }
 
+export function canOnSubject(
+  ability: Ability,
+  action: string,
+  entity: string,
+  doc: Record<string, unknown>
+): boolean {
+  return ability.can(action, caslSubject(entity, doc));
+}
+
 const fieldsFrom = (rule: { fields?: string[] }): string[] => rule.fields || [];
 
 export function maskFields<T extends Record<string, unknown>>(

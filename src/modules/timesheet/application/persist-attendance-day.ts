@@ -66,7 +66,16 @@ export async function persistAttendanceDay({
   const afternoonStatus = resolvePeriodStatus(computed.afternoon_absent, computed.statusMissedOut);
 
   await workDayStatusRepository.applyAttendanceDrivenStatus(
-    { userId, worksheetId, dayStart, dayEnd, morningStatus, afternoonStatus },
+    {
+      userId,
+      worksheetId,
+      dayStart,
+      dayEnd,
+      morningStatus,
+      afternoonStatus,
+      skipMorning: computed.leaveMorning,
+      skipAfternoon: computed.leaveAfternoon
+    },
     session
   );
 

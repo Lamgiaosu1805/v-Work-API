@@ -238,6 +238,38 @@ export interface ListInternalPhonesResult {
   has_previous: boolean;
 }
 
+export interface InternalGroupMember {
+  agent_id: string;
+  contact_id: string;
+  sip_user: string | null;
+}
+
+export interface InternalGroupItem {
+  _id: string;
+  group_name: string;
+  group_number: string;
+  members: InternalGroupMember[];
+  sip_members: string[] | null;
+  created_date: number;
+  last_updated_date: number;
+}
+
+export interface ListInternalGroupsParams {
+  keyword?: string;
+  page?: number;
+  size?: number;
+}
+
+export interface ListInternalGroupsResult {
+  items: InternalGroupItem[];
+  page_number: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+}
+
 interface CachedOmicallToken {
   accessToken: string;
   expiresAt: number;
@@ -444,6 +476,32 @@ export class OmicallClient {
   async listInternalPhones(params: ListInternalPhonesParams): Promise<ListInternalPhonesResult> {
     const { data } = await this.v1.get("/api/call_center/internal_phone/list", { params });
     return data?.payload;
+  }
+
+  async listInternalGroups(params: ListInternalGroupsParams): Promise<ListInternalGroupsResult> {
+    const { data } = await this.v1.get("/api/call_center/internal_group/list", { params });
+    return data?.payload;
+  }
+
+  async deleteInternalGroup(id: string): Promise<boolean> {
+    const { data } = await this.v1.delete(`/api/call_center/internal_group/delete/${id}`);
+    return data?.status_code === 9999;
+  }
+
+  async addInternalGroupMembers(groupId: string, sipUsers: string[]): Promise<boolean> {
+    const { data } = await this.v1.post("/api/call_center/internal_group/add-members", {
+      group_id: groupId,
+      sip_users: sipUsers
+    });
+    return data?.status_code === 9999;
+  }
+
+  async removeInternalGroupMembers(groupId: string, sipUsers: string[]): Promise<boolean> {
+    const { data } = await this.v1.post("/api/call_center/internal_group/remove-members", {
+      group_id: groupId,
+      sip_users: sipUsers
+    });
+    return data?.status_code === 9999;
   }
 }
 

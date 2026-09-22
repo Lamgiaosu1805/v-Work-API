@@ -8,6 +8,11 @@ import {
 } from "../application/update-hotline-config.service";
 import { listHotlineCallScripts } from "../application/list-hotline-call-scripts.service";
 import { listHotlineExtensions } from "../application/list-hotline-extensions.service";
+import { listHotlineRingGroups } from "../application/list-hotline-ring-groups.service";
+import { listInternalGroups } from "../application/list-internal-groups.service";
+import { deleteInternalGroup } from "../application/delete-internal-group.service";
+import { addInternalGroupMember } from "../application/add-internal-group-member.service";
+import { removeInternalGroupMember } from "../application/remove-internal-group-member.service";
 import { syncHotlineExtensionAssignments } from "../application/sync-hotline-extension-assignments.service";
 
 export const hotlineAdminHttpController = {
@@ -50,6 +55,35 @@ export const hotlineAdminHttpController = {
   async getHotlineExtensions(req: Request, res: Response) {
     const data = await listHotlineExtensions({ keyword: req.query.keyword as string | undefined });
     return res.status(200).json({ message: "OK", data });
+  },
+
+  async getHotlineRingGroups(req: Request, res: Response) {
+    const data = await listHotlineRingGroups({ keyword: req.query.keyword as string | undefined });
+    return res.status(200).json({ message: "OK", data });
+  },
+
+  async getInternalGroups(req: Request, res: Response) {
+    const data = await listInternalGroups({ keyword: req.query.keyword as string | undefined });
+    return res.status(200).json({ message: "OK", data });
+  },
+
+  async deleteInternalGroup(req: Request, res: Response) {
+    await deleteInternalGroup(req.params.id);
+    return res.status(200).json({ message: "Đã xoá nhóm nội bộ" });
+  },
+
+  async addInternalGroupMember(req: Request, res: Response) {
+    const { sipUser } = req.body;
+    if (!sipUser || typeof sipUser !== "string") {
+      throw new ArgumentInvalidException("sipUser là bắt buộc");
+    }
+    await addInternalGroupMember(req.params.id, sipUser);
+    return res.status(200).json({ message: "Đã thêm nhân viên vào nhóm nội bộ" });
+  },
+
+  async removeInternalGroupMember(req: Request, res: Response) {
+    await removeInternalGroupMember(req.params.id, req.params.sipUser);
+    return res.status(200).json({ message: "Đã xoá nhân viên khỏi nhóm nội bộ" });
   },
 
   async syncHotlineExtensionAssignments(req: Request, res: Response) {

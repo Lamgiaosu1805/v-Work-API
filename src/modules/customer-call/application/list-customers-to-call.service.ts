@@ -198,7 +198,8 @@ export async function listCustomersToCall(
             saleName: 1,
             callCount: 1,
             lastContactedAt: 1,
-            relationshipStatus: 1
+            relationshipStatus: 1,
+            registeredAt: 1
           }
         }
       ],

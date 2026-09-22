@@ -28,6 +28,41 @@ router.get(
 );
 
 router.get(
+  "/admin/hotline-ring-groups",
+  authenticate,
+  requirePermission("hotline.manage", "HotlineAdmin"),
+  asyncHandler(hotlineAdminHttpController.getHotlineRingGroups)
+);
+
+router.get(
+  "/admin/internal-groups",
+  authenticate,
+  requirePermission("internal_group.view", "InternalGroup"),
+  asyncHandler(hotlineAdminHttpController.getInternalGroups)
+);
+
+router.delete(
+  "/admin/internal-groups/:id",
+  authenticate,
+  requirePermission("internal_group.view", "InternalGroup"),
+  asyncHandler(hotlineAdminHttpController.deleteInternalGroup)
+);
+
+router.post(
+  "/admin/internal-groups/:id/members",
+  authenticate,
+  requirePermission("internal_group.view", "InternalGroup"),
+  asyncHandler(hotlineAdminHttpController.addInternalGroupMember)
+);
+
+router.delete(
+  "/admin/internal-groups/:id/members/:sipUser",
+  authenticate,
+  requirePermission("internal_group.view", "InternalGroup"),
+  asyncHandler(hotlineAdminHttpController.removeInternalGroupMember)
+);
+
+router.get(
   "/admin/hotlines/:phone",
   authenticate,
   requirePermission("hotline.manage", "HotlineAdmin"),

@@ -641,6 +641,14 @@ const DEFINITIONS: PermissionDef[] = [
     validDataScopePolicies: ["HOTLINE_ADMIN_ALL_COMPANY"]
   },
   {
+    code: "internal_group.view",
+    module: "crm",
+    name: "Xem nhóm nội bộ",
+    entity: "InternalGroup",
+    actionKind: "READ",
+    validDataScopePolicies: ["INTERNAL_GROUP_ALL_COMPANY"]
+  },
+  {
     code: "customer_call.update_relationship_status",
     module: "crm",
     name: "Cập nhật tình trạng kết bạn (Sale) với khách hàng",

@@ -42,4 +42,5 @@ export class SaleOmicallProfileRepository extends MongooseRepositoryBase<
       .lean();
     return docs.map((doc) => this.mapper.toDomain(doc));
   }
+
 }

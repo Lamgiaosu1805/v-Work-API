@@ -5,6 +5,7 @@ export {
 export {
   buildAbility,
   toMongoQuery,
+  canOnSubject,
   maskFields,
   assertAllowedFields,
   Ability

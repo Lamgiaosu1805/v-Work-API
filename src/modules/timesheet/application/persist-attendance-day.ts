@@ -59,7 +59,6 @@ export async function persistAttendanceDay({
     dateKey,
     checkInTime: computed.newCheckIn,
     checkOutTime: computed.newCheckOut,
-    lastShiftEnd: computed.lastShiftEnd,
     session
   });
 

@@ -175,14 +175,11 @@ export async function onApprove(request: any, session: ClientSession): Promise<v
 
   const refreshed = await WorkSheetModel.find(
     { user_id: request.user_id, date: { $gte: fromStart, $lte: toEnd }, isDeleted: false },
-    { date: 1, check_in: 1, check_out: 1, shifts: 1 }
-  )
-    .populate("shifts")
-    .session(session);
+    { date: 1, check_in: 1, check_out: 1 }
+  ).session(session);
 
   for (const w of refreshed as any[]) {
     if (!w.check_in || !w.check_out) continue;
-    const lastShift = w.shifts?.length ? w.shifts[w.shifts.length - 1] : null;
     // eslint-disable-next-line no-await-in-loop
     const { leaveRefundAmount } = await applyLeaveConflictOverride({
       userId: request.user_id.toString(),
@@ -190,7 +187,6 @@ export async function onApprove(request: any, session: ClientSession): Promise<v
       dateKey: moment.tz(w.date, TZ).format("YYYY-MM-DD"),
       checkInTime: w.check_in,
       checkOutTime: w.check_out,
-      lastShiftEnd: lastShift?.end_time ?? null,
       session
     });
     if (leaveRefundAmount > 0) {

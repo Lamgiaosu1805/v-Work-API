@@ -2,6 +2,8 @@ import moment from "moment-timezone";
 import { Period, PeriodValue } from "../../../shared-kernel/period";
 
 const TZ = "Asia/Ho_Chi_Minh";
+const MORNING_LEAVE_INVALIDATION_HOUR = 10;
+const AFTERNOON_LEAVE_INVALIDATION_HOUR = 14;
 
 export interface LeaveStatusSnapshot {
   id: string;
@@ -14,7 +16,6 @@ export interface ResolveLeaveConflictInput {
   dateKey: string;
   checkInTime: Date | null;
   checkOutTime: Date | null;
-  lastShiftEnd: string | null;
   leaveStatuses: LeaveStatusSnapshot[];
 }
 
@@ -27,25 +28,26 @@ export function resolveLeaveConflict({
   dateKey,
   checkInTime,
   checkOutTime,
-  lastShiftEnd,
   leaveStatuses
 }: ResolveLeaveConflictInput): ResolveLeaveConflictResult {
   if (!checkInTime || !checkOutTime) return { overriddenStatusIds: [], refundAmount: 0 };
   if (!leaveStatuses.length) return { overriddenStatusIds: [], refundAmount: 0 };
 
-  const noon = moment.tz(dateKey, TZ).hour(12).minute(0).second(0);
+  const morningCutoff = moment
+    .tz(dateKey, TZ)
+    .hour(MORNING_LEAVE_INVALIDATION_HOUR)
+    .minute(0)
+    .second(0);
+  const afternoonCutoff = moment
+    .tz(dateKey, TZ)
+    .hour(AFTERNOON_LEAVE_INVALIDATION_HOUR)
+    .minute(0)
+    .second(0);
   const checkIn = moment.tz(checkInTime, TZ);
   const checkOut = moment.tz(checkOutTime, TZ);
 
-  const coversMorning = checkIn.isBefore(noon);
-
-  let coversAfternoon = false;
-  if (lastShiftEnd) {
-    const [endH, endM] = lastShiftEnd.split(":").map(Number);
-    const shiftEndMoment = moment.tz(dateKey, TZ).hour(endH).minute(endM).second(0);
-    const threshold = shiftEndMoment.clone().subtract(60, "minutes");
-    coversAfternoon = checkOut.isSameOrAfter(threshold);
-  }
+  const coversMorning = checkIn.isBefore(morningCutoff);
+  const coversAfternoon = checkOut.isAfter(afternoonCutoff);
 
   const overriddenStatusIds: string[] = [];
   let refundAmount = 0;

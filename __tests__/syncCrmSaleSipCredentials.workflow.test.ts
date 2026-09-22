@@ -2,7 +2,6 @@ import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { syncCrmSaleSipCredentials } from "../src/workflows/sync-crm-sale-sip-credentials.workflow";
 import { OmicallClient } from "../src/utils/omicallClient";
-import { logger } from "../src/config/logger";
 import PermissionRoleModel from "../src/models/PermissionRoleModel";
 import EmployeePermissionProfileModel from "../src/models/EmployeePermissionProfileModel";
 import SaleOmicallProfileModel from "../src/models/SaleOmicallProfileModel";
@@ -54,7 +53,7 @@ async function createSale(username: string, fullName: string, maNv: string, emai
 }
 
 describe("syncCrmSaleSipCredentials (integration, MongoMemoryServer)", () => {
-  test("tạo agent mới trên Omicall (inviteAgent) rồi lưu credentials local — KHÔNG tìm agent có sẵn", async () => {
+  test("lấy credentials từ agent có sẵn trên Omicall (getExtensionDetail) rồi lưu local — KHÔNG tạo agent mới", async () => {
     const crmSaleRole = await PermissionRoleModel.create({
       name: "Sale CRM",
       code: "CRM_SALE",
@@ -72,58 +71,18 @@ describe("syncCrmSaleSipCredentials (integration, MongoMemoryServer)", () => {
       overrides: []
     });
 
-    const inviteAgentSpy = jest.spyOn(OmicallClient.prototype, "inviteAgent").mockResolvedValue({});
+    const inviteAgentSpy = jest.spyOn(OmicallClient.prototype, "inviteAgent");
     jest.spyOn(OmicallClient.prototype, "getExtensionDetail").mockResolvedValue({
       pbx_account: { sip_realm: "realm", sip_user: "201", sip_password: "pass201" }
     } as any);
 
     const credentials = await syncCrmSaleSipCredentials(employeeId);
 
-    expect(inviteAgentSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        identifyInfo: "sync-a@omicall.test",
-        fullName: "Sync Sale A",
-        roleName: "Sale"
-      })
-    );
+    expect(inviteAgentSpy).not.toHaveBeenCalled();
     expect(credentials).toEqual({ sipRealm: "realm", sipUser: "201", sipPassword: "pass201" });
 
     const savedProfile = await SaleOmicallProfileModel.findOne({ sale_id: employeeId }).lean();
     expect((savedProfile as any).omicall_extension).toBe("201");
-  });
-
-  test("inviteAgent Omicall lỗi -> ConflictException, không lưu profile local", async () => {
-    const crmSaleRole = await PermissionRoleModel.create({
-      name: "Sale CRM",
-      code: "CRM_SALE",
-      grants: []
-    });
-    const employeeId = await createSale(
-      "syncSaleB",
-      "Sync Sale B",
-      "NV-SYNC-B",
-      "sync-b@omicall.test"
-    );
-    await EmployeePermissionProfileModel.create({
-      employeeId,
-      roleIds: [crmSaleRole._id],
-      overrides: []
-    });
-
-    jest.spyOn(OmicallClient.prototype, "inviteAgent").mockRejectedValue({
-      response: { data: { message: "Email đã tồn tại" } },
-      message: "Request failed with status code 409"
-    });
-    const loggerErrorSpy = jest.spyOn(logger, "error").mockImplementation(() => undefined);
-
-    await expect(syncCrmSaleSipCredentials(employeeId)).rejects.toMatchObject({
-      statusCode: 409,
-      message: "Tạo tài khoản Omicall thất bại: Email đã tồn tại"
-    });
-    expect(loggerErrorSpy).toHaveBeenCalled();
-
-    const savedProfile = await SaleOmicallProfileModel.findOne({ sale_id: employeeId }).lean();
-    expect(savedProfile).toBeNull();
   });
 
   test("nhân viên không có role Sale CRM -> NotFoundException", async () => {
@@ -164,8 +123,10 @@ describe("syncCrmSaleSipCredentials (integration, MongoMemoryServer)", () => {
     });
 
     const inviteAgentSpy = jest.spyOn(OmicallClient.prototype, "inviteAgent");
+    const getExtensionDetailSpy = jest.spyOn(OmicallClient.prototype, "getExtensionDetail");
 
     await expect(syncCrmSaleSipCredentials(employeeId)).rejects.toThrow(ArgumentInvalidException);
     expect(inviteAgentSpy).not.toHaveBeenCalled();
+    expect(getExtensionDetailSpy).not.toHaveBeenCalled();
   });
 });

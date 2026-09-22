@@ -104,7 +104,6 @@ export function createOnApprove(status: string) {
         dateKey,
         checkInTime: check_in,
         checkOutTime: check_out,
-        lastShiftEnd: endTime,
         session
       });
       if (leaveRefundAmount > 0) {

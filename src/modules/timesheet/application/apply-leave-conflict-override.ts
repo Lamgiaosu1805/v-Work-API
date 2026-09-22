@@ -13,7 +13,6 @@ export interface ApplyLeaveConflictOverrideInput {
   dateKey: string;
   checkInTime: Date | null;
   checkOutTime: Date | null;
-  lastShiftEnd: string | null;
   session?: ClientSession;
 }
 
@@ -27,7 +26,6 @@ export async function applyLeaveConflictOverride({
   dateKey,
   checkInTime,
   checkOutTime,
-  lastShiftEnd,
   session
 }: ApplyLeaveConflictOverrideInput): Promise<ApplyLeaveConflictOverrideResult> {
   const dateMoment = moment.tz(dateKey, TZ).startOf("day");
@@ -44,7 +42,6 @@ export async function applyLeaveConflictOverride({
     dateKey,
     checkInTime,
     checkOutTime,
-    lastShiftEnd,
     leaveStatuses
   });
   await workDayStatusRepository.markStatusesPresent(

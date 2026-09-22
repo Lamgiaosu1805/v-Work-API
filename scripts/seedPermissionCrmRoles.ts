@@ -153,6 +153,31 @@ const SALE_MANAGER_GRANTS: PermissionGrantDoc[] = [
     fieldScopePolicyCode: null
   },
   {
+    permissionCode: "customer_call.view",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "call_log.view",
+    dataScopePolicyCode: "CALL_LOG_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "call_log.update_note",
+    dataScopePolicyCode: "CALL_LOG_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_call.initiate",
+    dataScopePolicyCode: "SALE_OMICALL_PROFILE_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_call.update_relationship_status",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
     permissionCode: "agent.view",
     dataScopePolicyCode: "AGENT_ALL_COMPANY",
     fieldScopePolicyCode: null

@@ -7,6 +7,8 @@ const DEFAULT_SHIFT_START_MINUTES = 480;
 const DEFAULT_SHIFT_END_MINUTES = 1020;
 const NOON_MINUTES = 720;
 const AFTERNOON_START_MINUTES = 780;
+const MORNING_LEAVE_INVALIDATION_HOUR = 10;
+const AFTERNOON_LEAVE_INVALIDATION_HOUR = 14;
 
 function toMinutesOfDay(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -211,18 +213,20 @@ export function resolveAttendanceDay({
   }
   if (hasIn && hasOut) {
     if (leaveMorning) {
-      const noon = moment.tz(dateKey, TZ).hour(12).minute(0).second(0);
-      if (moment.tz(newCheckIn as Date, TZ).isBefore(noon)) leaveMorning = false;
-    }
-    if (leaveAfternoon && lastShiftEnd) {
-      const [endH, endM] = lastShiftEnd.split(":").map(Number);
-      const threshold = moment
+      const morningCutoff = moment
         .tz(dateKey, TZ)
-        .hour(endH)
-        .minute(endM)
-        .second(0)
-        .subtract(60, "minutes");
-      if (moment.tz(newCheckOut as Date, TZ).isSameOrAfter(threshold)) leaveAfternoon = false;
+        .hour(MORNING_LEAVE_INVALIDATION_HOUR)
+        .minute(0)
+        .second(0);
+      if (moment.tz(newCheckIn as Date, TZ).isBefore(morningCutoff)) leaveMorning = false;
+    }
+    if (leaveAfternoon) {
+      const afternoonCutoff = moment
+        .tz(dateKey, TZ)
+        .hour(AFTERNOON_LEAVE_INVALIDATION_HOUR)
+        .minute(0)
+        .second(0);
+      if (moment.tz(newCheckOut as Date, TZ).isAfter(afternoonCutoff)) leaveAfternoon = false;
     }
   }
   const leaveDeduction = Math.min(

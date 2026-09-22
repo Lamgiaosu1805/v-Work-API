@@ -71,7 +71,6 @@ export async function recordCheckOut({
       // khai union rộng hơn cho những nơi khác của module, ép kiểu đúng thực tế tại đây.
       checkInTime: worksheet.check_in as Date | null,
       checkOutTime: now,
-      lastShiftEnd: lastShift.end_time,
       session
     });
     if (leaveRefundAmount > 0) {

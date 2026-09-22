@@ -428,7 +428,7 @@ const CustomerController = {
       }
 
       const pipeline = [
-        { $match: filter },
+        { $match: matchStage },
         { $addFields: { _sortRegisteredAt: { $ifNull: ["$registeredAt", "$createdAt"] } } },
         { $sort: { _sortRegisteredAt: -1 } },
         {

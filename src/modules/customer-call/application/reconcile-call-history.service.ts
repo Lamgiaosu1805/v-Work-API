@@ -3,16 +3,14 @@ import CallLogModel from "../../../models/CallLogModel";
 import { runInTransaction } from "../../../core/db/run-in-transaction";
 import { OmicallClient, CallTransactionDetail } from "../../../utils/omicallClient";
 import { CallLogRepository } from "../infrastructure/call-log.repository";
-import { CustomerCallStatsRepository } from "../infrastructure/customer-call-stats.repository";
 import { SaleOmicallProfileRepository } from "../infrastructure/sale-omicall-profile.repository";
 import { CallLogEntity, CallLogPayload } from "../domain/call-log.entity";
-import { CustomerCallStatsEntity } from "../domain/customer-call-stats.entity";
 import { normalizePhoneNumber } from "../domain/normalize-phone-number";
 import { resolveCustomerForCall } from "./resolve-customer-for-call";
+import { incrementCustomerCallStats } from "./increment-customer-call-stats";
 
 const omicallClient = new OmicallClient();
 const callLogRepository = new CallLogRepository();
-const customerCallStatsRepository = new CustomerCallStatsRepository();
 const saleOmicallProfileRepository = new SaleOmicallProfileRepository();
 
 const PAGE_SIZE = 50;
@@ -100,21 +98,7 @@ async function backfillTransaction(transactionId: string): Promise<void> {
     await callLogRepository.insert(callLog);
 
     if (!payload.customerId) return;
-
-    const stats = await customerCallStatsRepository.findByCustomerId(payload.customerId);
-    if (stats) {
-      stats.recordCallAttempt(payload.timeStartCall);
-      await customerCallStatsRepository.updateById(stats.id, stats);
-      return;
-    }
-
-    const statsId = new mongoose.Types.ObjectId().toString();
-    const newStats = CustomerCallStatsEntity.create({
-      id: statsId,
-      customerId: payload.customerId
-    });
-    newStats.recordCallAttempt(payload.timeStartCall);
-    await customerCallStatsRepository.insert(newStats);
+    await incrementCustomerCallStats(payload.customerId, payload.timeStartCall);
   });
 }
 

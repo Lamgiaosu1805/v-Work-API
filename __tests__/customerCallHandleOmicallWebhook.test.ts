@@ -35,7 +35,8 @@ beforeEach(async () => {
     CallLogModel.deleteMany({}),
     CustomerModel.deleteMany({}),
     AppModel.deleteMany({}),
-    SaleOmicallProfileModel.deleteMany({})
+    SaleOmicallProfileModel.deleteMany({}),
+    CustomerCallStatsModel.deleteMany({})
   ]);
 });
 
@@ -140,5 +141,45 @@ describe("handleOmicallWebhook (integration, MongoMemoryServer)", () => {
 
     const saved = await CallLogModel.findOne({ transaction_id: payload.transaction_id }).lean();
     expect(String(saved!.customer_id)).toBe(String(vnfiteCustomer._id));
+  });
+
+  test("tạo CallLog mới + có customer khớp -> tăng CustomerCallStats.callCount", async () => {
+    const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
+    const customer = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0979896589",
+      referred_by: null
+    });
+
+    const payload = basePayload({});
+    await handleOmicallWebhook(payload);
+
+    const stats = await CustomerCallStatsModel.findOne({ customer_id: customer._id }).lean();
+    expect(stats).not.toBeNull();
+    expect(stats!.call_count).toBe(1);
+  });
+
+  test("webhook gọi lại lần 2 cho CÙNG transaction_id (update CDR) -> KHÔNG tăng thêm callCount", async () => {
+    const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
+    const customer = await CustomerModel.create({
+      app_id: app._id,
+      phone_number: "0979896589",
+      referred_by: null
+    });
+
+    const payload = basePayload({});
+    await handleOmicallWebhook(payload);
+    await handleOmicallWebhook({ ...payload, bill_sec: 12, hangup_cause: "NORMAL_CLEARING" });
+
+    const stats = await CustomerCallStatsModel.findOne({ customer_id: customer._id }).lean();
+    expect(stats!.call_count).toBe(1);
+  });
+
+  test("không khớp được customer nào -> không tạo CustomerCallStats", async () => {
+    const payload = basePayload({ phone_number: "0900000000" });
+    await handleOmicallWebhook(payload);
+
+    const count = await CustomerCallStatsModel.countDocuments({});
+    expect(count).toBe(0);
   });
 });

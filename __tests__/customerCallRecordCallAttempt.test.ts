@@ -99,7 +99,7 @@ beforeEach(async () => {
 });
 
 describe("recordCallAttempt (integration, MongoMemoryServer)", () => {
-  test("sale trong scope, khách chưa từng gọi -> tạo mới stats, callCount=1", async () => {
+  test("sale trong scope -> không throw, KHÔNG đụng vào CustomerCallStats (callCount chỉ tăng qua webhook)", async () => {
     const saleA = await createSale("saleAttemptA", "Sale Attempt A", "NV-ATT-A");
     await seedCustomerCallPermission(saleA.employeeId);
     const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
@@ -111,15 +111,13 @@ describe("recordCallAttempt (integration, MongoMemoryServer)", () => {
     });
 
     const abilityA = await resolveEffectiveAbility(saleA.employeeId);
-    const result = await recordCallAttempt(abilityA, String(customer._id));
+    await expect(recordCallAttempt(abilityA, String(customer._id))).resolves.toBeUndefined();
 
-    expect(result.callCount).toBe(1);
     const stats = await CustomerCallStatsModel.findOne({ customer_id: customer._id });
-    expect(stats!.call_count).toBe(1);
-    expect(stats!.last_contacted_at).toBeTruthy();
+    expect(stats).toBeNull();
   });
 
-  test("gọi lần 2 -> callCount tăng lên 2, KHÔNG tạo bản ghi stats mới", async () => {
+  test("gọi lại nhiều lần cho cùng khách -> vẫn không tạo/tăng CustomerCallStats", async () => {
     const saleA = await createSale("saleAttemptB", "Sale Attempt B", "NV-ATT-B");
     await seedCustomerCallPermission(saleA.employeeId);
     const app = await AppModel.create({ name: "TikLuy", code: "tikluy" });
@@ -132,15 +130,13 @@ describe("recordCallAttempt (integration, MongoMemoryServer)", () => {
 
     const abilityA = await resolveEffectiveAbility(saleA.employeeId);
     await recordCallAttempt(abilityA, String(customer._id));
-    const result = await recordCallAttempt(abilityA, String(customer._id));
+    await recordCallAttempt(abilityA, String(customer._id));
 
-    expect(result.callCount).toBe(2);
     const allStats = await CustomerCallStatsModel.find({ customer_id: customer._id });
-    expect(allStats).toHaveLength(1);
-    expect(allStats[0].call_count).toBe(2);
+    expect(allStats).toHaveLength(0);
   });
 
-  test("sale ngoài scope (khách của sale khác) -> ForbiddenException, KHÔNG tạo/tăng stats", async () => {
+  test("sale ngoài scope (khách của sale khác) -> ForbiddenException", async () => {
     const saleA = await createSale("saleAttemptC", "Sale Attempt C", "NV-ATT-C");
     const saleB = await createSale("saleAttemptD", "Sale Attempt D", "NV-ATT-D");
     await seedCustomerCallPermission(saleA.employeeId);
@@ -156,9 +152,6 @@ describe("recordCallAttempt (integration, MongoMemoryServer)", () => {
     await expect(recordCallAttempt(abilityA, String(customer._id))).rejects.toThrow(
       ForbiddenException
     );
-
-    const stats = await CustomerCallStatsModel.findOne({ customer_id: customer._id });
-    expect(stats).toBeNull();
   });
 
   test("customerId không tồn tại -> NotFoundException", async () => {

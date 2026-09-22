@@ -4,6 +4,7 @@ import { SaleOmicallProfileRepository } from "../infrastructure/sale-omicall-pro
 import { CallLogEntity, CallLogPayload, CallLogDirection } from "../domain/call-log.entity";
 import { normalizePhoneNumber } from "../domain/normalize-phone-number";
 import { resolveCustomerForCall } from "./resolve-customer-for-call";
+import { incrementCustomerCallStats } from "./increment-customer-call-stats";
 import { getIO } from "../../../sockets/ioRegistry";
 
 const callLogRepository = new CallLogRepository();
@@ -88,6 +89,10 @@ export async function handleOmicallWebhook(payload: OmicallWebhookPayload): Prom
     callLogId = new mongoose.Types.ObjectId().toString();
     const callLog = CallLogEntity.create({ id: callLogId, ...callLogPayload });
     await callLogRepository.insert(callLog);
+
+    if (callLogPayload.customerId) {
+      await incrementCustomerCallStats(callLogPayload.customerId, callLogPayload.timeStartCall);
+    }
   }
 
   if (callLogPayload.timeEndCall && callLogPayload.saleId) {

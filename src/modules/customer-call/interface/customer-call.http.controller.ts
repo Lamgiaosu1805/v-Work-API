@@ -92,8 +92,8 @@ export const customerCallHttpController = {
   },
 
   async recordCallAttempt(req: Request, res: Response) {
-    const data = await recordCallAttempt(req.permissionAbility!, req.params.id);
-    return res.status(200).json({ message: "OK", data });
+    await recordCallAttempt(req.permissionAbility!, req.params.id);
+    return res.status(200).json({ message: "OK" });
   },
 
   async rateCallLog(req: Request, res: Response) {

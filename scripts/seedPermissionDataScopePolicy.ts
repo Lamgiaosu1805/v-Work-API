@@ -101,7 +101,8 @@ const GENERIC_ALL_COMPANY_ENTITIES: Record<string, string> = {
   AI_CHAT_ALL_COMPANY: "AiChat",
   APP_INTEGRATION_ALL_COMPANY: "AppIntegration",
   SALE_OMICALL_PROFILE_ALL_COMPANY: "SaleOmicallProfile",
-  HOTLINE_ADMIN_ALL_COMPANY: "HotlineAdmin"
+  HOTLINE_ADMIN_ALL_COMPANY: "HotlineAdmin",
+  PERMISSION_SYSTEM_ALL_COMPANY: "PermissionSystem"
 };
 
 const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [

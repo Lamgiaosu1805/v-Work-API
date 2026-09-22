@@ -61,9 +61,9 @@ const DEPT_MANAGER_GRANTS: PermissionGrantDoc[] = [
 async function upsertRole(): Promise<void> {
   const existing = await PermissionRoleModel.findOne({ code: ROLE_CODE });
   const payload = {
-    name: "Trưởng phòng (dùng chung mọi phòng ban)",
+    name: "Trưởng phòng",
     description:
-      "Role hệ thống — quyền quản lý nhân sự/file nội bộ/báo cáo tuần trong PHẠM VI PHÒNG BAN MÌNH, cộng quyền xem read-only dữ liệu tham chiếu chung công ty.",
+      "Quản lý nhân sự/file nội bộ/báo cáo tuần trong phòng ban mình, xem read-only dữ liệu chung công ty.",
     isSystemRole: true,
     grants: DEPT_MANAGER_GRANTS,
     isDeleted: false

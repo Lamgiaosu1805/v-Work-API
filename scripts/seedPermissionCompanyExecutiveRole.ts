@@ -61,9 +61,8 @@ const COMPANY_EXECUTIVE_GRANTS: PermissionGrantDoc[] = [
 async function upsertRole(): Promise<void> {
   const existing = await PermissionRoleModel.findOne({ code: ROLE_CODE });
   const payload = {
-    name: "Ban Giám đốc / CEO (chỉ xem)",
-    description:
-      "Role hệ thống — quyền xem (view-only) dữ liệu tổng quan HRM + CRM ở phạm vi toàn công ty, không có quyền tạo/sửa/xoá.",
+    name: "Ban Giám đốc / CEO",
+    description: "Xem dữ liệu tổng quan HRM + CRM toàn công ty, không có quyền tạo/sửa/xoá.",
     isSystemRole: true,
     grants: COMPANY_EXECUTIVE_GRANTS,
     isDeleted: false

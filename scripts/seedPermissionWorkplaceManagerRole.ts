@@ -96,9 +96,8 @@ const WORKPLACE_MANAGER_GRANTS: PermissionGrantDoc[] = [
 async function upsertRole(): Promise<void> {
   const existing = await PermissionRoleModel.findOne({ code: ROLE_CODE });
   const payload = {
-    name: "Quản lý Workplace (toàn công ty)",
-    description:
-      "Role hệ thống — toàn bộ quyền quản lý Workplace ở phạm vi công ty (KPI, bảng tin, thư mục dùng chung, lịch sử in), trừ quyền tự phục vụ cá nhân (đã có ở EMPLOYEE_BASELINE).",
+    name: "Quản lý Workplace",
+    description: "Quản lý Workplace toàn công ty: KPI, bảng tin, thư mục dùng chung, lịch sử in.",
     isSystemRole: true,
     grants: WORKPLACE_MANAGER_GRANTS,
     isDeleted: false

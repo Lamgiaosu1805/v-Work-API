@@ -180,8 +180,7 @@ async function upsertRole(): Promise<void> {
   const existing = await PermissionRoleModel.findOne({ code: ROLE_CODE });
   const payload = {
     name: "HR Manager",
-    description:
-      "Role hệ thống — toàn bộ quyền quản lý HRM ở phạm vi công ty (tạo/sửa/xoá/duyệt), trừ quyền tự phục vụ cá nhân (đã có ở EMPLOYEE_BASELINE).",
+    description: "Toàn quyền quản lý HRM công ty: tạo/sửa/xoá/duyệt.",
     isSystemRole: true,
     grants: HRM_MANAGER_GRANTS,
     isDeleted: false

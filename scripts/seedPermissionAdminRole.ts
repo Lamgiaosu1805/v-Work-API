@@ -43,9 +43,8 @@ async function buildFullGrants(): Promise<PermissionGrantDoc[]> {
 async function upsertRole(grants: PermissionGrantDoc[]): Promise<mongoose.Types.ObjectId> {
   const existing = await PermissionRoleModel.findOne({ code: ROLE_CODE });
   const payload = {
-    name: "Quản trị hệ thống (toàn quyền)",
-    description:
-      "Role hệ thống — đủ toàn bộ permission ở scope rộng nhất, gán sẵn cho admin để tránh bootstrap deadlock khi bật requirePermission.",
+    name: "Quản trị hệ thống",
+    description: "Toàn quyền hệ thống, gán sẵn cho admin để tránh bootstrap deadlock.",
     isSystemRole: true,
     grants,
     isDeleted: false

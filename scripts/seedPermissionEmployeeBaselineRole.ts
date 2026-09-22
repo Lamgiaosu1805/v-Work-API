@@ -71,9 +71,9 @@ const BASELINE_GRANTS: PermissionGrantDoc[] = [
 async function upsertRole(): Promise<void> {
   const existing = await PermissionRoleModel.findOne({ code: ROLE_CODE });
   const payload = {
-    name: "Nhân viên (mặc định)",
+    name: "Nhân viên",
     description:
-      "Role hệ thống — quyền tự-phục-vụ tối thiểu mà mọi nhân viên đều cần, không phụ thuộc module_access: tạo/xem/huỷ đơn từ của chính mình, xem hồ sơ chính mình, xem bảng công của chính mình, xem/bình luận bảng tin công ty.",
+      "Quyền tự phục vụ tối thiểu cho mọi nhân viên: đơn từ, hồ sơ, bảng công, bảng tin của chính mình.",
     isSystemRole: true,
     grants: BASELINE_GRANTS,
     isDeleted: false

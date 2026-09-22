@@ -1,5 +1,6 @@
 import express from "express";
-import { authenticate, isAdmin } from "../../../middlewares/authMiddleware";
+import { authenticate } from "../../../middlewares/authMiddleware";
+import { requirePermission } from "../../../core/authorization/require-permission.middleware";
 import { asyncHandler } from "../../../core/http/async-handler";
 import { permissionHttpController } from "./permission.http.controller";
 
@@ -7,9 +8,10 @@ const router = express.Router();
 
 router.get("/me", authenticate, asyncHandler(permissionHttpController.getMyEffectivePermissions));
 
-router.use(authenticate, isAdmin);
+router.use(authenticate, requirePermission("permission_system.manage", "PermissionSystem"));
 
 router.get("/roles", asyncHandler(permissionHttpController.listRoles));
+router.patch("/roles/:id/bulk-assign", asyncHandler(permissionHttpController.bulkAssignRole));
 router.get(
   "/roles/:id/deletion-impact",
   asyncHandler(permissionHttpController.getRoleDeletionImpact)

@@ -329,19 +329,19 @@ async function seed(): Promise<void> {
   const saleRoleId = await upsertRole(
     SALE_ROLE_CODE,
     "Sale CRM",
-    "Role hệ thống — nhân viên sale CRM, chỉ xem/thao tác dữ liệu khách hàng do mình phụ trách.",
+    "Xem/thao tác dữ liệu khách hàng do mình phụ trách.",
     SALE_GRANTS
   );
   const saleManagerRoleId = await upsertRole(
     SALE_MANAGER_ROLE_CODE,
     "Sale CRM Manager",
-    "Role hệ thống — quản lý CRM, xem/quản lý toàn bộ dữ liệu khách hàng công ty.",
+    "Quản lý toàn bộ dữ liệu khách hàng công ty.",
     SALE_MANAGER_GRANTS
   );
   await upsertRole(
     TEAM_LEAD_ROLE_CODE,
     "Sale CRM Team Lead",
-    "Role hệ thống — trưởng nhóm sale CRM, xem/gọi khách hàng trong phạm vi cùng phòng ban.",
+    "Xem/gọi khách hàng trong phạm vi cùng phòng ban.",
     TEAM_LEAD_GRANTS
   );
 

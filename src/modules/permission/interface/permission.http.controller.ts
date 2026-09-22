@@ -9,6 +9,7 @@ import { getRoleDeletionImpact } from "../application/get-role-deletion-impact.s
 import { listEmployeesForPermission } from "../application/list-employees-for-permission.service";
 import { getEmployeePermissionProfile } from "../application/get-employee-permission-profile.service";
 import { updateEmployeePermission } from "../application/update-employee-permission.service";
+import { bulkAssignRole } from "../application/bulk-assign-role.service";
 import { listDataScopePolicies } from "../application/list-data-scope-policies.service";
 import { getDataScopePolicyById } from "../application/get-data-scope-policy-by-id.service";
 import { createDataScopePolicy } from "../application/create-data-scope-policy.service";
@@ -74,6 +75,14 @@ export const permissionHttpController = {
     return res
       .status(200)
       .json({ message: "Cập nhật phân quyền thành công", data: profile.getProps() });
+  },
+
+  async bulkAssignRole(req: Request, res: Response) {
+    const { changes } = req.body;
+    const result = await bulkAssignRole(req.params.id, changes);
+    return res
+      .status(200)
+      .json({ message: `Đã cập nhật ${result.updated} nhân viên`, data: result });
   },
 
   async listDataScopePolicies(req: Request, res: Response) {

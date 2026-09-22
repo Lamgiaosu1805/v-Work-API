@@ -202,6 +202,14 @@ const DEFINITIONS: PermissionDef[] = [
     validDataScopePolicies: ["SHIFT_CONFIG_ALL_COMPANY"]
   },
   {
+    code: "permission_system.manage",
+    module: "hrm",
+    name: "Quản lý hệ phân quyền",
+    entity: "PermissionSystem",
+    actionKind: "STRUCTURAL",
+    validDataScopePolicies: ["PERMISSION_SYSTEM_ALL_COMPANY"]
+  },
+  {
     code: "payroll.view",
     module: "hrm",
     name: "Xem bảng lương",

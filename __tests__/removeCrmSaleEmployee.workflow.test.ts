@@ -54,7 +54,7 @@ async function createSale(username: string, fullName: string, maNv: string, emai
 }
 
 describe("removeCrmSaleEmployee (integration, MongoMemoryServer)", () => {
-  test("gỡ nhân viên -> gọi deleteAgent Omicall, xoá SaleOmicallProfile, GIỮ NGUYÊN role/email/khách hàng đang phụ trách", async () => {
+  test("gỡ nhân viên -> xoá SaleOmicallProfile local, KHÔNG gọi Omicall, GIỮ NGUYÊN role/email/khách hàng đang phụ trách", async () => {
     const crmSaleRole = await PermissionRoleModel.create({
       name: "Sale CRM",
       code: "CRM_SALE",
@@ -88,7 +88,7 @@ describe("removeCrmSaleEmployee (integration, MongoMemoryServer)", () => {
 
     await removeCrmSaleEmployee(sale.employeeId);
 
-    expect(deleteAgentSpy).toHaveBeenCalledWith("a@omicall.test");
+    expect(deleteAgentSpy).not.toHaveBeenCalled();
 
     const omicallProfile = await SaleOmicallProfileModel.findOne({
       sale_id: sale.employeeId
@@ -107,34 +107,7 @@ describe("removeCrmSaleEmployee (integration, MongoMemoryServer)", () => {
     expect(String((updatedCustomer as any).referred_by)).toBe(sale.employeeId);
   });
 
-  test("deleteAgent Omicall lỗi -> ném ConflictException, KHÔNG xoá SaleOmicallProfile local", async () => {
-    const sale = await createSale("removeSaleB", "Remove Sale B", "NV-REMOVE-B", "b@omicall.test");
-
-    await SaleOmicallProfileModel.create({
-      sale_id: sale.employeeId,
-      sip_realm: "realm",
-      omicall_extension: "102",
-      sip_password: "pass",
-      omicall_email: "b@omicall.test"
-    });
-
-    jest.spyOn(OmicallClient.prototype, "deleteAgent").mockRejectedValue({
-      response: { data: { message: "Agent không tồn tại" } },
-      message: "Request failed with status code 404"
-    });
-
-    await expect(removeCrmSaleEmployee(sale.employeeId)).rejects.toMatchObject({
-      statusCode: 409,
-      message: "Xóa tài khoản Omicall thất bại: Agent không tồn tại"
-    });
-
-    const omicallProfile = await SaleOmicallProfileModel.findOne({
-      sale_id: sale.employeeId
-    }).lean();
-    expect((omicallProfile as any).isDeleted).toBe(false);
-  });
-
-  test("nhân viên chưa có SaleOmicallProfile -> không gọi Omicall, không lỗi", async () => {
+  test("nhân viên chưa có SaleOmicallProfile -> không lỗi, không gọi Omicall", async () => {
     const sale = await createSale("removeSaleC", "Remove Sale C", "NV-REMOVE-C", "c@omicall.test");
 
     const deleteAgentSpy = jest.spyOn(OmicallClient.prototype, "deleteAgent").mockResolvedValue({});

@@ -665,6 +665,12 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
     fields: []
   },
   {
+    entity: "InternalGroup",
+    subjectAttributes: [],
+    resourceAttributes: [],
+    fields: []
+  },
+  {
     entity: "Transaction",
     subjectAttributes: [],
     resourceAttributes: [],

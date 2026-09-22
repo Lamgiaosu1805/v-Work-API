@@ -247,6 +247,8 @@ export interface InternalGroupItem {
   group_name: string;
   group_number: string;
   members: InternalGroupMember[];
+  created_date: number;
+  last_updated_date: number;
 }
 
 export interface ListInternalGroupsParams {
@@ -476,6 +478,11 @@ export class OmicallClient {
   async listInternalGroups(params: ListInternalGroupsParams): Promise<ListInternalGroupsResult> {
     const { data } = await this.v1.get("/api/call_center/internal_group/list", { params });
     return data?.payload;
+  }
+
+  async deleteInternalGroup(id: string): Promise<boolean> {
+    const { data } = await this.v1.delete(`/api/call_center/internal_group/delete/${id}`);
+    return data?.status_code === 9999;
   }
 }
 

@@ -9,6 +9,8 @@ import {
 import { listHotlineCallScripts } from "../application/list-hotline-call-scripts.service";
 import { listHotlineExtensions } from "../application/list-hotline-extensions.service";
 import { listHotlineRingGroups } from "../application/list-hotline-ring-groups.service";
+import { listInternalGroups } from "../application/list-internal-groups.service";
+import { deleteInternalGroup } from "../application/delete-internal-group.service";
 import { syncHotlineExtensionAssignments } from "../application/sync-hotline-extension-assignments.service";
 
 export const hotlineAdminHttpController = {
@@ -56,6 +58,16 @@ export const hotlineAdminHttpController = {
   async getHotlineRingGroups(req: Request, res: Response) {
     const data = await listHotlineRingGroups({ keyword: req.query.keyword as string | undefined });
     return res.status(200).json({ message: "OK", data });
+  },
+
+  async getInternalGroups(req: Request, res: Response) {
+    const data = await listInternalGroups({ keyword: req.query.keyword as string | undefined });
+    return res.status(200).json({ message: "OK", data });
+  },
+
+  async deleteInternalGroup(req: Request, res: Response) {
+    await deleteInternalGroup(req.params.id);
+    return res.status(200).json({ message: "Đã xoá nhóm nội bộ" });
   },
 
   async syncHotlineExtensionAssignments(req: Request, res: Response) {

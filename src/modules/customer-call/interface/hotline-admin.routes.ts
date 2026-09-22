@@ -35,6 +35,20 @@ router.get(
 );
 
 router.get(
+  "/admin/internal-groups",
+  authenticate,
+  requirePermission("internal_group.view", "InternalGroup"),
+  asyncHandler(hotlineAdminHttpController.getInternalGroups)
+);
+
+router.delete(
+  "/admin/internal-groups/:id",
+  authenticate,
+  requirePermission("internal_group.view", "InternalGroup"),
+  asyncHandler(hotlineAdminHttpController.deleteInternalGroup)
+);
+
+router.get(
   "/admin/hotlines/:phone",
   authenticate,
   requirePermission("hotline.manage", "HotlineAdmin"),

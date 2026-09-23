@@ -54,8 +54,8 @@ const AuthController = {
 
       res.status(200).json({
         message: "Đăng nhập thành công",
-        access_token: accessToken,
-        refresh_token: refreshToken,
+        accessToken,
+        refreshToken,
         account: {
           id: account._id,
           username: account.username,

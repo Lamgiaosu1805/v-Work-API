@@ -110,7 +110,12 @@ describe("getSipCredentials", () => {
     } as any);
 
     const result = await getSipCredentials(employeeId, true);
-    expect(result).toEqual({ sipRealm: "realm-x", sipUser: "110", sipPassword: "pass123" });
+    expect(result).toEqual({
+      sipRealm: "realm-x",
+      sipUser: "110",
+      sipPassword: "pass123",
+      hotlineNumbers: ["842871008617"]
+    });
 
     const saved = await SaleOmicallProfileModel.findOne({ sale_id: employeeId }).lean();
     expect((saved as any).hotline_numbers).toEqual(["842871008617"]);
@@ -159,7 +164,12 @@ describe("getSipCredentials", () => {
     } as any);
 
     const result = await getSipCredentials(newEmployeeId, true);
-    expect(result).toEqual({ sipRealm: "realm-new", sipUser: "111", sipPassword: "pass-new" });
+    expect(result).toEqual({
+      sipRealm: "realm-new",
+      sipUser: "111",
+      sipPassword: "pass-new",
+      hotlineNumbers: []
+    });
 
     const oldProfile = await SaleOmicallProfileModel.findOne({ sale_id: oldEmployeeId }).lean();
     expect((oldProfile as any).isDeleted).toBe(true);

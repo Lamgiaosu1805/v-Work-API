@@ -79,7 +79,12 @@ describe("syncCrmSaleSipCredentials (integration, MongoMemoryServer)", () => {
     const credentials = await syncCrmSaleSipCredentials(employeeId);
 
     expect(inviteAgentSpy).not.toHaveBeenCalled();
-    expect(credentials).toEqual({ sipRealm: "realm", sipUser: "201", sipPassword: "pass201" });
+    expect(credentials).toEqual({
+      sipRealm: "realm",
+      sipUser: "201",
+      sipPassword: "pass201",
+      hotlineNumbers: []
+    });
 
     const savedProfile = await SaleOmicallProfileModel.findOne({ sale_id: employeeId }).lean();
     expect((savedProfile as any).omicall_extension).toBe("201");

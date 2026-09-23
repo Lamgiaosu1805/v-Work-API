@@ -12,6 +12,7 @@ export interface SipCredentials {
   sipRealm: string;
   sipUser: string;
   sipPassword: string;
+  hotlineNumbers: string[];
 }
 
 export async function getSipCredentials(
@@ -23,7 +24,8 @@ export async function getSipCredentials(
     return {
       sipRealm: existing.sipRealm,
       sipUser: existing.omicallExtension,
-      sipPassword: existing.sipPassword
+      sipPassword: existing.sipPassword,
+      hotlineNumbers: existing.hotlineNumbers
     };
   }
 
@@ -47,7 +49,8 @@ export async function getSipCredentials(
   const credentials: SipCredentials = {
     sipRealm: detail.pbx_account.sip_realm,
     sipUser: detail.pbx_account.sip_user,
-    sipPassword: detail.pbx_account.sip_password
+    sipPassword: detail.pbx_account.sip_password,
+    hotlineNumbers: detail.hotlines ?? []
   };
 
   const conflictingProfile = await saleOmicallProfileRepository.findByExtension(

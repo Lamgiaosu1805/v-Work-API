@@ -11,6 +11,7 @@ export interface ListInternalGroupsFilters {
 export interface InternalGroupMemberOption {
   fullName: string;
   maNv: string;
+  sipUser: string;
 }
 
 export interface InternalGroupOption {
@@ -39,15 +40,15 @@ export async function listInternalGroups(
   ]);
   const groups = result.items ?? [];
 
-  const emailByAgentId = new Map(
-    Array.from(agentsByEmail.values()).map((agent) => [agent.id, agent.email.toLowerCase()])
+  const agentByAgentId = new Map(
+    Array.from(agentsByEmail.values()).map((agent) => [agent.id, agent])
   );
 
   const allEmails = Array.from(
     new Set(
       groups.flatMap((group) =>
         (group.members ?? [])
-          .map((member) => emailByAgentId.get(member.agent_id))
+          .map((member) => agentByAgentId.get(member.agent_id)?.email?.toLowerCase())
           .filter((email): email is string => Boolean(email))
       )
     )
@@ -68,10 +69,11 @@ export async function listInternalGroups(
   const items: InternalGroupOption[] = groups.map((group) => {
     const members: InternalGroupMemberOption[] = [];
     (group.members ?? []).forEach((member) => {
-      const email = emailByAgentId.get(member.agent_id);
+      const agent = agentByAgentId.get(member.agent_id);
+      const email = agent?.email?.toLowerCase();
       const userInfo = email ? userInfoByEmail.get(email) : undefined;
-      if (!userInfo || !userInfo.maNv) return;
-      members.push(userInfo);
+      if (!userInfo || !userInfo.maNv || !agent?.pbx_account?.sip_user) return;
+      members.push({ ...userInfo, sipUser: agent.pbx_account.sip_user });
     });
 
     return {

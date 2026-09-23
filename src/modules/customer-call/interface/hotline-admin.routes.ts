@@ -55,6 +55,13 @@ router.post(
   asyncHandler(hotlineAdminHttpController.addInternalGroupMember)
 );
 
+router.delete(
+  "/admin/internal-groups/:id/members/:sipUser",
+  authenticate,
+  requirePermission("internal_group.view", "InternalGroup"),
+  asyncHandler(hotlineAdminHttpController.removeInternalGroupMember)
+);
+
 router.get(
   "/admin/hotlines/:phone",
   authenticate,

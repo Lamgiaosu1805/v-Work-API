@@ -495,6 +495,14 @@ export class OmicallClient {
     });
     return data?.status_code === 9999;
   }
+
+  async removeInternalGroupMembers(groupId: string, sipUsers: string[]): Promise<boolean> {
+    const { data } = await this.v1.post("/api/call_center/internal_group/remove-members", {
+      group_id: groupId,
+      sip_users: sipUsers
+    });
+    return data?.status_code === 9999;
+  }
 }
 
 export function extractOmicallErrorMessage(error: unknown): string {

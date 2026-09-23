@@ -12,6 +12,7 @@ import { listHotlineRingGroups } from "../application/list-hotline-ring-groups.s
 import { listInternalGroups } from "../application/list-internal-groups.service";
 import { deleteInternalGroup } from "../application/delete-internal-group.service";
 import { addInternalGroupMember } from "../application/add-internal-group-member.service";
+import { removeInternalGroupMember } from "../application/remove-internal-group-member.service";
 import { syncHotlineExtensionAssignments } from "../application/sync-hotline-extension-assignments.service";
 
 export const hotlineAdminHttpController = {
@@ -78,6 +79,11 @@ export const hotlineAdminHttpController = {
     }
     await addInternalGroupMember(req.params.id, sipUser);
     return res.status(200).json({ message: "Đã thêm nhân viên vào nhóm nội bộ" });
+  },
+
+  async removeInternalGroupMember(req: Request, res: Response) {
+    await removeInternalGroupMember(req.params.id, req.params.sipUser);
+    return res.status(200).json({ message: "Đã xoá nhân viên khỏi nhóm nội bộ" });
   },
 
   async syncHotlineExtensionAssignments(req: Request, res: Response) {

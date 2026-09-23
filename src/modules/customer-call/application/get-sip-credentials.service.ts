@@ -62,7 +62,7 @@ export async function getSipCredentials(
       sipRealm: credentials.sipRealm,
       omicallExtension: credentials.sipUser,
       sipPassword: credentials.sipPassword,
-      omicallAgentId: existing.omicallAgentId,
+      omicallAgentId: detail.uuid ?? existing.omicallAgentId,
       omicallEmail: email,
       hotlineNumbers: detail.hotlines ?? []
     });
@@ -77,6 +77,7 @@ export async function getSipCredentials(
     sipRealm: credentials.sipRealm,
     omicallExtension: credentials.sipUser,
     sipPassword: credentials.sipPassword,
+    omicallAgentId: detail.uuid ?? null,
     omicallEmail: email,
     hotlineNumbers: detail.hotlines ?? []
   });

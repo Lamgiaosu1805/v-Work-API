@@ -240,6 +240,8 @@ export interface ListInternalPhonesResult {
 
 export interface InternalGroupMember {
   agent_id: string;
+  contact_id: string;
+  sip_user: string | null;
 }
 
 export interface InternalGroupItem {
@@ -247,6 +249,7 @@ export interface InternalGroupItem {
   group_name: string;
   group_number: string;
   members: InternalGroupMember[];
+  sip_members: string[] | null;
   created_date: number;
   last_updated_date: number;
 }
@@ -482,6 +485,14 @@ export class OmicallClient {
 
   async deleteInternalGroup(id: string): Promise<boolean> {
     const { data } = await this.v1.delete(`/api/call_center/internal_group/delete/${id}`);
+    return data?.status_code === 9999;
+  }
+
+  async addInternalGroupMembers(groupId: string, sipUsers: string[]): Promise<boolean> {
+    const { data } = await this.v1.post("/api/call_center/internal_group/add-members", {
+      group_id: groupId,
+      sip_users: sipUsers
+    });
     return data?.status_code === 9999;
   }
 }

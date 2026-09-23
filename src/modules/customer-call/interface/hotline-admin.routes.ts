@@ -48,6 +48,13 @@ router.delete(
   asyncHandler(hotlineAdminHttpController.deleteInternalGroup)
 );
 
+router.post(
+  "/admin/internal-groups/:id/members",
+  authenticate,
+  requirePermission("internal_group.view", "InternalGroup"),
+  asyncHandler(hotlineAdminHttpController.addInternalGroupMember)
+);
+
 router.get(
   "/admin/hotlines/:phone",
   authenticate,

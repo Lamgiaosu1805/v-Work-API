@@ -1,9 +1,8 @@
 import { OmicallClient } from "../../../utils/omicallClient";
 import UserInfoModel from "../../../models/UserInfoModel";
-import { SaleOmicallProfileRepository } from "../infrastructure/sale-omicall-profile.repository";
+import { listOmicallAgentsByEmail } from "./list-omicall-agents.service";
 
 const omicallClient = new OmicallClient();
-const saleOmicallProfileRepository = new SaleOmicallProfileRepository();
 
 export interface ListInternalGroupsFilters {
   keyword?: string;
@@ -30,35 +29,38 @@ export interface ListInternalGroupsResult {
 export async function listInternalGroups(
   filters: ListInternalGroupsFilters
 ): Promise<ListInternalGroupsResult> {
-  const result = await omicallClient.listInternalGroups({
-    keyword: filters.keyword,
-    page: 1,
-    size: 200
-  });
+  const [result, agentsByEmail] = await Promise.all([
+    omicallClient.listInternalGroups({
+      keyword: filters.keyword,
+      page: 1,
+      size: 200
+    }),
+    listOmicallAgentsByEmail()
+  ]);
   const groups = result.items ?? [];
 
-  const allAgentIds = Array.from(
-    new Set(groups.flatMap((group) => (group.members ?? []).map((member) => member.agent_id)))
-  ).filter(Boolean);
-
-  const profiles = allAgentIds.length
-    ? await saleOmicallProfileRepository.findManyByAgentIds(allAgentIds)
-    : [];
-  const saleIdByAgentId = new Map(
-    profiles
-      .filter((profile) => profile.omicallAgentId)
-      .map((profile) => [profile.omicallAgentId as string, profile.saleId])
+  const emailByAgentId = new Map(
+    Array.from(agentsByEmail.values()).map((agent) => [agent.id, agent.email.toLowerCase()])
   );
 
-  const saleIds = Array.from(new Set(profiles.map((profile) => profile.saleId)));
-  const userInfos = saleIds.length
-    ? await UserInfoModel.find({ _id: { $in: saleIds }, isDeleted: false })
-        .select("full_name ma_nv")
+  const allEmails = Array.from(
+    new Set(
+      groups.flatMap((group) =>
+        (group.members ?? [])
+          .map((member) => emailByAgentId.get(member.agent_id))
+          .filter((email): email is string => Boolean(email))
+      )
+    )
+  );
+
+  const userInfos = allEmails.length
+    ? await UserInfoModel.find({ email: { $in: allEmails }, isDeleted: false })
+        .select("full_name ma_nv email")
         .lean()
     : [];
-  const userInfoBySaleId = new Map(
-    userInfos.map((userInfo: { _id: unknown; full_name?: string; ma_nv?: string }) => [
-      String(userInfo._id),
+  const userInfoByEmail = new Map(
+    userInfos.map((userInfo: { full_name?: string; ma_nv?: string; email?: string }) => [
+      (userInfo.email ?? "").toLowerCase(),
       { fullName: userInfo.full_name ?? "", maNv: userInfo.ma_nv ?? "" }
     ])
   );
@@ -66,8 +68,8 @@ export async function listInternalGroups(
   const items: InternalGroupOption[] = groups.map((group) => {
     const members: InternalGroupMemberOption[] = [];
     (group.members ?? []).forEach((member) => {
-      const saleId = saleIdByAgentId.get(member.agent_id);
-      const userInfo = saleId ? userInfoBySaleId.get(saleId) : undefined;
+      const email = emailByAgentId.get(member.agent_id);
+      const userInfo = email ? userInfoByEmail.get(email) : undefined;
       if (!userInfo || !userInfo.maNv) return;
       members.push(userInfo);
     });

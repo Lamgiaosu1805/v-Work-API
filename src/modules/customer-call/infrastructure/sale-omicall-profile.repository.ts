@@ -43,11 +43,4 @@ export class SaleOmicallProfileRepository extends MongooseRepositoryBase<
     return docs.map((doc) => this.mapper.toDomain(doc));
   }
 
-  async findManyByAgentIds(agentIds: string[]): Promise<SaleOmicallProfileEntity[]> {
-    const docs = await this.model
-      .find({ omicall_agent_id: { $in: agentIds }, isDeleted: false })
-      .session(this.session ?? null)
-      .lean();
-    return docs.map((doc) => this.mapper.toDomain(doc));
-  }
 }

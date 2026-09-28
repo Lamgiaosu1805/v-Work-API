@@ -1294,22 +1294,30 @@ const AttendanceController = {
   adminEditWorksheet: async (req, res) => {
     try {
       const { worksheetId } = req.params;
-      const { work_unit } = req.body;
+      const { work_unit, penalty_amount } = req.body;
 
       if (!mongoose.Types.ObjectId.isValid(worksheetId))
         return res.status(400).json({ message: "worksheetId không hợp lệ" });
 
-      if (
-        work_unit === undefined ||
-        work_unit === null ||
-        typeof work_unit !== "number" ||
-        work_unit < 0
-      )
+      const hasWorkUnit = work_unit !== undefined;
+      const hasPenalty = penalty_amount !== undefined;
+
+      if (!hasWorkUnit && !hasPenalty)
+        return res.status(400).json({ message: "Cần truyền work_unit hoặc penalty_amount" });
+
+      if (hasWorkUnit && (typeof work_unit !== "number" || work_unit < 0))
         return res.status(400).json({ message: "work_unit phải là số không âm" });
+
+      if (hasPenalty && (typeof penalty_amount !== "number" || penalty_amount < 0))
+        return res.status(400).json({ message: "penalty_amount phải là số không âm" });
+
+      const updateData = { edited_by: req.account._id, edited_at: new Date() };
+      if (hasWorkUnit) updateData.work_unit = work_unit;
+      if (hasPenalty) updateData.penalty_amount = penalty_amount;
 
       const worksheet = await WorkSheetModel.findOneAndUpdate(
         { _id: worksheetId, isDeleted: false },
-        { work_unit, edited_by: req.account._id, edited_at: new Date() },
+        updateData,
         { new: true }
       );
       if (!worksheet) return res.status(404).json({ message: "Không tìm thấy bản ghi công" });

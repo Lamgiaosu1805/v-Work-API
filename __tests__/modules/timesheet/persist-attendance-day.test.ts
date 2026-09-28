@@ -163,6 +163,63 @@ describe("persistAttendanceDay", () => {
     expect(oldLeaveDoc).toBeNull(); // bị xoá bởi applyAttendanceDrivenStatus, không còn tồn tại
   });
 
+  test("leave_paid buổi sáng còn hợp lệ (check-in sau 10h, không bị invalidate) nhưng bản ghi WorkDayStatus gốc đã không còn tồn tại: recompute KHÔNG được tự bịa 'absent' cho buổi sáng", async () => {
+    const userId = new mongoose.Types.ObjectId();
+    const shift = await ShiftModel.create({
+      name: "Ca hành chính",
+      start_time: "08:00",
+      end_time: "17:30"
+    });
+    const worksheet = await WorkSheetModel.create({
+      user_id: userId,
+      date: new Date(`${DATE_KEY}T00:00:00.000Z`),
+      shifts: [shift._id],
+      check_in: null,
+      check_out: null
+    });
+
+    // Cố tình KHÔNG seed doc leave_paid nào (mô phỏng đúng case Mai Ngọc Đạt: bản ghi gốc đã biến mất
+    // trước khi recompute chạy) — chỉ có leavePeriodsMap báo buổi sáng có phép.
+    const leavePeriodsMap = new Map([[DATE_KEY, new Set(["morning"])]]);
+
+    // Check-in 12:54 (sau 10h) -> rule invalidate của resolveAttendanceDay KHÔNG được kích hoạt,
+    // leaveMorning phải giữ nguyên true.
+    const computed = resolveAttendanceDay({
+      dateKey: DATE_KEY,
+      rawIn: "12:54",
+      rawOut: "17:06",
+      worksheet: {
+        check_in: null,
+        check_out: null,
+        shifts: [{ start_time: "08:00", end_time: "17:30" }]
+      },
+      forgotMap: new Map(),
+      forgotOccurrenceMap: new Map(),
+      lateForgivenSet: new Set(),
+      earlyForgivenSet: new Set(),
+      leavePeriodsMap,
+      resolveLatePenalty: stubLatePenalty,
+      resolveEarlyPenalty: stubEarlyPenalty,
+      resolveForgotPenalty: stubForgotPenalty
+    }) as ResolveAttendanceDayComputed;
+
+    expect(computed.leaveMorning).toBe(true);
+    expect(computed.work_unit).toBe(0.5); // 1 - leaveDeduction(0.5)
+
+    await persistAttendanceDay({
+      userId: userId.toString(),
+      worksheetId: worksheet._id.toString(),
+      dateKey: DATE_KEY,
+      computed
+    });
+
+    const statuses = await WorkDayStatusModel.find({ user_id: userId }).lean();
+    // Buổi sáng KHÔNG được tạo mới thành "absent" — chỉ buổi chiều (present) được ghi.
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0].period).toBe("afternoon");
+    expect(statuses[0].status).toBe("present");
+  });
+
   test("nhân viên xin nghỉ cả ngày (leave_paid full) và KHÔNG check-in: không có leave-conflict, work_unit=0 do skip", async () => {
     const userId = new mongoose.Types.ObjectId();
     const shift = await ShiftModel.create({

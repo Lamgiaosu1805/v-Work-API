@@ -11,6 +11,8 @@ export interface ApplyAttendanceDrivenStatusInput {
   dayEnd: Date;
   morningStatus: WorkDayStatus;
   afternoonStatus: WorkDayStatus;
+  skipMorning?: boolean;
+  skipAfternoon?: boolean;
 }
 
 export class WorkDayStatusRepository {
@@ -23,10 +25,21 @@ export class WorkDayStatusRepository {
     input: ApplyAttendanceDrivenStatusInput,
     session?: ClientSession
   ): Promise<void> {
-    const { userId, worksheetId, dayStart, dayEnd, morningStatus, afternoonStatus } = input;
+    const {
+      userId,
+      worksheetId,
+      dayStart,
+      dayEnd,
+      morningStatus,
+      afternoonStatus,
+      skipMorning = false,
+      skipAfternoon = false
+    } = input;
     const resolvedSession = this.resolveSession(session);
 
-    if (morningStatus === afternoonStatus) {
+    if (skipMorning && skipAfternoon) return;
+
+    if (!skipMorning && !skipAfternoon && morningStatus === afternoonStatus) {
       const newStatus = morningStatus;
       await WorkDayStatusModel.deleteMany(
         {
@@ -60,8 +73,8 @@ export class WorkDayStatusRepository {
         { session: resolvedSession }
       );
       const periodStatuses: [string, WorkDayStatus][] = [
-        ["morning", morningStatus],
-        ["afternoon", afternoonStatus]
+        ...(skipMorning ? [] : ([["morning", morningStatus]] as [string, WorkDayStatus][])),
+        ...(skipAfternoon ? [] : ([["afternoon", afternoonStatus]] as [string, WorkDayStatus][]))
       ];
       for (const [period, st] of periodStatuses) {
         // eslint-disable-next-line no-await-in-loop

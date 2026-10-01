@@ -20,6 +20,7 @@ const customerClaimRequestRouter = require("./customerClaimRequest");
 const aiRouter = require("./ai");
 const chatRouter = require("./chat");
 const requestRouter = require("../modules/request/interface/request.routes");
+const fecLeadRouter = require("../modules/fec-lead/interface/fec-lead.routes");
 const permissionRouter = require("../modules/permission/interface/permission.routes");
 const holidayRouter = require("./holiday");
 const employmentStatusRouter = require("./employmentStatus");
@@ -55,6 +56,7 @@ const route = (app) => {
   app.use(`/print`, printRouter);
   app.use(`/customer-claim-request`, customerClaimRequestRouter);
   app.use(`/requests`, requestRouter);
+  app.use(`/fec-lead`, fecLeadRouter);
   app.use(`/permissions`, permissionRouter);
   app.use(`/holidays`, holidayRouter);
   app.use(`/employment-status`, employmentStatusRouter);

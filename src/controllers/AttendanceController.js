@@ -8,7 +8,8 @@ const HolidayModel = require("../models/HolidayModel");
 const AttendanceMachineMappingModel = require("../models/AttendanceMachineMappingModel");
 const { RequestModel } = require("../models/RequestModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
-const { getLeaveBalance } = require("../modules/leave");
+const { getLeaveBalance, adjustLeaveBalance } = require("../modules/leave");
+const { LEAVE_BALANCE_REASON } = require("../constants");
 const {
   processAttendanceDay,
   buildLatePenaltyResolver,
@@ -1142,6 +1143,16 @@ const AttendanceController = {
               } else {
                 counts.imported++;
               }
+              if (result.leaveRefundAmount > 0) {
+                await adjustLeaveBalance({
+                  userId,
+                  amount: result.leaveRefundAmount,
+                  reason: LEAVE_BALANCE_REASON.ATTENDANCE_OVERRIDE_REFUND,
+                  refId: worksheet._id,
+                  refType: "system",
+                  allowNegative: true
+                });
+              }
             } catch (e) {
               console.error(`[importExcel] Lỗi ngày ${dateStr} (mã ${block.machine_code}):`, e);
               failures.push({
@@ -1198,6 +1209,16 @@ const AttendanceController = {
                 counts.unchanged++;
               } else {
                 counts.imported++;
+              }
+              if (result.leaveRefundAmount > 0) {
+                await adjustLeaveBalance({
+                  userId,
+                  amount: result.leaveRefundAmount,
+                  reason: LEAVE_BALANCE_REASON.ATTENDANCE_OVERRIDE_REFUND,
+                  refId: worksheet._id,
+                  refType: "system",
+                  allowNegative: true
+                });
               }
             } catch (e) {
               console.error(

@@ -102,7 +102,7 @@ export class WorkDayStatusRepository {
   ): Promise<LeaveStatusSnapshot[]> {
     const docs = await WorkDayStatusModel.find({
       user_id: userId,
-      date: { $gte: dayStart, $lte: dayEnd },
+      date: { $gte: dayStart, $lt: dayEnd },
       status: { $in: ["leave_paid", "leave_unpaid"] },
       isDeleted: false
     })

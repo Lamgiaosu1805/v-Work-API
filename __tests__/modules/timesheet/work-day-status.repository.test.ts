@@ -193,6 +193,32 @@ describe("WorkDayStatusRepository.findLeaveStatusesForDay / markStatusesPresent"
     expect(result).toEqual([]);
   });
 
+  test("findLeaveStatusesForDay: dayEnd theo đúng cách tính thật (dayStart + 1 ngày) không được lấy nhầm leave của ngày hôm sau", async () => {
+    // Đúng cách apply-leave-conflict-override.ts tính dayEnd: dayStart + 1 ngày (bằng đúng dayStart
+    // của ngày hôm sau, vì convention lưu date là local-midnight-as-UTC) — nếu dùng $lte sẽ lấy nhầm
+    // bản ghi leave của ngày kế tiếp.
+    const realDayStart = new Date("2026-09-22T17:00:00.000Z"); // local 23/9
+    const realDayEnd = new Date("2026-09-23T17:00:00.000Z"); // local 24/9 (= dayStart của ngày sau)
+
+    await WorkDayStatusModel.create({
+      user_id: userId,
+      worksheet_id: worksheetId,
+      date: realDayEnd, // leave của ngày 24/9, KHÔNG phải 23/9
+      period: "full",
+      status: "leave_paid",
+      sources: []
+    });
+
+    const repo = new WorkDayStatusRepository();
+    const result = await repo.findLeaveStatusesForDay(
+      userId.toString(),
+      realDayStart,
+      realDayEnd
+    );
+
+    expect(result).toEqual([]);
+  });
+
   test("markStatusesPresent: flip đúng status + gắn worksheet_id + thêm source attendance", async () => {
     const doc = await WorkDayStatusModel.create({
       user_id: userId,

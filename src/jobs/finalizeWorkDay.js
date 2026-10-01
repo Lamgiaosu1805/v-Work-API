@@ -10,6 +10,8 @@ const {
 } = require("../modules/timesheet");
 const { buildAttendanceContext } = require("../workflows/import-attendance.workflow");
 const { getPayrollPeriodRange } = require("../helpers/payrollPeriod");
+const { adjustLeaveBalance } = require("../modules/leave");
+const { LEAVE_BALANCE_REASON } = require("../constants");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -104,6 +106,16 @@ async function finalizeWorkDay(targetDate = null) {
         if (result.skip) continue;
 
         if (!result.unchanged) finalized++;
+        if (result.leaveRefundAmount > 0) {
+          await adjustLeaveBalance({
+            userId: worksheet.user_id,
+            amount: result.leaveRefundAmount,
+            reason: LEAVE_BALANCE_REASON.ATTENDANCE_OVERRIDE_REFUND,
+            refId: worksheet._id,
+            refType: "system",
+            allowNegative: true
+          });
+        }
       } catch (e) {
         console.error(`[Cron] finalizeWorkDay lỗi user ${worksheet.user_id}:`, e);
         failed++;

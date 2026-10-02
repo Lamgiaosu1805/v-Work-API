@@ -227,7 +227,7 @@ async function buildCustomerPipeline(req, query) {
     advancedMatch["referred_by.branch_id"] = new mongoose.Types.ObjectId(branch_id);
   if (selectedSaleIds.length) advancedMatch["referred_by._id"] = { $in: selectedSaleIds };
   if (scopedSaleId) {
-    advancedMatch.$or = [{ "referred_by._id": scopedSaleId }, { referred_by: null }];
+    advancedMatch["referred_by._id"] = scopedSaleId;
   }
   if (Object.keys(advancedMatch).length) pipeline.push({ $match: advancedMatch });
 

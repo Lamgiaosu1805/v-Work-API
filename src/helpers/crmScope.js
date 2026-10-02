@@ -1,5 +1,4 @@
-const CustomerModel = require("../models/CustomerModel");
-const { toMongoQuery, canOnSubject } = require("../modules/permission");
+const { canOnSubject } = require("../modules/permission");
 
 const canAccessCustomer = async (
   ability,
@@ -7,12 +6,9 @@ const canAccessCustomer = async (
   action = "customer.view",
   { allowUnassigned = false } = {}
 ) => {
+  if (canOnSubject(ability, action, "Customer", customer)) return true;
   if (!customer.referred_by) return allowUnassigned;
-
-  const scopeFilter = toMongoQuery(ability, action, "Customer");
-  if (Object.keys(scopeFilter).length === 0) return true;
-
-  return Boolean(await CustomerModel.exists({ _id: customer._id, ...scopeFilter }));
+  return false;
 };
 
 const canManageSale = async (ability, saleId) =>

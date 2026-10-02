@@ -4,7 +4,7 @@ const AppModel = require("../models/AppModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const InvestmentModel = require("../models/InvestmentModel");
 const AgentModel = require("../models/AgentModel");
-const { toMongoQuery } = require("../modules/permission");
+const { resolveCustomerScope } = require("./crmScope");
 
 const decrypt = (encryptedText) => {
   if (!encryptedText) return null;
@@ -76,8 +76,11 @@ async function buildCustomerPipeline(req, query) {
     ];
   }
 
-  const scopeFilter = toMongoQuery(req.permissionAbility, "customer.view", "Customer");
-  const scopedSaleId = scopeFilter.referred_by?.$eq ?? null;
+  const { myEmployeeId: scopedSaleId } = await resolveCustomerScope(
+    req.permissionAbility,
+    req.account._id,
+    "customer.view"
+  );
 
   const pipeline = [
     { $match: initialMatch },

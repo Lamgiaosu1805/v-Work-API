@@ -5,7 +5,7 @@ const AppModel = require("../models/AppModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AgentModel = require("../models/AgentModel");
 const BranchModel = require("../models/BranchModel");
-const { toMongoQuery } = require("../modules/permission");
+const { toMongoQuery, canOnSubject } = require("../modules/permission");
 const {
   calculateCommission,
   getTNCNRate,
@@ -905,7 +905,9 @@ const InvestmentController = {
 
       const matchFilter = { invested_at: { $gte: from }, isDeleted: false };
       const scopeFilter = toMongoQuery(req.permissionAbility, "investment.view", "Investment");
-      const isUnrestricted = Object.keys(scopeFilter).length === 0;
+      const isUnrestricted = canOnSubject(req.permissionAbility, "investment.view", "Investment", {
+        customer_id: new mongoose.Types.ObjectId()
+      });
 
       let mode;
       if (isUnrestricted) {
@@ -1182,8 +1184,9 @@ InvestmentController.getLeaderboard = async (req, res) => {
 // ── Tỷ lệ chuyển đổi ─────────────────────────────────────────────────────────
 InvestmentController.getConversion = async (req, res) => {
   try {
-    const scopeFilter = toMongoQuery(req.permissionAbility, "investment.view", "Investment");
-    const isUnrestricted = Object.keys(scopeFilter).length === 0;
+    const isUnrestricted = canOnSubject(req.permissionAbility, "investment.view", "Investment", {
+      customer_id: new mongoose.Types.ObjectId()
+    });
 
     if (!isUnrestricted) {
       // Phễu cá nhân — đếm theo quan hệ khách hàng (referred_by) thay vì commission.sale_id

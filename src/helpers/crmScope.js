@@ -1,3 +1,5 @@
+const mongoose = require("mongoose");
+const UserInfoModel = require("../models/UserInfoModel");
 const { canOnSubject } = require("../modules/permission");
 
 const canAccessCustomer = async (
@@ -14,7 +16,18 @@ const canAccessCustomer = async (
 const canManageSale = async (ability, saleId) =>
   canOnSubject(ability, "customer.assign", "Customer", { referred_by: saleId });
 
+const resolveCustomerScope = async (ability, accountId, action = "customer.view") => {
+  const isUnrestricted = canOnSubject(ability, action, "Customer", {
+    referred_by: new mongoose.Types.ObjectId()
+  });
+  if (isUnrestricted) return { isUnrestricted: true, myEmployeeId: null };
+
+  const myUserInfo = await UserInfoModel.findOne({ id_account: accountId }).select("_id");
+  return { isUnrestricted: false, myEmployeeId: myUserInfo?._id ?? null };
+};
+
 module.exports = {
   canAccessCustomer,
-  canManageSale
+  canManageSale,
+  resolveCustomerScope
 };

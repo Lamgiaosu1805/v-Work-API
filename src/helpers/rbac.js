@@ -2,9 +2,11 @@ const RolePermissionModel = require("../models/RolePermissionModel");
 const UserRoleModel = require("../models/UserRoleModel");
 const UserPermissionModel = require("../models/UserPermissionModel");
 const PermissionModel = require("../models/PermissionModel");
+const UserInfoModel = require("../models/UserInfoModel");
+const DepartmentModel = require("../models/DepartmentModel");
 const redis = require("../config/redis");
 const { mergePermissions } = require("./rbacResolve");
-const { ROLE } = require("../constants");
+const { ROLE, PERMISSION } = require("../constants");
 
 const RBAC_CACHE_TTL = 60;
 
@@ -42,12 +44,31 @@ async function getEffectivePermissions(accountId) {
       .map((override) => ({ code: override.permission.code, effect: override.effect }));
   };
 
-  const [roleGrantedCodes, userOverrides] = await Promise.all([
+  // Quản lý theo sơ đồ tổ chức — được gán làm "Quản lý trực tiếp" của ít nhất 1 nhân viên, hoặc là
+  // manager của 1 phòng ban (vd Phó TGĐ phụ trách khối) — tự có quyền duyệt đơn, không cần gán role
+  // riêng. Gộp vào nhóm quyền theo role (trước bước merge) để override DENY cá nhân vẫn thắng.
+  const resolveOrgManagerCodes = async () => {
+    const userInfo = await UserInfoModel.findOne({ id_account: accountIdStr, isDeleted: false })
+      .select("_id")
+      .lean();
+    if (!userInfo) return [];
+    const [hasDirectReport, managesDepartment] = await Promise.all([
+      UserInfoModel.exists({ direct_manager: userInfo._id, isDeleted: false }),
+      DepartmentModel.exists({ manager: userInfo._id, isDeleted: false })
+    ]);
+    return hasDirectReport || managesDepartment ? [PERMISSION.HRM_REQUEST_REVIEW] : [];
+  };
+
+  const [roleGrantedCodes, userOverrides, orgManagerCodes] = await Promise.all([
     resolveRoleGrantedCodes(),
-    resolveUserOverrides()
+    resolveUserOverrides(),
+    resolveOrgManagerCodes()
   ]);
 
-  const effectivePermissions = mergePermissions(roleGrantedCodes, userOverrides);
+  const effectivePermissions = mergePermissions(
+    [...roleGrantedCodes, ...orgManagerCodes],
+    userOverrides
+  );
 
   redis.setex(cacheKey, RBAC_CACHE_TTL, JSON.stringify([...effectivePermissions]));
 

@@ -182,6 +182,9 @@ async function setupTwoReviewers(branchId, dept) {
   const { userInfo: r2, account: a2 } = await createEmployee({ branchId });
   await assignDept(r2._id, dept._id);
 
+  await DepartmentModel.updateOne({ _id: dept._id }, { manager: r1._id });
+  await UserInfoModel.updateOne({ _id: r1._id }, { direct_manager: r2._id });
+
   return { r1, a1, r2, a2 };
 }
 
@@ -285,6 +288,7 @@ describe("review — data scope ABAC + thông báo dedupe", () => {
       branchId
     });
     await assignDept(divisionHead._id, division._id);
+    await DepartmentModel.updateOne({ _id: division._id }, { manager: divisionHead._id });
 
     const req = {
       account: { _id: divisionHeadAccount._id.toString() },
@@ -321,7 +325,7 @@ describe("review — data scope ABAC + thông báo dedupe", () => {
     expect(res.status).toHaveBeenCalledWith(403);
   });
 
-  test("dedupe: người vừa là quản lý trực tiếp vừa là HR chỉ nhận đúng 1 thông báo", async () => {
+  test("người được gán quản lý và có quyền HR vẫn không tự nhận thông báo", async () => {
     const branchId = new mongoose.Types.ObjectId();
     const dept = await createDept("Phòng Kế toán", "department");
     const { userInfo: employee } = await createEmployee({ branchId });
@@ -330,14 +334,13 @@ describe("review — data scope ABAC + thông báo dedupe", () => {
 
     const { userInfo: manager, account: managerAccount } = await createEmployee({ branchId });
     await assignDept(manager._id, dept._id);
+    await DepartmentModel.updateOne({ _id: dept._id }, { manager: manager._id });
     await grantPermission(managerAccount._id, PERMISSION.HRM_REQUEST_REVIEW);
     await grantPermission(managerAccount._id, PERMISSION.HRM_REQUEST_VIEW_ALL);
 
-    const { account: adminAccount } = await createEmployee({ branchId, role: "admin" });
-
     const req = {
-      account: { _id: adminAccount._id.toString() },
-      permissionAbility: abilityAll(),
+      account: { _id: managerAccount._id.toString() },
+      permissionAbility: await abilityForManager(manager._id),
       params: { id: request._id.toString() },
       body: { action: "approve" }
     };
@@ -353,7 +356,7 @@ describe("review — data scope ABAC + thông báo dedupe", () => {
     const managerNotifications = await NotificationModel.countDocuments({
       account_id: managerAccount._id
     });
-    expect(managerNotifications).toBe(1);
+    expect(managerNotifications).toBe(0);
   });
 
   test("người vừa duyệt không tự nhận thông báo về hành động của chính mình", async () => {
@@ -365,6 +368,7 @@ describe("review — data scope ABAC + thông báo dedupe", () => {
 
     const { userInfo: manager, account: managerAccount } = await createEmployee({ branchId });
     await assignDept(manager._id, dept._id);
+    await DepartmentModel.updateOne({ _id: dept._id }, { manager: manager._id });
     await grantPermission(managerAccount._id, PERMISSION.HRM_REQUEST_REVIEW);
 
     const req = {
@@ -587,7 +591,7 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     expect(updated.approvals.length).toBe(1);
   });
 
-  test("2 admin khác nhau duyệt đơn nghỉ dài ngày: đủ 2 lượt mới approved (admin cũng chỉ tính 1 người)", async () => {
+  test("admin khác không nằm trong chuỗi không được duyệt lượt thứ 2", async () => {
     const branchId = new mongoose.Types.ObjectId();
     const dept = await createDept("Phòng Kế toán", "department");
     const { userInfo: employee } = await createEmployee({ branchId });
@@ -620,13 +624,13 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
       res2
     );
 
-    expect(res2.status).toHaveBeenCalledWith(200);
+    expect(res2.status).toHaveBeenCalledWith(403);
     const updated = await LeaveRequest.findById(request._id);
-    expect(updated.status).toBe("approved");
-    expect(updated.approvals.length).toBe(2);
+    expect(updated.status).toBe("pending");
+    expect(updated.approvals.length).toBe(1);
   });
 
-  test("race: 2 người khác nhau duyệt gần như đồng thời — không mất/thừa lượt, onApprove chỉ chạy 1 lần", async () => {
+  test("cấp 2 không thể vượt bước cấp 1 khi duyệt đơn nghỉ dài ngày", async () => {
     const branchId = new mongoose.Types.ObjectId();
     const dept = await createDept("Phòng Kế toán", "department");
     const { userInfo: employee } = await createEmployee({ branchId });
@@ -649,15 +653,14 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
       body: { action: "approve" }
     };
 
-    const results = await Promise.allSettled([
-      callController(requestHttpController.review, reqA, makeRes()),
-      callController(requestHttpController.review, reqB, makeRes())
-    ]);
+    const resB = makeRes();
+    await callController(requestHttpController.review, reqB, resB);
+    expect(resB.status).toHaveBeenCalledWith(403);
 
-    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+    await callController(requestHttpController.review, reqA, makeRes());
     const updated = await LeaveRequest.findById(request._id);
-    expect(updated.status).toBe("approved");
-    expect(updated.approvals.length).toBe(2);
-    expect(onApproveSpy).toHaveBeenCalledTimes(1);
+    expect(updated.status).toBe("pending");
+    expect(updated.approvals.length).toBe(1);
+    expect(onApproveSpy).not.toHaveBeenCalled();
   });
 });

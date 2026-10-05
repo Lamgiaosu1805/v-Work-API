@@ -60,9 +60,9 @@ describe("RequestEntity.reject() — veto-1-người, giữ nguyên hành vi g�
   });
 });
 
-// Người dùng chốt (sau khi đối chiếu lại SRS v2.0, 03/08/2026): ngưỡng đa duyệt của "Nghỉ dài hạn" là
-// "> 2 ngày", KHÔNG phải "> 3 ngày" như code cũ — khoá đúng ngưỡng biên để không bị lệch lại.
-describe("RequestEntity.needsMultiApproval() — ngưỡng 'Nghỉ dài hạn' đúng SRS (> 2 ngày)", () => {
+// LUỒNG PHÂN QUYỀN CHẤM CÔNG V-WORK (HCNS, 10/2026): "Nghỉ phép dưới 2 ngày: Quản lý trực tiếp phê
+// duyệt" — từ 2 ngày trở lên cần 2 cấp (thay ngưỡng "> 2 ngày" của SRS v2.0). Khoá đúng ngưỡng biên.
+describe("RequestEntity — ngưỡng đa duyệt nghỉ phép (từ 2 ngày) và approvalMode()", () => {
   function newLeaveEntity(totalDays) {
     return RequestEntity.create({
       userId: "employee-1",
@@ -79,11 +79,24 @@ describe("RequestEntity.needsMultiApproval() — ngưỡng 'Nghỉ dài hạn' �
     });
   }
 
-  it("total_days = 2: chỉ cần 1 cấp (không needsMultiApproval)", () => {
-    expect(newLeaveEntity(2).needsMultiApproval()).toBe(false);
+  it("total_days = 1.5: chỉ quản lý trực tiếp duyệt (direct_only, 1 lượt)", () => {
+    const entity = newLeaveEntity(1.5);
+    expect(entity.needsMultiApproval()).toBe(false);
+    expect(entity.approvalMode()).toBe("direct_only");
+    expect(entity.requiredApprovals(2)).toBe(1);
   });
 
-  it("total_days = 3: cần 2 cấp (needsMultiApproval) — trước đây (ngưỡng >3 cũ) sẽ là false, giờ phải true", () => {
-    expect(newLeaveEntity(3).needsMultiApproval()).toBe(true);
+  it("total_days = 2: cần 2 cấp, duyệt tuần tự (sequential)", () => {
+    const entity = newLeaveEntity(2);
+    expect(entity.needsMultiApproval()).toBe(true);
+    expect(entity.approvalMode()).toBe("sequential");
+    expect(entity.requiredApprovals(2)).toBe(2);
+  });
+
+  it("đa cấp nhưng chuỗi chỉ có 1 người: 1 lượt là đủ; chưa biết chuỗi: vẫn 2 lượt như cũ", () => {
+    const entity = newLeaveEntity(5);
+    expect(entity.requiredApprovals(1)).toBe(1);
+    expect(entity.requiredApprovals(0)).toBe(2);
+    expect(entity.requiredApprovals()).toBe(2);
   });
 });

@@ -18,6 +18,11 @@ const ADMIN_SCOPE_OVERRIDES: Record<string, string> = {
   "customer_call.view": "CUSTOMER_SELF_ASSIGNED"
 };
 
+// Quyền KHÔNG cấp theo role admin — chỉ cấp đích danh qua override nhân viên trên màn Phân quyền.
+// request.approve_all: duyệt mọi đơn vượt chuỗi quản lý — chỉ dành cho lãnh đạo được chỉ định
+// (chốt 07/10/2026: Mai Ngọc Đoàn, Nguyễn Văn Lam), không phải mọi admin.
+const ADMIN_EXCLUDED_PERMISSIONS = new Set(["request.approve_all"]);
+
 async function buildFullGrants(): Promise<PermissionGrantDoc[]> {
   const permissions = await PermissionCatalogModel.find({ isDeleted: false }).lean();
   if (!permissions.length) {
@@ -26,18 +31,20 @@ async function buildFullGrants(): Promise<PermissionGrantDoc[]> {
     );
   }
 
-  return permissions.map((permission) => {
-    const overrideScope = ADMIN_SCOPE_OVERRIDES[permission.code];
-    const dataScope = overrideScope ?? permission.validDataScopePolicies[0];
-    if (!dataScope) {
-      throw new Error(`Permission "${permission.code}" không có validDataScopePolicies nào`);
-    }
-    return {
-      permissionCode: permission.code,
-      dataScopePolicyCode: dataScope,
-      fieldScopePolicyCode: null
-    };
-  });
+  return permissions
+    .filter((permission) => !ADMIN_EXCLUDED_PERMISSIONS.has(permission.code))
+    .map((permission) => {
+      const overrideScope = ADMIN_SCOPE_OVERRIDES[permission.code];
+      const dataScope = overrideScope ?? permission.validDataScopePolicies[0];
+      if (!dataScope) {
+        throw new Error(`Permission "${permission.code}" không có validDataScopePolicies nào`);
+      }
+      return {
+        permissionCode: permission.code,
+        dataScopePolicyCode: dataScope,
+        fieldScopePolicyCode: null
+      };
+    });
 }
 
 async function upsertRole(grants: PermissionGrantDoc[]): Promise<mongoose.Types.ObjectId> {

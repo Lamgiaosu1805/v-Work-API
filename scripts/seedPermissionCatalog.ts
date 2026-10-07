@@ -420,6 +420,16 @@ const DEFINITIONS: PermissionDef[] = [
     actionKind: "STRUCTURAL",
     validDataScopePolicies: ["REQUEST_ALL_COMPANY", "REQUEST_OWN_DEPARTMENT"]
   },
+  {
+    // Duyệt/từ chối MỌI đơn của mọi phòng ban, bỏ qua chuỗi quản lý; quyết định là quyết định cuối.
+    // Cấp riêng cho lãnh đạo (vd Chủ tịch, P.TGĐ điều hành) qua override nhân viên trên màn Phân quyền.
+    code: "request.approve_all",
+    module: "hrm",
+    name: "Duyệt mọi đơn từ toàn công ty (vượt chuỗi quản lý)",
+    entity: "Request",
+    actionKind: "STRUCTURAL",
+    validDataScopePolicies: ["REQUEST_ALL_COMPANY"]
+  },
 
   // ==================== Workplace ====================
   {

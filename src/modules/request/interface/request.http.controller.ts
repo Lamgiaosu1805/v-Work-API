@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { canOnSubject } from "../../permission";
 import { resolveRequestScopeFilter } from "../../../core/authorization/resolve-request-scope-filter";
 import { getEligibleReviewers } from "../application/get-eligible-reviewers.service";
 import { getMyRequests } from "../application/get-my-requests.service";
@@ -47,7 +48,8 @@ export const requestHttpController = {
     const scopeFilter = resolveRequestScopeFilter(req.permissionAbility!, "request.review");
     const { entity, isFinal } = await reviewRequest(req.account, scopeFilter, req.params.id, {
       action,
-      reviewer_note
+      reviewer_note,
+      approveAll: canOnSubject(req.permissionAbility!, "request.approve_all", "Request", {})
     });
 
     let message: string;

@@ -77,6 +77,11 @@ function assertCanActOnCurrentStep(
 export interface ReviewRequestOptions {
   action: string;
   reviewer_note?: string;
+  /**
+   * Người duyệt có quyền `request.approve_all` (lãnh đạo duyệt mọi đơn toàn công ty): bỏ qua phạm vi
+   * dữ liệu + chuỗi quản lý, quyết định của họ là quyết định cuối (duyệt = chốt đơn ngay).
+   */
+  approveAll?: boolean;
 }
 
 export interface ReviewRequestEntityResult {
@@ -88,7 +93,7 @@ export async function reviewRequestEntity(
   account: any,
   scopeFilter: Record<string, unknown>,
   id: string,
-  { action, reviewer_note = "" }: ReviewRequestOptions,
+  { action, reviewer_note = "", approveAll = false }: ReviewRequestOptions,
   session: ClientSession
 ): Promise<ReviewRequestEntityResult> {
   const reviewerInfo = await UserInfoModel.findOne({
@@ -98,7 +103,7 @@ export async function reviewRequestEntity(
   if (!reviewerInfo) throw new NotFoundException("Không tìm thấy thông tin nhân viên");
 
   const allowed = await RequestModel.exists({
-    $and: [{ _id: id, isDeleted: false }, scopeFilter]
+    $and: [{ _id: id, isDeleted: false }, approveAll ? {} : scopeFilter]
   }).session(session);
   if (!allowed) throw new ForbiddenException("Bạn không được chỉ định duyệt đơn này");
 
@@ -108,13 +113,18 @@ export async function reviewRequestEntity(
   // Data Scope chỉ giới hạn tập dữ liệu có thể truy cập. Người thực sự được duyệt phải nằm trong
   // chuỗi quản lý mới (direct_manager/department.manager); quyền cũ hoặc role admin không bypass.
   const chain = await getApprovalChain(entity.userId);
-  assertCanActOnCurrentStep(entity, chain, {
-    accountId: account._id.toString(),
-    userInfoId: reviewerInfo._id.toString(),
-    action
-  });
+  if (!approveAll) {
+    assertCanActOnCurrentStep(entity, chain, {
+      accountId: account._id.toString(),
+      userInfoId: reviewerInfo._id.toString(),
+      action
+    });
+  }
 
-  if (action === "approve") {
+  if (action === "approve" && approveAll) {
+    // Lãnh đạo duyệt toàn quyền: chốt đơn ngay, không chờ các cấp còn lại
+    entity.approve(reviewerInfo._id.toString(), reviewer_note, 1);
+  } else if (action === "approve") {
     const configuredLevels = chain.length === 1 && chain[0].source === "admin" ? 0 : chain.length;
     entity.approve(
       reviewerInfo._id.toString(),

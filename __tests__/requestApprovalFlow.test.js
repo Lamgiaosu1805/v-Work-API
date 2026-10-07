@@ -664,3 +664,98 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     expect(onApproveSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("review — lãnh đạo có quyền request.approve_all duyệt mọi đơn toàn công ty", () => {
+  const abilityApproveAll = () =>
+    buildAbility([
+      { action: "request.review", subject: "Request" },
+      { action: "request.view", subject: "Request" },
+      { action: "request.approve_all", subject: "Request" }
+    ]);
+
+  async function setupRequestOutsideChain() {
+    const branchId = new mongoose.Types.ObjectId();
+    const dept = await createDept("Phòng Kinh doanh", "department");
+    const { userInfo: employee } = await createEmployee({ branchId });
+    await assignDept(employee._id, dept._id);
+    const { r1 } = await setupTwoReviewers(branchId, dept);
+    const { account: leader } = await createEmployee({ branchId });
+    return { employee, leader, chainManager: r1 };
+  }
+
+  test("không có approve_all: người ngoài chuỗi vẫn bị chặn 403 như cũ", async () => {
+    const { employee, leader } = await setupRequestOutsideChain();
+    const request = await createLeaveRequest(employee._id);
+    const res = makeRes();
+    await callController(
+      requestHttpController.review,
+      {
+        account: { _id: leader._id.toString() },
+        permissionAbility: abilityAll(),
+        params: { id: request._id.toString() },
+        body: { action: "approve" }
+      },
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect((await LeaveRequest.findById(request._id)).status).toBe("pending");
+  });
+
+  test("có approve_all: duyệt được đơn phòng khác và chốt ngay cả đơn cần 2 cấp", async () => {
+    const { employee, leader } = await setupRequestOutsideChain();
+    const request = await createLongLeaveRequest(employee._id);
+    const res = makeRes();
+    await callController(
+      requestHttpController.review,
+      {
+        account: { _id: leader._id.toString() },
+        permissionAbility: abilityApproveAll(),
+        params: { id: request._id.toString() },
+        body: { action: "approve", reviewer_note: "Lãnh đạo duyệt" }
+      },
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    const updated = await LeaveRequest.findById(request._id);
+    expect(updated.status).toBe("approved");
+    const leaderInfo = await UserInfoModel.findOne({ id_account: leader._id });
+    expect(String(updated.reviewed_by)).toBe(String(leaderInfo._id));
+  });
+
+  test("có approve_all: từ chối được đơn ngoài chuỗi", async () => {
+    const { employee, leader } = await setupRequestOutsideChain();
+    const request = await createLeaveRequest(employee._id);
+    const res = makeRes();
+    await callController(
+      requestHttpController.review,
+      {
+        account: { _id: leader._id.toString() },
+        permissionAbility: abilityApproveAll(),
+        params: { id: request._id.toString() },
+        body: { action: "reject", reviewer_note: "Không đồng ý" }
+      },
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect((await LeaveRequest.findById(request._id)).status).toBe("rejected");
+  });
+
+  test("có approve_all nhưng vẫn không được tự duyệt đơn của chính mình", async () => {
+    const branchId = new mongoose.Types.ObjectId();
+    const { userInfo: leaderInfo, account: leader } = await createEmployee({ branchId });
+    const request = await createLeaveRequest(leaderInfo._id);
+    const res = makeRes();
+    await callController(
+      requestHttpController.review,
+      {
+        account: { _id: leader._id.toString() },
+        permissionAbility: abilityApproveAll(),
+        params: { id: request._id.toString() },
+        body: { action: "approve" }
+      },
+      res
+    );
+    expect(res.status).not.toHaveBeenCalledWith(200);
+    expect((await LeaveRequest.findById(request._id)).status).toBe("pending");
+  });
+});

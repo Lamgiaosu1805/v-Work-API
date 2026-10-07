@@ -19,13 +19,45 @@ const DepartmentModel = require("../models/DepartmentModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
 const { sign, serializeUser } = require("../helpers/staticUrl");
-const { getEffectivePermissions, can } = require("../helpers/rbac");
+const { getEffectivePermissions, invalidateRbacCache } = require("../helpers/rbac");
+const { invalidatePermissionCache } = require("../core/authorization/invalidate-permission-cache");
 const AppModel = require("../models/AppModel");
 const {
   resolveEmployeeScopeFilter
 } = require("../core/authorization/resolve-employee-scope-filter");
 
 const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
+
+// "" / "null" (multipart gửi dạng chuỗi) / null -> bỏ gán quản lý trực tiếp.
+const normalizeDirectManager = (value) =>
+  value === "" || value === "null" || value === null ? null : value;
+
+// Trả về thông báo lỗi nếu không gán được `directManagerId` làm quản lý trực tiếp của `userId`, null
+// nếu hợp lệ. Chặn tự gán chính mình và gán vòng (chọn cấp dưới — trực tiếp hoặc nhiều tầng — của
+// nhân viên này làm quản lý của họ), vì chuỗi duyệt đi ngược theo direct_manager.
+const validateDirectManager = async (userId, directManagerId, session) => {
+  if (!mongoose.Types.ObjectId.isValid(directManagerId)) return "Quản lý trực tiếp không hợp lệ";
+  if (String(directManagerId) === String(userId)) {
+    return "Không thể chọn chính nhân viên này làm quản lý trực tiếp";
+  }
+
+  const manager = await UserInfoModel.findOne({ _id: directManagerId, isDeleted: false })
+    .select("direct_manager")
+    .session(session);
+  if (!manager) return "Không tìm thấy quản lý trực tiếp";
+
+  const visited = new Set();
+  let cursor = manager.direct_manager;
+  while (cursor && !visited.has(String(cursor))) {
+    if (String(cursor) === String(userId)) {
+      return "Không thể chọn cấp dưới của nhân viên này làm quản lý trực tiếp";
+    }
+    visited.add(String(cursor));
+    const next = await UserInfoModel.findById(cursor).select("direct_manager").session(session);
+    cursor = next?.direct_manager;
+  }
+  return null;
+};
 
 const uploadDir =
   process.env.NODE_ENV === "production" ? process.env.UPLOAD_DIR_PROD : process.env.UPLOAD_DIR_DEV;
@@ -593,7 +625,10 @@ const UserController = {
         return res.status(400).json({ message: "ID không hợp lệ" });
       }
 
-      const user = await UserInfoModel.findOne({ _id: id, isDeleted: false });
+      const user = await UserInfoModel.findOne({ _id: id, isDeleted: false }).populate(
+        "direct_manager",
+        "full_name ma_nv"
+      );
       if (!user) {
         return res.status(404).json({ message: "Không tìm thấy user" });
       }
@@ -697,6 +732,21 @@ const UserController = {
         if (req.body[field] !== undefined) {
           updates[field] = req.body[field];
         }
+      }
+
+      const hasDirectManager = req.body.direct_manager !== undefined;
+      const previousDirectManager = user.direct_manager;
+      if (hasDirectManager) {
+        const directManagerId = normalizeDirectManager(req.body.direct_manager);
+        if (directManagerId) {
+          const directManagerError = await validateDirectManager(id, directManagerId, session);
+          if (directManagerError) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: directManagerError });
+          }
+        }
+        updates.direct_manager = directManagerId;
       }
 
       const hasLeaveBalanceDelta = req.body.leave_balance_annual_delta !== undefined;
@@ -908,6 +958,17 @@ const UserController = {
 
       await session.commitTransaction();
       session.endSession();
+
+      // Quyền duyệt đơn của quản lý trực tiếp tính ngầm từ direct_manager — xoá cả cache quyền cũ
+      // và cache CASL mới để người mới được gán / người bị bỏ gán có hiệu lực ngay.
+      if (hasDirectManager) {
+        const managerIds = [previousDirectManager, updates.direct_manager].filter(Boolean);
+        const managers = await UserInfoModel.find({ _id: { $in: managerIds } }).select(
+          "id_account"
+        );
+        managers.forEach((m) => invalidateRbacCache(m.id_account));
+        await invalidatePermissionCache(managerIds.map(String));
+      }
 
       const leaveBalance = await getLeaveBalance(id);
 

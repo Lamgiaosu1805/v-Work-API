@@ -143,13 +143,14 @@ describe("getRequestById()", () => {
     expect(getApprovalChain).not.toHaveBeenCalled();
   });
 
-  it("pending_reviewer: người đầu tiên trong chain chưa approve", async () => {
+  it("pending_reviewer: người đầu tiên trong chain chưa approve (nghỉ từ 2 ngày, duyệt tuần tự)", async () => {
     const { account, userInfo } = await createUserInfo(1);
     const reviewerA = new mongoose.Types.ObjectId();
     const reviewerB = new mongoose.Types.ObjectId();
     const doc = await LeaveRequest.create(
       leaveRequestPayload(userInfo._id, {
         status: "pending",
+        total_days: 3,
         approvals: [{ account: reviewerA, reviewed_at: new Date() }]
       })
     );
@@ -159,6 +160,44 @@ describe("getRequestById()", () => {
     expect(String(data.pending_reviewer.accountId)).toBe(String(reviewerB));
   });
 
+  it("approval_chain: nghỉ dưới 2 ngày — cấp 2 chỉ nhận thông tin (role informed), pending là cấp 1", async () => {
+    const { account, userInfo } = await createUserInfo(1);
+    const reviewerA = new mongoose.Types.ObjectId();
+    const reviewerB = new mongoose.Types.ObjectId();
+    const doc = await LeaveRequest.create(
+      leaveRequestPayload(userInfo._id, { status: "pending", total_days: 1 })
+    );
+    getApprovalChain.mockResolvedValue([{ accountId: reviewerA }, { accountId: reviewerB }]);
+
+    const data = await getRequestById(account, ALL, String(doc._id));
+    expect(data.approval_mode).toBe("direct_only");
+    expect(data.approval_chain[0]).toMatchObject({ accountId: reviewerA, role: "approver" });
+    expect(data.approval_chain[1]).toMatchObject({ accountId: reviewerB, role: "informed" });
+    expect(String(data.pending_reviewer.accountId)).toBe(String(reviewerA));
+  });
+
+  it("approval_chain: approvals[].account lưu user_info._id vẫn đánh dấu đúng cấp đã duyệt", async () => {
+    const { account, userInfo } = await createUserInfo(1);
+    const reviewerAccount = new mongoose.Types.ObjectId();
+    const reviewerUserInfo = new mongoose.Types.ObjectId();
+    const doc = await LeaveRequest.create(
+      leaveRequestPayload(userInfo._id, {
+        status: "pending",
+        total_days: 3,
+        approvals: [{ account: reviewerUserInfo, reviewed_at: new Date() }]
+      })
+    );
+    getApprovalChain.mockResolvedValue([
+      { accountId: reviewerAccount, userInfoId: reviewerUserInfo },
+      { accountId: new mongoose.Types.ObjectId() }
+    ]);
+
+    const data = await getRequestById(account, ALL, String(doc._id));
+    expect(data.approval_mode).toBe("sequential");
+    expect(data.approval_chain[0].approved).toBe(true);
+    expect(data.approval_chain[1].approved).toBe(false);
+  });
+
   it("approval_chain: trả đủ cả 2 cấp kèm trạng thái đã duyệt/chưa duyệt của từng cấp", async () => {
     const { account, userInfo } = await createUserInfo(1);
     const reviewerA = new mongoose.Types.ObjectId();
@@ -166,6 +205,7 @@ describe("getRequestById()", () => {
     const doc = await LeaveRequest.create(
       leaveRequestPayload(userInfo._id, {
         status: "pending",
+        total_days: 3,
         approvals: [{ account: reviewerA, reviewed_at: new Date() }]
       })
     );

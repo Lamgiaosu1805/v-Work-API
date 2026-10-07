@@ -11,6 +11,7 @@ import {
 } from "../../modules/permission";
 import { buildPermissionCacheKey } from "./permission-cache-key";
 import { resolveEmployeeId } from "./resolve-employee-id";
+import { resolveManagedRequestEmployeeIds } from "./resolve-managed-request-employee-ids";
 
 declare global {
   namespace Express {
@@ -49,6 +50,18 @@ export function requirePermission(action: string, subject: string) {
 
     const employeeId = await resolveEmployeeId(req.account._id);
     const rawRules = await loadRules(employeeId);
+    if (subject === "Request") {
+      const managedEmployeeIds = await resolveManagedRequestEmployeeIds(employeeId);
+      if (managedEmployeeIds.length) {
+        const conditions = {
+          user_id: { $in: managedEmployeeIds }
+        } as unknown as NonNullable<RawCaslRule["conditions"]>;
+        rawRules.push(
+          { action: "request.view", subject: "Request", conditions },
+          { action: "request.review", subject: "Request", conditions }
+        );
+      }
+    }
     const ability = buildAbility(rawRules);
 
     if (!ability.can(action, subject)) {

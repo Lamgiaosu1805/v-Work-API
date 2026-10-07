@@ -39,14 +39,39 @@ async function onRequestPartiallyApproved(
   if (String(employeeInfo.id_account) === String(reviewerInfo.id_account)) return;
 
   const label = TYPE_LABELS[event.requestType];
-  await notify(employeeInfo.id_account, {
-    title: "Đơn đã được duyệt bước 1/2",
-    body: `Đơn ${label} của bạn đã được ${reviewerInfo.full_name} duyệt (1/2), đang chờ người duyệt tiếp theo`,
-    type: "leave_partially_approved",
-    ref_id: event.aggregateId,
-    ref_type: "request",
-    uri: `/requests/${event.aggregateId}`
-  });
+  const notifications: Promise<unknown>[] = [
+    notify(employeeInfo.id_account, {
+      title: "Đơn đã được duyệt bước 1/2",
+      body: `Đơn ${label} của bạn đã được ${reviewerInfo.full_name} duyệt (1/2), đang chờ người duyệt tiếp theo`,
+      type: "leave_partially_approved",
+      ref_id: event.aggregateId,
+      ref_type: "request",
+      uri: `/requests/${event.aggregateId}`
+    })
+  ];
+
+  // Báo người duyệt tiếp theo — trước đây cấp 2 không nhận được thông báo nào cho tới khi đơn có kết
+  // quả. Đơn nghỉ phép duyệt tuần tự nên chỉ còn cấp 2; loại đơn khác (không theo thứ tự) thì báo mọi
+  // người còn lại trong chuỗi. Tra chuỗi sau khi đã gửi thông báo cho chủ đơn.
+  const chain = await getApprovalChain(event.userId);
+  const nextReviewers = event.requestType === "leave" ? chain.slice(1) : chain;
+  const excluded = new Set([String(reviewerInfo.id_account), String(employeeInfo.id_account)]);
+  nextReviewers
+    .filter((c) => !excluded.has(String(c.accountId)))
+    .forEach((c) => {
+      notifications.push(
+        notify(c.accountId, {
+          title: "Đơn chờ bạn duyệt (bước 2/2)",
+          body: `Đơn ${label} của ${employeeInfo.full_name} đã được ${reviewerInfo.full_name} duyệt bước 1, đang chờ bạn duyệt`,
+          type: `${event.requestType}_created`,
+          ref_id: event.aggregateId,
+          ref_type: "request",
+          uri: `/requests/${event.aggregateId}`
+        })
+      );
+    });
+
+  await Promise.all(notifications);
 }
 
 interface FinalDecisionOptions {
@@ -97,9 +122,11 @@ async function notifyFinalDecision(
     );
   }
 
-  const nearestChain = await getApprovalChain(event.userId);
+  // HCNS (người có hrm.request.view_all) + cả chuỗi duyệt — quản lý gián tiếp "nắm thông tin" theo
+  // luồng phân quyền chấm công, kể cả khi đơn chỉ cần quản lý trực tiếp duyệt.
+  const chain = await getApprovalChain(event.userId);
   const broadcastIds = new Set(hrAccountIds.map((accId: unknown) => String(accId)));
-  if (nearestChain[0]) broadcastIds.add(String(nearestChain[0].accountId));
+  chain.forEach((c) => broadcastIds.add(String(c.accountId)));
   broadcastIds.delete(reviewerAccountId);
   broadcastIds.delete(employeeAccountId);
 

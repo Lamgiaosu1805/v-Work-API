@@ -27,6 +27,11 @@ const UserInfoModel = new mongoose.Schema(
     start_date: { type: Date, default: null },
     probation_end_date: { type: Date, default: null },
     resignation_date: { type: Date, default: null },
+    // "Quản lý trực tiếp" (Duyệt cấp 1, theo LUỒNG PHÂN QUYỀN CHẤM CÔNG V-WORK) — HCNS gán thủ công
+    // cho từng nhân viên, có thể khác phòng ban (vd CV Pháp chế do TP TCKT duyệt). Quản lý gián tiếp
+    // (cấp 2) không lưu riêng mà suy ra = quản lý trực tiếp của người này, xem approval-chain.ts.
+    // Người được gán tự có quyền duyệt đơn (hrm.request.review), xem helpers/rbac.js.
+    direct_manager: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
     avatar: { type: String, default: null },
     cover_photo: { type: String, default: null },
     ...BaseSchema.obj

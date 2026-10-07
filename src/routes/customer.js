@@ -2,7 +2,7 @@ const express = require("express");
 const { authenticate } = require("../middlewares/authMiddleware");
 const { requirePermission } = require("../core/authorization/require-permission.middleware");
 const CustomerController = require("../controllers/CustomerController");
-// const CustomerInteractionController = require("../controllers/CustomerInteractionController");
+const CustomerInteractionController = require("../controllers/CustomerInteractionController");
 const verifyInternalRequest = require("../middlewares/verifyInternalRequest");
 
 const router = express.Router();
@@ -15,7 +15,14 @@ router.get("/my-customers", authenticate, viewCustomer, CustomerController.getMy
 router.get("/agent-customers", verifyInternalRequest, CustomerController.getMyCustomersAsAgent);
 router.get("/my-info", authenticate, CustomerController.getMyInfo);
 router.get("/all", authenticate, viewCustomer, CustomerController.getAll);
-router.get("/export-excel", authenticate, viewCustomer, CustomerController.exportExcel);
+// Xuất dữ liệu cần quyền riêng + ghi nhật ký (Quy định 183A, Điều 11); phạm vi dữ liệu vẫn theo customer.view
+router.get(
+  "/export-excel",
+  authenticate,
+  requirePermission("customer.export", "Customer"),
+  viewCustomer,
+  CustomerController.exportExcel
+);
 router.get(
   "/detail-info-customer",
   authenticate,
@@ -36,23 +43,24 @@ router.get(
   viewCustomer,
   CustomerController.getCustomerStaffInfo
 );
-// router.get(
-//   "/interactions/:externalId",
-//   authenticate,
-//   viewCustomer,
-//   CustomerInteractionController.list
-// );
+router.get(
+  "/interactions/:externalId",
+  authenticate,
+  requirePermission("customer_interaction.view", "CustomerInteraction"),
+  CustomerInteractionController.list
+);
 
 // POST
 router.post("/upsert", verifyInternalRequest, CustomerController.upsert);
 router.post("/apply-referral", verifyInternalRequest, CustomerController.applyReferral);
 router.post("/bulk-upsert", verifyInternalRequest, CustomerController.bulkUpsert);
-// router.post(
-//   "/interactions/:externalId",
-//   authenticate,
-//   viewCustomer,
-//   CustomerInteractionController.create
-// );
+// Báo cáo chăm sóc bắt buộc sau mỗi lần liên hệ (Quy định 183A, Điều 7.2)
+router.post(
+  "/interactions/:externalId",
+  authenticate,
+  requirePermission("customer_interaction.create", "CustomerInteraction"),
+  CustomerInteractionController.create
+);
 router.post(
   "/bulk-assign",
   authenticate,

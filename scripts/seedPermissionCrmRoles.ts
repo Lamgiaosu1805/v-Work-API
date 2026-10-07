@@ -12,6 +12,11 @@ const TEAM_LEAD_ROLE_CODE = "CRM_SALE_TEAM_LEAD";
 
 const SALE_GRANTS: PermissionGrantDoc[] = [
   {
+    permissionCode: "customer_care.view",
+    dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED",
+    fieldScopePolicyCode: null
+  },
+  {
     permissionCode: "customer.view",
     dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED",
     fieldScopePolicyCode: null
@@ -75,6 +80,21 @@ const SALE_GRANTS: PermissionGrantDoc[] = [
 
 const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
   {
+    permissionCode: "customer_care.view",
+    dataScopePolicyCode: "CUSTOMER_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_care.manage",
+    dataScopePolicyCode: "CUSTOMER_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer.export",
+    dataScopePolicyCode: "CUSTOMER_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
     permissionCode: "customer_call.view",
     dataScopePolicyCode: "CUSTOMER_OWN_DEPARTMENT",
     fieldScopePolicyCode: null
@@ -122,6 +142,26 @@ const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
 ];
 
 const SALE_MANAGER_GRANTS: PermissionGrantDoc[] = [
+  {
+    permissionCode: "customer_care.view",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_care.manage",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer_care.policy",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "customer.export",
+    dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
   {
     permissionCode: "customer.view",
     dataScopePolicyCode: "CUSTOMER_ALL_COMPANY",

@@ -19,6 +19,8 @@ export interface CustomerCareStateProps {
   enteredPoolAt: Date | null;
   convertedAt: Date | null;
   statusReason: string | null;
+  /** Ưu tiên thấp (vd khách dưới 18 tuổi): vẫn ở kho chung nhưng phân sau mọi khách khác */
+  lowPriority: boolean;
 }
 
 export class CustomerCareStateEntity extends Entity<CustomerCareStateProps> {
@@ -42,7 +44,8 @@ export class CustomerCareStateEntity extends Entity<CustomerCareStateProps> {
         previousSaleIds: [],
         enteredPoolAt: input.at,
         convertedAt: null,
-        statusReason: null
+        statusReason: null,
+        lowPriority: false
       }
     });
   }
@@ -132,6 +135,15 @@ export class CustomerCareStateEntity extends Entity<CustomerCareStateProps> {
       enteredPoolAt: at,
       statusReason: reason
     });
+  }
+
+  get lowPriority(): boolean {
+    return this.props.lowPriority;
+  }
+
+  setLowPriority(lowPriority: boolean): void {
+    if (this.props.lowPriority === lowPriority) return;
+    this._setProps({ lowPriority });
   }
 
   reclassify(priorityClass: "A" | "B"): void {

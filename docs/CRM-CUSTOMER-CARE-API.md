@@ -105,7 +105,8 @@ Room `user:<userInfoId>` nhận `customer_call:ended` (và `customer_call:rate` 
 
 ### `GET /customer-care/pool?appCode=&poolStatus=in_pool|nurturing|excluded&priorityClass=A|B|C&page=&limit=`
 `{ data: [{ _id, customer_id:{...}, pool_status, priority_class, round_count, entered_pool_at,
-previous_sale_ids, status_reason }], total, page, limit }`
+previous_sale_ids, status_reason, low_priority }], total, page, limit }`
+`low_priority: true` = khách dưới 18 tuổi (theo eKYC) — phân sau mọi khách khác.
 
 ### `GET /customer-care/sales?appCode=`
 ```json

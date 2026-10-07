@@ -11,8 +11,13 @@ jest.mock("../src/modules/permission", () => ({
 
 /* eslint-disable import/first */
 import { listEmployeesByRoleCodes } from "../src/modules/permission";
-import { updateCarePolicy, setSaleAllocationStatus } from "../src/modules/customer-care";
 import {
+  updateCarePolicy,
+  setSaleAllocationStatus,
+  setSaleCaps
+} from "../src/modules/customer-care";
+import {
+  isMinorAt,
   syncCustomerCareByCustomerId,
   isCustomerSystemAssigned
 } from "../src/workflows/sync-customer-care.workflow";
@@ -64,7 +69,9 @@ async function createSale(maNv: string) {
   return String(info._id);
 }
 
-async function createCustomer(opts: { kyc?: boolean; referredBy?: string } = {}) {
+async function createCustomer(
+  opts: { kyc?: boolean; referredBy?: string; dateOfBirth?: Date } = {}
+) {
   phoneSeq += 1;
   const customer = await CustomerModel.create({
     app_id: appId,
@@ -74,7 +81,11 @@ async function createCustomer(opts: { kyc?: boolean; referredBy?: string } = {})
     source_type: opts.referredBy ? "sale" : "marketing",
     referred_by: opts.referredBy ?? null,
     identity: opts.kyc
-      ? { full_name: `Khách ${phoneSeq}`, verified_at: vn("2026-10-06T10:00") }
+      ? {
+          full_name: `Khách ${phoneSeq}`,
+          verified_at: vn("2026-10-06T10:00"),
+          date_of_birth: opts.dateOfBirth ?? new Date("1990-05-01")
+        }
       : {}
   });
   return String(customer._id);
@@ -339,6 +350,34 @@ describe("Luồng chăm sóc khách TIKLUY (Quy định 183A)", () => {
     );
     expect(await releaseUnavailableSaleCustomers(vn("2026-10-08T00:10"))).toBe(1);
     expect(await activeAssignment(referral)).toBeNull();
+  });
+
+  it("khách dưới 18 tuổi vẫn vào kho nhưng phân sau mọi khách khác (chỉ khi Sale còn hạn mức)", async () => {
+    expect(isMinorAt(new Date("2010-10-08"), vn("2026-10-07T09:00"))).toBe(true);
+    expect(isMinorAt(new Date("2008-10-07"), vn("2026-10-07T09:00"))).toBe(false);
+    expect(isMinorAt(null, vn("2026-10-07T09:00"))).toBe(false);
+
+    (listEmployeesByRoleCodes as jest.Mock).mockResolvedValue([
+      { employeeId: saleA, accountIsDeleted: false }
+    ]);
+    await setSaleCaps({ saleId: saleA, capNewPerDay: 1, capTotal: 50, defaultRank: "C" });
+
+    // Khách 16 tuổi vào kho TRƯỚC, khách người lớn vào sau — người lớn vẫn được phân trước
+    const minor = await createCustomer({ kyc: true, dateOfBirth: new Date("2010-03-15") });
+    await syncCustomerCareByCustomerId(minor, vn("2026-10-07T08:30"));
+    const adult = await createCustomer({ kyc: true });
+    await syncCustomerCareByCustomerId(adult, vn("2026-10-07T08:40"));
+    expect((await careState(minor)).low_priority).toBe(true);
+    expect((await careState(adult)).low_priority).toBe(false);
+
+    const run = await allocateCustomerPool("tikluy", vn("2026-10-07T09:00"));
+    expect(run).toMatchObject({ assigned: 1, leftInPool: 1 });
+    expect(await activeAssignment(adult)).not.toBeNull();
+    expect(await activeAssignment(minor)).toBeNull();
+
+    // Ngày làm việc kế tiếp Sale có hạn mức trống → khách dưới 18 tuổi mới được phân
+    await allocateCustomerPool("tikluy", vn("2026-10-08T09:00"));
+    expect(String((await activeAssignment(minor)).sale_id)).toBe(saleA);
   });
 
   it("chế độ chạy thử (enabled = false): chỉ ghi nhận Pool, không phân, không thu hồi", async () => {

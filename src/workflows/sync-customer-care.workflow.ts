@@ -18,13 +18,23 @@ export interface SyncCustomerCareOptions {
   actorAccountId?: string | null;
 }
 
+/** Dưới 18 tuổi tại thời điểm `at` (theo ngày sinh eKYC) — chưa eKYC thì chưa biết tuổi → false. */
+export function isMinorAt(dateOfBirth: Date | string | null | undefined, at: Date): boolean {
+  if (!dateOfBirth) return false;
+  const dob = new Date(dateOfBirth);
+  if (Number.isNaN(dob.getTime())) return false;
+  const adultAt = new Date(dob);
+  adultAt.setFullYear(dob.getFullYear() + 18);
+  return at.getTime() < adultAt.getTime();
+}
+
 export async function syncCustomerCareByCustomerId(
   customerId: string,
   at: Date = new Date(),
   options: SyncCustomerCareOptions = {}
 ): Promise<SyncCustomerCareResult> {
   const customer = (await CustomerModel.findOne({ _id: customerId, isDeleted: false })
-    .select("app_id referred_by agent_id status identity.verified_at")
+    .select("app_id referred_by agent_id status identity.verified_at identity.date_of_birth")
     .lean()) as any;
   if (!customer) return { action: "skipped" };
   // Khách của đại lý không thuộc luồng phân cho Sale
@@ -49,7 +59,8 @@ export async function syncCustomerCareByCustomerId(
       currentSaleId: customer.referred_by ? String(customer.referred_by) : null,
       at,
       ownerChannel: options.ownerChannel,
-      actorAccountId: options.actorAccountId ?? null
+      actorAccountId: options.actorAccountId ?? null,
+      lowPriority: isMinorAt(customer.identity?.date_of_birth, at)
     })
   );
 }

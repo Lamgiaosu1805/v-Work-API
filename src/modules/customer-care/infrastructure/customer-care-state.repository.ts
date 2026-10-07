@@ -19,11 +19,11 @@ export class CustomerCareStateRepository extends MongooseRepositoryBase<
     return doc ? this.mapper.toDomain(doc) : null;
   }
 
-  /** Khách trong Pool theo thứ tự phân: nhóm A trước B, vào Pool sớm trước. */
+  /** Khách trong Pool theo thứ tự phân: ưu tiên thường trước ưu tiên thấp, nhóm A trước B, vào Pool sớm trước. */
   async findPoolQueue(appId: string, limit: number): Promise<CustomerCareStateEntity[]> {
     const docs = await this.model
       .find({ app_id: appId, pool_status: "in_pool", isDeleted: false })
-      .sort({ priority_class: 1, entered_pool_at: 1 })
+      .sort({ low_priority: 1, priority_class: 1, entered_pool_at: 1 })
       .limit(limit)
       .session(this.session ?? null)
       .lean();

@@ -181,7 +181,7 @@ export async function listPool(ability: Ability, filters: ListPoolFilters) {
   const [data, total] = await Promise.all([
     CustomerCareStateModel.find(match)
       .populate("customer_id", CUSTOMER_FIELDS)
-      .sort({ priority_class: 1, entered_pool_at: 1 })
+      .sort({ low_priority: 1, priority_class: 1, entered_pool_at: 1 })
       .skip(skip)
       .limit(limit)
       .lean(),

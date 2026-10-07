@@ -22,7 +22,8 @@ export const customerCareStateMapper: Mapper<CustomerCareStateEntity, any> = {
           previousSaleIds: (record.previous_sale_ids ?? []).map(String),
           enteredPoolAt: record.entered_pool_at ?? null,
           convertedAt: record.converted_at ?? null,
-          statusReason: record.status_reason ?? null
+          statusReason: record.status_reason ?? null,
+          lowPriority: !!record.low_priority
         } as CustomerCareStateProps,
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
@@ -46,7 +47,8 @@ export const customerCareStateMapper: Mapper<CustomerCareStateEntity, any> = {
       previous_sale_ids: p.previousSaleIds,
       entered_pool_at: p.enteredPoolAt,
       converted_at: p.convertedAt,
-      status_reason: p.statusReason
+      status_reason: p.statusReason,
+      low_priority: p.lowPriority
     };
   }
 };

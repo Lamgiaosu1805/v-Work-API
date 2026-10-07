@@ -24,6 +24,8 @@ const CustomerCareStateSchema = new Schema(
     entered_pool_at: { type: Date, default: null },
     converted_at: { type: Date, default: null },
     status_reason: { type: String, default: null },
+    // Ưu tiên thấp (khách dưới 18 tuổi — chốt 07/10/2026): vẫn vào kho, phân sau mọi khách khác
+    low_priority: { type: Boolean, default: false },
 
     ...BaseSchema.obj
   },
@@ -39,6 +41,12 @@ CustomerCareStateSchema.index(
   { customer_id: 1 },
   { unique: true, partialFilterExpression: { isDeleted: false } }
 );
-CustomerCareStateSchema.index({ app_id: 1, pool_status: 1, priority_class: 1, entered_pool_at: 1 });
+CustomerCareStateSchema.index({
+  app_id: 1,
+  pool_status: 1,
+  low_priority: 1,
+  priority_class: 1,
+  entered_pool_at: 1
+});
 
 export default mongoose.model("customer_care_state", CustomerCareStateSchema);

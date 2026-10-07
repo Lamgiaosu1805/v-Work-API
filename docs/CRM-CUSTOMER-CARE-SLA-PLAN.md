@@ -247,4 +247,12 @@ Permission mới seed vào `seedPermissionCrmRoles.ts`: Sale/Team lead `customer
 - Web, App (mục 5); named flag mới cho `usePermissions.js` + `getPermissions()`.
 - `/customer/bulk-upsert` (đồng bộ batch, cron phía TIKLUY đang tắt) chưa gọi đồng bộ Pool.
 - Thông báo quản lý khi Pool tồn không có Sale nhận (hiện chỉ thấy trên dashboard).
-- Các điểm cần chốt ở mục 9 (khách < 18 tuổi, ngưỡng 20s, số ngày backfill).
+- Xác nhận với phía TIKLUY: khách 13–17 tuổi có luôn đi qua eKYC và gửi `date_of_birth` không (session
+  TIKLUY không mở lúc chốt — nếu không gửi thì khách này không được nhận diện ưu tiên thấp).
+
+### Quyết định đã chốt (07/10/2026) — thay cho mục 9.1–9.3
+1. **Khách dưới 18 tuổi**: vẫn vào kho nhưng **ưu tiên thấp** — `customer_care_state.low_priority = true`
+   khi ngày sinh eKYC < 18 tuổi; hàng đợi phân sắp `low_priority` trước nhất nên chỉ được phân khi Sale
+   còn hạn mức sau khi đã nhận hết khách thường. Chưa eKYC = chưa biết tuổi → ưu tiên bình thường.
+2. **Ngưỡng cuộc gọi hợp lệ**: giữ **20 giây** (mặc định `validCallMinAnswerSec`).
+3. **Backfill**: **30 ngày** — `backfillCustomerCarePool.ts --app=tikluy --days=30` (chạy `--dry-run` trước).

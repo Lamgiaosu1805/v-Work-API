@@ -59,6 +59,8 @@ export interface SyncCustomerCareInput {
    */
   ownerChannel?: AssignmentChannel;
   actorAccountId?: string | null;
+  /** Khách thuộc diện ưu tiên thấp (dưới 18 tuổi theo eKYC) — phân sau mọi khách khác */
+  lowPriority?: boolean;
 }
 
 export type SyncCustomerCareResult =
@@ -99,11 +101,17 @@ export async function syncCustomerCare(
     await stateRepository.insert(state);
   }
 
+  const lowPriorityChanged = state.lowPriority !== !!input.lowPriority;
+  state.setLowPriority(!!input.lowPriority);
+  if (lowPriorityChanged && isNew) await stateRepository.updateById(state.id, state);
+
   const active = await assignmentRepository.findActiveByCustomer(input.customerId);
 
   if (cls === null) {
-    if (state.poolStatus === "converted")
+    if (state.poolStatus === "converted") {
+      if (lowPriorityChanged) await stateRepository.updateById(state.id, state);
       return { action: "updated", poolStatus: "converted", assignmentId: null };
+    }
     let endedSaleId: string | null = null;
     if (active) {
       active.end("converted", input.at, null, "Khách đã đầu tư");

@@ -7,6 +7,7 @@ const { registerAccrueMonthlyLeaveJob } = require("./accrueMonthlyLeave");
 const { registerChurnDetectionJob } = require("./churnDetectionJob");
 const { registerSharedFolderCleanupJob } = require("./sharedFolderCleanupJob");
 const { registerReconcileFecLeadCommissionJob } = require("./reconcileFecLeadCommission");
+const { registerCustomerCareJobs } = require("./customerCareJob");
 
 function startCronJobs() {
   registerGenWorkSheetJob();
@@ -18,6 +19,7 @@ function startCronJobs() {
   registerChurnDetectionJob();
   registerSharedFolderCleanupJob();
   registerReconcileFecLeadCommissionJob();
+  registerCustomerCareJobs();
 }
 
 module.exports = { startCronJobs };

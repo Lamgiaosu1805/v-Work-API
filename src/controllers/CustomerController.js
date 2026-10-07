@@ -8,6 +8,7 @@ const AppModel = require("../models/AppModel");
 const AgentModel = require("../models/AgentModel");
 const CustomerClaimRequestModel = require("../models/CustomerClaimRequestModel");
 const InvestmentModel = require("../models/InvestmentModel");
+const DataExportLogModel = require("../models/DataExportLogModel");
 const {
   createCifCommission,
   createEkycCommission,
@@ -20,6 +21,7 @@ const { tikluyClient } = require("../utils/tikluyClient");
 const { decrypt, buildCustomerPipeline } = require("../helpers/customerHelper");
 const { canAccessCustomer, canManageSale } = require("../helpers/crmScope");
 const { invalidatePermissionCache } = require("../core/authorization/invalidate-permission-cache");
+const { syncCustomerCareInBackground } = require("../workflows/sync-customer-care.workflow");
 
 const GENDER_LABELS = {
   male: "Nam",
@@ -248,6 +250,7 @@ const CustomerController = {
         if (referred_by) {
           await invalidatePermissionCache([String(referred_by)]);
         }
+        syncCustomerCareInBackground(customer._id);
 
         return res.status(201).json({
           message: "Tạo khách hàng thành công",
@@ -374,6 +377,7 @@ const CustomerController = {
       if (updateData.referred_by) {
         await invalidatePermissionCache([String(updateData.referred_by)]);
       }
+      syncCustomerCareInBackground(existingCustomer._id);
 
       return res.status(200).json({
         message: "Cập nhật khách hàng thành công",
@@ -1110,6 +1114,7 @@ const CustomerController = {
 
       await session.commitTransaction();
       session.endSession();
+      syncCustomerCareInBackground(customer._id);
 
       return res.status(200).json({
         message: "Áp dụng mã giới thiệu thành công",
@@ -1413,6 +1418,10 @@ const CustomerController = {
       session.endSession();
 
       await invalidatePermissionCache([oldSaleId ? String(oldSaleId) : null, String(newSale._id)]);
+      syncCustomerCareInBackground(customer._id, {
+        ownerChannel: "manual",
+        actorAccountId: String(accountId)
+      });
 
       return res.status(200).json({
         message: "Chuyển sale thành công",
@@ -1522,6 +1531,7 @@ const CustomerController = {
       session.endSession();
 
       await invalidatePermissionCache([String(oldSaleId)]);
+      syncCustomerCareInBackground(customer._id, { actorAccountId: String(accountId) });
 
       return res
         .status(200)
@@ -1682,6 +1692,10 @@ const CustomerController = {
       session.endSession();
 
       await invalidatePermissionCache([String(sale._id)]);
+      syncCustomerCareInBackground(customer._id, {
+        ownerChannel: "manual",
+        actorAccountId: String(accountId)
+      });
 
       return res.status(200).json({
         message: "Phân khách thành công",
@@ -1861,6 +1875,12 @@ const CustomerController = {
       session.endSession();
 
       await invalidatePermissionCache([String(sale._id)]);
+      assigned.forEach((customerId) =>
+        syncCustomerCareInBackground(customerId, {
+          ownerChannel: "manual",
+          actorAccountId: String(accountId)
+        })
+      );
 
       return res.status(200).json({
         message: `Đã phân ${assigned.length}/${customer_ids.length} khách hàng cho sale ${sale.full_name}`,
@@ -1952,6 +1972,14 @@ const CustomerController = {
       XLSX.utils.book_append_sheet(workbook, worksheet, "Khách hàng");
 
       const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+      await DataExportLogModel.create({
+        account_id: req.account._id,
+        resource: "customer",
+        filters: req.query,
+        row_count: rows.length,
+        ip: req.ip ?? null,
+        user_agent: req.get("user-agent") ?? null
+      });
       const filename = `khach_hang_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
       res.setHeader(

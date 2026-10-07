@@ -9,3 +9,5 @@ export { removeSaleOmicallProfile } from "./application/remove-sale-omicall-prof
 export { updateSaleOmicallPassword } from "./application/update-sale-omicall-password.service";
 
 export { listOmicallAgentsByEmail } from "./application/list-omicall-agents.service";
+
+export { CallLogEndedDomainEvent } from "./domain/events/call-log-ended.domain-event";

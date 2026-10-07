@@ -657,6 +657,38 @@ const DEFINITIONS: PermissionDef[] = [
     validDataScopePolicies: CUSTOMER_CALL_SCOPES
   },
   {
+    code: "customer.export",
+    module: "crm",
+    name: "Xuất Excel danh sách khách hàng",
+    entity: "Customer",
+    actionKind: "READ",
+    validDataScopePolicies: CUSTOMER_SCOPES_VIEW
+  },
+  {
+    code: "customer_care.view",
+    module: "crm",
+    name: "Xem khách cần xử lý (SLA chăm sóc) của mình",
+    entity: "Customer",
+    actionKind: "READ",
+    validDataScopePolicies: CUSTOMER_SCOPES_VIEW
+  },
+  {
+    code: "customer_care.manage",
+    module: "crm",
+    name: "Điều phối khách: kho chung, phân/thu hồi, tạm dừng nhận khách, dashboard SLA",
+    entity: "Customer",
+    actionKind: "STRUCTURAL",
+    validDataScopePolicies: ["CUSTOMER_ALL_COMPANY", "CUSTOMER_OWN_DEPARTMENT"]
+  },
+  {
+    code: "customer_care.policy",
+    module: "crm",
+    name: "Cấu hình chính sách SLA/phân khách (CRM/IT)",
+    entity: "Customer",
+    actionKind: "STRUCTURAL",
+    validDataScopePolicies: ["CUSTOMER_ALL_COMPANY"]
+  },
+  {
     code: "customer_interaction.view",
     module: "crm",
     name: "Xem lịch sử tương tác khách hàng",

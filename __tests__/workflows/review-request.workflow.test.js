@@ -36,6 +36,17 @@ const NONE = { $expr: { $eq: [0, 1] } };
 let mongod;
 let repo;
 
+async function configuredReviewers(ownerId) {
+  const reviewers = await UserInfoModel.find({ _id: { $ne: ownerId }, isDeleted: false })
+    .sort({ _id: 1 })
+    .lean();
+  return reviewers.map((reviewer) => ({
+    accountId: reviewer.id_account,
+    userInfoId: reviewer._id,
+    source: "direct_manager"
+  }));
+}
+
 beforeAll(async () => {
   mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongod.getUri());
@@ -48,6 +59,11 @@ afterAll(async () => {
   await mongod.stop();
 });
 
+beforeEach(() => {
+  // getApprovalChain luôn trả mảng ở code thật — mặc định chuỗi rỗng, test cần chuỗi cụ thể tự override.
+  getApprovalChain.mockResolvedValue([]);
+});
+
 afterEach(async () => {
   await AccountModel.deleteMany({});
   await UserInfoModel.deleteMany({});
@@ -55,7 +71,7 @@ afterEach(async () => {
   await LeaveRequest.deleteMany({});
   await ForgotCheckinRequest.deleteMany({});
   jest.restoreAllMocks();
-  getApprovalChain.mockReset().mockResolvedValue([]);
+  getApprovalChain.mockReset();
   notify.mockReset();
 });
 
@@ -78,6 +94,7 @@ async function createUserInfo(n) {
 
 async function insertEntity(entity) {
   await RequestContextService.run({ requestId: "setup" }, () => repo.insert(entity));
+  getApprovalChain.mockResolvedValue(await configuredReviewers(entity.userId));
 }
 
 function newExplanationEntity(userId) {
@@ -239,7 +256,8 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
 
   it("200: đơn đa duyệt (leave total_days>3) — lần approve ĐẦU không finalize, KHÔNG gọi handler.onApprove", async () => {
     const { account: r1 } = await createUserInfo(1);
-    const { userInfo: owner } = await createUserInfo(2);
+    await createUserInfo(2);
+    const { userInfo: owner } = await createUserInfo(3);
     const entity = newLongLeaveEntity(owner._id);
     await insertEntity(entity);
 
@@ -305,7 +323,8 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
 
   it("notify: thông báo 1/2 khi duyệt partial, gửi cho chủ đơn", async () => {
     const { account: r1 } = await createUserInfo(1);
-    const { userInfo: owner } = await createUserInfo(2);
+    await createUserInfo(2);
+    const { userInfo: owner } = await createUserInfo(3);
     const entity = newLongLeaveEntity(owner._id);
     await insertEntity(entity);
 
@@ -314,9 +333,14 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
       setTimeout(resolve, 50);
     });
 
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(String(notify.mock.calls[0][0])).toBe(String(owner.id_account));
-    expect(notify.mock.calls[0][1]).toMatchObject({ type: "leave_partially_approved" });
+    expect(notify).toHaveBeenCalledTimes(2);
+    const ownerNotification = notify.mock.calls.find(
+      (call) => String(call[0]) === String(owner.id_account)
+    );
+    expect(ownerNotification[1]).toMatchObject({ type: "leave_partially_approved" });
+    expect(notify.mock.calls.some((call) => call[1].title === "Đơn chờ bạn duyệt (bước 2/2)")).toBe(
+      true
+    );
   });
 
   it("notify: khi reject đè lên approval đã có, message có nhắc tới việc đã duyệt 1 phần trước đó", async () => {
@@ -342,7 +366,7 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
     expect(rejectNotifyCall[1].body).toMatch(/duyệt 1 phần trước đó/);
   });
 
-  it("2 reviewer approve đồng thời đơn đa duyệt (Redis lock serialize) — cả 2 đều thành công, không ConflictException, approvals đủ 2, đúng 1 lần finalize", async () => {
+  it("2 cấp duyệt tuần tự đơn nghỉ dài ngày — đủ 2 lượt và chỉ finalize 1 lần", async () => {
     const { account: r1 } = await createUserInfo(1);
     const { account: r2 } = await createUserInfo(2);
     const { userInfo: owner } = await createUserInfo(3);
@@ -351,22 +375,20 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
 
     jest.spyOn(leaveSideEffects, "onApprove").mockResolvedValue(undefined);
 
-    const [res1, res2] = await Promise.all([
-      reviewRequest(r1, ALL, entity.id, { action: "approve" }),
-      reviewRequest(r2, ALL, entity.id, { action: "approve" })
-    ]);
+    const step1 = await reviewRequest(r1, ALL, entity.id, { action: "approve" });
+    const step2 = await reviewRequest(r2, ALL, entity.id, { action: "approve" });
 
-    const finalized = [res1, res2].filter((r) => r.isFinal);
-    expect(finalized).toHaveLength(1);
-    expect(finalized[0].entity.status).toBe("approved");
-    expect(finalized[0].entity.approvals).toHaveLength(2);
+    expect(step1.isFinal).toBe(false);
+    expect(step2.isFinal).toBe(true);
+    expect(step2.entity.status).toBe("approved");
+    expect(step2.entity.approvals).toHaveLength(2);
   });
 
   // Người dùng chốt qua hỏi trực tiếp: KHÔNG ràng buộc thứ tự duyệt giữa 2 cấp — ai có quyền duyệt
   // (scope filter khớp) cũng được, kể cả forgot_checkin/late_early.
   describe("đơn đa cấp: không ràng buộc thứ tự duyệt giữa 2 người duyệt", () => {
     it("200: reviewer thứ 2 duyệt lần đầu dù reviewer thứ 1 chưa duyệt — vẫn được phép, isFinal=false", async () => {
-      const { account: r1 } = await createUserInfo(1);
+      await createUserInfo(1);
       const { account: r2 } = await createUserInfo(2);
       const { userInfo: owner } = await createUserInfo(3);
       const entity = newMultiApprovalForgotCheckinEntity(owner._id);
@@ -393,6 +415,133 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
       expect(result.isFinal).toBe(true);
       expect(result.entity.status).toBe("approved");
       expect(result.entity.approvals).toHaveLength(2);
+    });
+  });
+
+  // LUỒNG PHÂN QUYỀN CHẤM CÔNG V-WORK (HCNS, 10/2026): nghỉ dưới 2 ngày chỉ quản lý trực tiếp duyệt
+  // (gián tiếp nắm thông tin); từ 2 ngày cấp 1 duyệt rồi mới chuyển cấp 2.
+  describe("đơn nghỉ phép theo luồng phân quyền chấm công", () => {
+    function newLeaveEntity(userId, totalDays) {
+      return RequestEntity.create({
+        userId,
+        requestType: "leave",
+        reason: "test",
+        from_date: new Date("2026-01-05"),
+        from_period: "morning",
+        to_date: new Date("2026-01-06"),
+        to_period: "afternoon",
+        total_days: totalDays,
+        leave_type: "paid",
+        paid_days: totalDays,
+        unpaid_days: 0
+      });
+    }
+
+    async function setupChain(totalDays) {
+      const { account: direct, userInfo: directInfo } = await createUserInfo(1);
+      const { account: indirect, userInfo: indirectInfo } = await createUserInfo(2);
+      const { userInfo: owner } = await createUserInfo(3);
+      const entity = newLeaveEntity(owner._id, totalDays);
+      await insertEntity(entity);
+      getApprovalChain.mockResolvedValue([
+        { accountId: direct._id, userInfoId: directInfo._id },
+        { accountId: indirect._id, userInfoId: indirectInfo._id }
+      ]);
+      jest.spyOn(leaveSideEffects, "onApprove").mockResolvedValue(undefined);
+      jest.spyOn(leaveSideEffects, "onReject").mockResolvedValue(undefined);
+      return { direct, indirect, entity };
+    }
+
+    it("nghỉ dưới 2 ngày: quản lý gián tiếp không duyệt được (403)", async () => {
+      const { indirect, entity } = await setupChain(1.5);
+
+      await expect(
+        reviewRequest(indirect, ALL, entity.id, { action: "approve" })
+      ).rejects.toMatchObject({ statusCode: 403 });
+      await expect(
+        reviewRequest(indirect, ALL, entity.id, { action: "reject" })
+      ).rejects.toMatchObject({ statusCode: 403 });
+    });
+
+    it("nghỉ dưới 2 ngày: quản lý trực tiếp duyệt 1 lần là xong", async () => {
+      const { direct, entity } = await setupChain(1);
+
+      const result = await reviewRequest(direct, ALL, entity.id, { action: "approve" });
+
+      expect(result.isFinal).toBe(true);
+      expect(result.entity.status).toBe("approved");
+    });
+
+    it("nghỉ từ 2 ngày: cấp 2 không duyệt trước cấp 1 được (403)", async () => {
+      const { indirect, entity } = await setupChain(2);
+
+      await expect(
+        reviewRequest(indirect, ALL, entity.id, { action: "approve" })
+      ).rejects.toMatchObject({
+        statusCode: 403,
+        message: "Đơn đang chờ quản lý trực tiếp duyệt trước"
+      });
+    });
+
+    it("nghỉ từ 2 ngày: cấp 1 duyệt -> chờ cấp 2; cấp 2 duyệt -> approved", async () => {
+      const { direct, indirect, entity } = await setupChain(2);
+
+      const step1 = await reviewRequest(direct, ALL, entity.id, { action: "approve" });
+      expect(step1.isFinal).toBe(false);
+      expect(step1.entity.approvals).toHaveLength(1);
+
+      const step2 = await reviewRequest(indirect, ALL, entity.id, { action: "approve" });
+      expect(step2.isFinal).toBe(true);
+      expect(step2.entity.status).toBe("approved");
+      expect(step2.entity.approvals).toHaveLength(2);
+    });
+
+    it("nghỉ từ 2 ngày: cấp 1 đã duyệt thì không tự từ chối được nữa, chỉ cấp 2 quyết", async () => {
+      const { direct, indirect, entity } = await setupChain(3);
+
+      await reviewRequest(direct, ALL, entity.id, { action: "approve" });
+      await expect(
+        reviewRequest(direct, ALL, entity.id, { action: "reject" })
+      ).rejects.toMatchObject({ statusCode: 403 });
+
+      const result = await reviewRequest(indirect, ALL, entity.id, { action: "reject" });
+      expect(result.entity.status).toBe("rejected");
+    });
+
+    it("nghỉ từ 2 ngày: cấp 1 duyệt lại lần 2 vẫn báo AlreadyReviewedError (409)", async () => {
+      const { direct, entity } = await setupChain(2);
+
+      await reviewRequest(direct, ALL, entity.id, { action: "approve" });
+      await expect(
+        reviewRequest(direct, ALL, entity.id, { action: "approve" })
+      ).rejects.toMatchObject({ statusCode: 409 });
+    });
+
+    it("nghỉ từ 2 ngày nhưng chuỗi chỉ có 1 cấp (vd TGĐ duyệt cho Phó TGĐ): 1 lượt là xong", async () => {
+      const { account: ceo, userInfo: ceoInfo } = await createUserInfo(1);
+      const { userInfo: owner } = await createUserInfo(2);
+      const entity = newLeaveEntity(owner._id, 5);
+      await insertEntity(entity);
+      getApprovalChain.mockResolvedValue([{ accountId: ceo._id, userInfoId: ceoInfo._id }]);
+      jest.spyOn(leaveSideEffects, "onApprove").mockResolvedValue(undefined);
+
+      const result = await reviewRequest(ceo, ALL, entity.id, { action: "approve" });
+
+      expect(result.isFinal).toBe(true);
+      expect(result.entity.status).toBe("approved");
+    });
+
+    it("thông báo cấp 2 khi cấp 1 duyệt xong đơn nghỉ từ 2 ngày", async () => {
+      const { direct, indirect, entity } = await setupChain(2);
+
+      await reviewRequest(direct, ALL, entity.id, { action: "approve" });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      const toIndirect = notify.mock.calls.find((call) => String(call[0]) === String(indirect._id));
+      expect(toIndirect).toBeDefined();
+      expect(toIndirect[1].title).toBe("Đơn chờ bạn duyệt (bước 2/2)");
     });
   });
 });

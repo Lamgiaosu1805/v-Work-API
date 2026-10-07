@@ -15,13 +15,29 @@ import { RequestType, RequestProps, RequestStatus } from "./types";
 
 const VALID_STATUSES: RequestStatus[] = ["pending", "approved", "rejected", "cancelled"];
 
-// SRS "Nghỉ dài hạn": ngưỡng 2 cấp duyệt là "> 2 ngày" (không phải > 3 — đã sửa theo yêu cầu người
-// dùng sau khi đối chiếu lại tài liệu SRS v2.0, 03/08/2026).
+// LUỒNG PHÂN QUYỀN CHẤM CÔNG V-WORK (HCNS, 10/2026): "Nghỉ phép dưới 2 ngày: Quản lý trực tiếp phê
+// duyệt" — từ 2 ngày trở lên là vượt thẩm quyền, phải chuyển Quản lý gián tiếp duyệt (thay ngưỡng
+// "> 2 ngày" của SRS v2.0 trước đây).
+export const LEAVE_MULTI_APPROVAL_MIN_DAYS = 2;
+
 const MULTI_APPROVAL_RULES: Partial<Record<RequestType, (props: RequestProps) => boolean>> = {
-  leave: (props) => (props.total_days ?? 0) > 2,
+  leave: (props) => (props.total_days ?? 0) >= LEAVE_MULTI_APPROVAL_MIN_DAYS,
   forgot_checkin: (props) => (props.occurrence ?? 0) >= 6,
   late_early: (props) => (props.occurrence ?? 0) >= 4
 };
+
+// Ai trong chuỗi duyệt (cấp 1 = trực tiếp, cấp 2 = gián tiếp) được duyệt/từ chối đơn:
+// - direct_only: chỉ cấp 1; cấp 2 chỉ nhận thông tin (nghỉ phép dưới 2 ngày)
+// - sequential: cấp 1 duyệt trước rồi mới chuyển cấp 2 (nghỉ phép từ 2 ngày)
+// - any: ai trong chuỗi cũng được, không theo thứ tự (các loại đơn khác — giữ nguyên như cũ)
+export type ApprovalMode = "direct_only" | "sequential" | "any";
+
+export function approvalModeOf(
+  props: Pick<RequestProps, "request_type" | "total_days">
+): ApprovalMode {
+  if (props.request_type !== "leave") return "any";
+  return (props.total_days ?? 0) >= LEAVE_MULTI_APPROVAL_MIN_DAYS ? "sequential" : "direct_only";
+}
 
 export const REQUEST_TYPE_FIELDS: Record<RequestType, string[]> = {
   leave: [
@@ -101,11 +117,28 @@ export class RequestEntity extends AggregateRoot<RequestProps> {
     return rule ? rule(this.props) : false;
   }
 
-  approve(reviewerId: string, reviewerNote = ""): void {
+  approvalMode(): ApprovalMode {
+    return approvalModeOf(this.props);
+  }
+
+  // Số lượt duyệt cần để đơn được duyệt xong, khi chuỗi duyệt có `chainLength` người. Đơn nghỉ phép
+  // nhiều cấp mà chuỗi chỉ có 1 cấp (vd Phó TGĐ xin nghỉ, chỉ TGĐ ở trên) thì 1 lượt là đủ — các loại
+  // đơn khác, hoặc chưa biết chuỗi (không truyền / chuỗi rỗng), giữ nguyên cách cũ: đa cấp cần 2 lượt.
+  requiredApprovals(chainLength?: number): number {
+    if (!this.needsMultiApproval()) return 1;
+    if (this.approvalMode() === "sequential" && chainLength) return Math.min(2, chainLength);
+    return 2;
+  }
+
+  approve(
+    reviewerId: string,
+    reviewerNote = "",
+    requiredApprovals = this.requiredApprovals()
+  ): void {
     this._assertNotSelfReview(reviewerId);
     this._assertPending();
 
-    if (!this.needsMultiApproval()) {
+    if (requiredApprovals <= 1) {
       this._finalizeApproval(reviewerId, reviewerNote);
       return;
     }
@@ -121,7 +154,7 @@ export class RequestEntity extends AggregateRoot<RequestProps> {
 
     const approvals = [...this.props.approvals, { account: reviewerId, reviewed_at: new Date() }];
 
-    if (approvals.length >= 2) {
+    if (approvals.length >= requiredApprovals) {
       this._setProps({ approvals });
       this._finalizeApproval(reviewerId, reviewerNote);
     } else {
@@ -161,7 +194,7 @@ export class RequestEntity extends AggregateRoot<RequestProps> {
 
   cancel(): void {
     this._assertPending();
-    // Đơn đa cấp (leave >3 ngày / forgot_checkin >=6 lần / late_early >=4 lần): sau khi cấp 1 đã duyệt,
+    // Đơn đa cấp (leave >=2 ngày / forgot_checkin >=6 lần / late_early >=4 lần): sau khi cấp 1 đã duyệt,
     // status vẫn "pending" cho tới khi đủ cấp cuối (xem approve() bên dưới) — nếu chỉ check status thì
     // nhân viên tự huỷ được đơn đã có người duyệt mà không ai hay biết. Chặn thêm ở đây.
     if (this.props.approvals.length > 0) {

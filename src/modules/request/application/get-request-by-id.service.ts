@@ -4,6 +4,7 @@ import UserInfoModel from "../../../models/UserInfoModel";
 import { getApprovalChain, ApprovalCandidate } from "../domain/approval-chain";
 import { resolveReviewerProfileByAccountId } from "../domain/resolve-reviewer-profile";
 import { RequestNotFoundError } from "../domain/request.errors";
+import { approvalModeOf } from "../domain/request.entity";
 import { ArgumentInvalidException, ForbiddenException } from "../../../core/exceptions/exceptions";
 
 export async function getRequestById(
@@ -53,15 +54,25 @@ export async function getRequestById(
   // Hiển thị đủ cả 2 cấp phê duyệt (trực tiếp + gián tiếp) cùng lúc, kèm trạng thái đã duyệt hay
   // chưa của từng cấp — trước đây chỉ trả `pending_reviewer` (1 người kế tiếp), FE không có cách
   // hiển thị song song cả 2 cấp trong luồng phê duyệt.
-  let approval_chain: Array<ApprovalCandidate & { approved: boolean }> = [];
+  // `role`: "approver" (người duyệt) | "informed" (chỉ nhận thông tin — cấp 2 của đơn nghỉ dưới 2
+  // ngày), theo approval_mode (xem ApprovalMode ở request.entity.ts).
+  const approval_mode = approvalModeOf(request);
+  let approval_chain: Array<
+    ApprovalCandidate & { approved: boolean; role: "approver" | "informed" }
+  > = [];
   if (request.status === "pending") {
     const chain = await getChain();
-    const approvedAccountIds = new Set(request.approvals.map((a: any) => String(a.account)));
-    pending_reviewer = chain.find((c) => !approvedAccountIds.has(String(c.accountId))) ?? null;
-    approval_chain = chain.map((c) => ({
+    // approvals[].account thực tế lưu user_info._id của người duyệt (xem reviewRequestEntity) — so
+    // cả 2 id để cờ `approved` đúng.
+    const approvedIds = new Set(request.approvals.map((a: any) => String(a.account)));
+    const isApproved = (c: ApprovalCandidate) =>
+      approvedIds.has(String(c.accountId)) || approvedIds.has(String(c.userInfoId));
+    approval_chain = chain.map((c, index) => ({
       ...c,
-      approved: approvedAccountIds.has(String(c.accountId))
+      approved: isApproved(c),
+      role: approval_mode === "direct_only" && index > 0 ? "informed" : "approver"
     }));
+    pending_reviewer = approval_chain.find((c) => c.role === "approver" && !c.approved) ?? null;
   }
 
   return {
@@ -69,6 +80,7 @@ export async function getRequestById(
     approvals,
     reviewed_by_profile,
     pending_reviewer,
+    approval_mode,
     approval_chain
   };
 }

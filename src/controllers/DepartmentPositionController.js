@@ -4,6 +4,7 @@ const PositionModel = require("../models/PositionModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const { ensureFolderForDept } = require("../jobs/ensureDeptFolders");
+const { invalidatePermissionCache } = require("../core/authorization/invalidate-permission-cache");
 
 const DepartmentPositionController = {
   createDepartment: async (req, res) => {
@@ -47,6 +48,7 @@ const DepartmentPositionController = {
       if (LEAF_TYPES.includes(newDept.type)) {
         ensureFolderForDept(department_code);
       }
+      if (manager_id) await invalidatePermissionCache([String(manager_id)]);
 
       return res.status(201).json({ message: "Tạo phòng ban thành công", data: newDept });
     } catch (error) {
@@ -103,6 +105,7 @@ const DepartmentPositionController = {
 
       const dept = await DepartmentModel.findOne({ _id: id, isDeleted: false });
       if (!dept) return res.status(404).json({ message: "Phòng ban không tồn tại" });
+      const previousManagerId = dept.manager ? String(dept.manager) : null;
 
       if (department_name) dept.department_name = department_name;
       if (description !== undefined) dept.description = description;
@@ -137,6 +140,12 @@ const DepartmentPositionController = {
       }
 
       await dept.save();
+      if (manager_id !== undefined) {
+        await invalidatePermissionCache([
+          previousManagerId,
+          dept.manager ? String(dept.manager) : null
+        ]);
+      }
       return res.status(200).json({ message: "Cập nhật phòng ban thành công", data: dept });
     } catch (error) {
       return res.status(500).json({ message: "Lỗi server", error: error.message });

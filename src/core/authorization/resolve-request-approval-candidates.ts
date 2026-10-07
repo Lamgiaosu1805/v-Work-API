@@ -1,20 +1,9 @@
-import { subject as caslSubject } from "@casl/ability";
-import PermissionRoleModel from "../../models/PermissionRoleModel";
-import EmployeePermissionProfileModel from "../../models/EmployeePermissionProfileModel";
-import UserInfoModel from "../../models/UserInfoModel";
-import UserDepartmentPositionModel from "../../models/UserDepartmentPositionModel";
+import AccountModel from "../../models/AccountModel";
 import DepartmentModel from "../../models/DepartmentModel";
-import { resolveEffectiveRules, buildAbility, toMongoQuery } from "../../modules/permission";
+import UserDepartmentPositionModel from "../../models/UserDepartmentPositionModel";
+import UserInfoModel from "../../models/UserInfoModel";
 
-function isUnconditioned(filter: Record<string, unknown>): boolean {
-  const orBranches = (filter as { $or?: unknown[] }).$or;
-  if (Array.isArray(orBranches)) {
-    return orBranches.some(
-      (branch) => branch && typeof branch === "object" && Object.keys(branch).length === 0
-    );
-  }
-  return Object.keys(filter).length === 0;
-}
+export type RequestApprovalSource = "direct_manager" | "branch_leader" | "admin";
 
 export interface RequestApprovalCandidate {
   userInfoId: string;
@@ -22,125 +11,117 @@ export interface RequestApprovalCandidate {
   full_name: string;
   position_name: string | null;
   department_name: string | null;
+  source: RequestApprovalSource;
+}
+
+async function buildCandidate(
+  userInfoId: unknown,
+  source: RequestApprovalSource
+): Promise<RequestApprovalCandidate | null> {
+  const userInfo: any = await UserInfoModel.findOne({ _id: userInfoId, isDeleted: false }).lean();
+  if (!userInfo) return null;
+  const account: any = await AccountModel.findOne({
+    _id: userInfo.id_account,
+    isDeleted: false
+  }).lean();
+  if (!account) return null;
+  const membership: any = await UserDepartmentPositionModel.findOne({
+    user: userInfo._id,
+    isDeleted: false
+  })
+    .populate("position", "position_name")
+    .populate("department", "department_name")
+    .lean();
+
+  return {
+    userInfoId: String(userInfo._id),
+    accountId: String(account._id),
+    full_name: userInfo.full_name,
+    position_name: membership?.position?.position_name ?? null,
+    department_name: membership?.department?.department_name ?? null,
+    source
+  };
+}
+
+async function resolveDirectManager(userInfoId: unknown): Promise<RequestApprovalCandidate | null> {
+  const userInfo: any = await UserInfoModel.findOne(
+    { _id: userInfoId, isDeleted: false },
+    { direct_manager: 1 }
+  ).lean();
+  if (!userInfo?.direct_manager || String(userInfo.direct_manager) === String(userInfoId)) {
+    return null;
+  }
+  return buildCandidate(userInfo.direct_manager, "direct_manager");
+}
+
+async function resolveDepartmentManager(
+  userInfoId: unknown
+): Promise<RequestApprovalCandidate | null> {
+  const membership: any = await UserDepartmentPositionModel.findOne({
+    user: userInfoId,
+    isDeleted: false
+  }).lean();
+  if (!membership) return null;
+
+  const visited = new Set<string>();
+  let departmentId: unknown = membership.department;
+  while (departmentId && !visited.has(String(departmentId))) {
+    visited.add(String(departmentId));
+    const department: any = await DepartmentModel.findOne(
+      { _id: departmentId, isDeleted: false },
+      { manager: 1, parent: 1 }
+    ).lean();
+    if (!department) return null;
+    if (department.manager && String(department.manager) !== String(userInfoId)) {
+      const candidate = await buildCandidate(department.manager, "branch_leader");
+      if (candidate) return candidate;
+    }
+    departmentId = department.parent;
+  }
+  return null;
+}
+
+async function resolveFallbackAdmin(
+  targetEmployeeId: unknown
+): Promise<RequestApprovalCandidate | null> {
+  const admin: any = await AccountModel.findOne({ role: "admin", isDeleted: false })
+    .sort({ createdAt: 1 })
+    .lean();
+  if (!admin) return null;
+  const userInfo: any = await UserInfoModel.findOne({
+    id_account: admin._id,
+    isDeleted: false,
+    _id: { $ne: targetEmployeeId }
+  }).lean();
+  return userInfo ? buildCandidate(userInfo._id, "admin") : null;
+}
+
+async function resolveConfiguredManager(
+  userInfoId: unknown
+): Promise<RequestApprovalCandidate | null> {
+  return (await resolveDirectManager(userInfoId)) ?? resolveDepartmentManager(userInfoId);
 }
 
 export async function resolveRequestApprovalCandidates(
   targetEmployeeId: string
 ): Promise<RequestApprovalCandidate[]> {
-  const roles = await PermissionRoleModel.find(
-    { "grants.permissionCode": "request.review", isDeleted: false },
-    { _id: 1 }
-  ).lean();
-  const roleIds = roles.map((role: any) => role._id);
-
-  const [roleProfiles, overrideProfiles] = await Promise.all([
-    roleIds.length
-      ? EmployeePermissionProfileModel.find(
-          { roleIds: { $in: roleIds }, isDeleted: false, employeeId: { $ne: targetEmployeeId } },
-          { employeeId: 1 }
-        ).lean()
-      : Promise.resolve([]),
-    EmployeePermissionProfileModel.find(
-      {
-        overrides: { $elemMatch: { permissionCode: "request.review", status: "ALLOW" } },
-        isDeleted: false,
-        employeeId: { $ne: targetEmployeeId }
-      },
-      { employeeId: 1 }
-    ).lean()
-  ]);
-
-  const candidateIds = Array.from(
-    new Set(
-      [...roleProfiles, ...overrideProfiles].map((profile: any) => String(profile.employeeId))
-    )
-  );
-  if (!candidateIds.length) return [];
-
-  const targetDepartmentIds = new Set(
-    (
-      await UserDepartmentPositionModel.find({
-        user: targetEmployeeId,
-        isDeleted: false
-      }).distinct("department")
-    ).map(String)
-  );
-
-  const targetDepartments = await DepartmentModel.find(
-    { _id: { $in: Array.from(targetDepartmentIds) }, isDeleted: false },
-    { manager: 1 }
-  ).lean();
-  const tier2ManagerIds = new Set(
-    targetDepartments
-      .map((department: any) => department.manager)
-      .filter(Boolean)
-      .map(String)
-  );
-
-  const evaluated = await Promise.all(
-    candidateIds.map(async (candidateId) => {
-      const rawRules = await resolveEffectiveRules(candidateId);
-      const ability = buildAbility(rawRules);
-      const allowed = ability.can(
-        "request.review",
-        caslSubject("Request", { user_id: targetEmployeeId })
-      );
-      if (!allowed) return null;
-      const scopeFilter = toMongoQuery(ability, "request.review", "Request");
-      const isCompanyWide = isUnconditioned(scopeFilter);
-      return { candidateId, isCompanyWide };
-    })
-  );
-  const approved = evaluated.filter(
-    (entry): entry is { candidateId: string; isCompanyWide: boolean } => entry !== null
-  );
-  if (!approved.length) return [];
-
-  const approvedIds = approved.map((entry) => entry.candidateId);
-  const [userInfos, memberships] = await Promise.all([
-    UserInfoModel.find({ _id: { $in: approvedIds } }, { full_name: 1, id_account: 1 }).lean(),
-    UserDepartmentPositionModel.find({ user: { $in: approvedIds }, isDeleted: false })
-      .populate("position", "position_name")
-      .populate("department", "department_name")
-      .lean()
-  ]);
-
-  const membershipByUser = new Map<string, any>();
-  const departmentIdsByUser = new Map<string, Set<string>>();
-  memberships.forEach((membership: any) => {
-    const userId = String(membership.user);
-    if (!membershipByUser.has(userId)) membershipByUser.set(userId, membership);
-    if (!departmentIdsByUser.has(userId)) departmentIdsByUser.set(userId, new Set());
-    departmentIdsByUser.get(userId)!.add(String(membership.department?._id ?? membership.department));
-  });
-  const infoByCandidate = new Map(approved.map((entry) => [entry.candidateId, entry]));
-
-  function rankOf(candidateId: string, isCompanyWide: boolean): number {
-    const candidateDepartmentIds = departmentIdsByUser.get(candidateId) ?? new Set();
-    for (const deptId of candidateDepartmentIds) {
-      if (targetDepartmentIds.has(deptId)) return 0;
-    }
-    if (tier2ManagerIds.has(candidateId)) return 1;
-    return isCompanyWide ? 2 : 1;
+  const level1 = await resolveConfiguredManager(targetEmployeeId);
+  if (!level1) {
+    const fallback = await resolveFallbackAdmin(targetEmployeeId);
+    return fallback ? [fallback] : [];
   }
 
-  return userInfos
-    .map((info: any) => {
-      const candidateId = String(info._id);
-      const membership = membershipByUser.get(candidateId);
-      const entry = infoByCandidate.get(candidateId);
-      return {
-        userInfoId: candidateId,
-        accountId: String(info.id_account),
-        full_name: info.full_name,
-        position_name: membership?.position?.position_name ?? null,
-        department_name: membership?.department?.department_name ?? null,
-        rank: rankOf(candidateId, entry?.isCompanyWide ?? true)
-      };
-    })
-    .sort((a, b) => {
-      if (a.rank !== b.rank) return a.rank - b.rank;
-      return a.full_name.localeCompare(b.full_name);
-    })
-    .map(({ rank, ...candidate }) => candidate);
+  const level2Candidates = [
+    await resolveDirectManager(level1.userInfoId),
+    await resolveDepartmentManager(level1.userInfoId),
+    await resolveDepartmentManager(targetEmployeeId)
+  ];
+  const level2 = level2Candidates.find(
+    (candidate) =>
+      candidate &&
+      candidate.userInfoId !== targetEmployeeId &&
+      candidate.accountId !== level1.accountId
+  );
+
+  return level2 ? [level1, level2] : [level1];
 }

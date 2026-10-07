@@ -79,8 +79,11 @@ async function main() {
   await mongoose.disconnect();
 }
 
-main().catch(async (error) => {
-  console.error(error);
-  await mongoose.disconnect();
-  process.exit(1);
-});
+// Thoát chủ động: workflow kéo theo Redis client/cron handle của app giữ event loop sống sau khi xong
+main()
+  .then(() => process.exit(0))
+  .catch(async (error) => {
+    console.error(error);
+    await mongoose.disconnect();
+    process.exit(1);
+  });

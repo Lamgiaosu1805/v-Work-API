@@ -6,6 +6,12 @@ const UserInfoModel = require("../models/UserInfoModel");
 const AppModel = require("../models/AppModel");
 const InvestmentModel = require("../models/InvestmentModel");
 const { createCifCommission, createEkycCommission, calculateCommission, getTNCNRate } = require("../helpers/commissionCalculator");
+const { invalidatePermissionCache } = require("../core/authorization/invalidate-permission-cache");
+const {
+    syncCustomerCareInBackground,
+    syncCustomerCareByCustomerId,
+    isCustomerSystemAssigned,
+} = require("../workflows/sync-customer-care.workflow");
 
 const CustomerClaimRequestController = {
 
@@ -40,8 +46,9 @@ const CustomerClaimRequestController = {
                 return res.status(404).json({ message: "Không tìm thấy khách hàng với SĐT này" });
             }
 
-            // Khách đã có sale phụ trách
-            if (customer.referred_by) {
+            // Khách đã có sale phụ trách — trừ khi Sale đó do hệ thống/quản lý phân (Quy định 183A):
+            // Sale giới thiệu thật vẫn được gửi yêu cầu trong cửa sổ thời gian
+            if (customer.referred_by && !(await isCustomerSystemAssigned(customer._id))) {
                 return res.status(409).json({
                     message: "Khách hàng này đã có sale phụ trách, không thể gửi yêu cầu",
                 });
@@ -199,7 +206,10 @@ const CustomerClaimRequestController = {
                 return res.status(404).json({ message: "Không tìm thấy khách hàng" });
             }
 
-            if (customer.referred_by) {
+            const previousSaleId = customer.referred_by ? String(customer.referred_by) : null;
+            const overridesSystemAssignment =
+                !!customer.referred_by && (await isCustomerSystemAssigned(customer._id));
+            if (customer.referred_by && !overridesSystemAssignment) {
                 // Tự động reject yêu cầu này vì khách đã có người
                 await CustomerClaimRequestModel.findByIdAndUpdate(id, {
                     status: "rejected",
@@ -320,6 +330,13 @@ const CustomerClaimRequestController = {
             await session.commitTransaction();
             session.endSession();
 
+            // Kết thúc lượt giao của Sale do hệ thống phân (nếu có) và mở lượt giao kênh "claim"
+            await syncCustomerCareByCustomerId(String(customer._id), new Date(), {
+                ownerChannel: "claim",
+                actorAccountId: String(accountId),
+            }).catch((error) => console.error("Đồng bộ chăm sóc khách sau duyệt yêu cầu lỗi:", error));
+            await invalidatePermissionCache([previousSaleId, String(sale._id)]);
+
             return res.status(200).json({
                 message: "Phê duyệt yêu cầu thành công",
                 data: {
@@ -371,7 +388,8 @@ const CustomerClaimRequestController = {
             // Reset thông tin phân công trên customer
             const resetData = {
                 referred_by: null,
-                source_type: null,
+                // Duyệt yêu cầu đã đổi nguồn sang "sale"; huỷ duyệt = nhận nhầm → trả về nguồn marketing
+                source_type: "marketing",
                 ref_code: null,
                 referred_at: null,
             };
@@ -427,6 +445,7 @@ const CustomerClaimRequestController = {
 
             await session.commitTransaction();
             session.endSession();
+            syncCustomerCareInBackground(customer._id, { actorAccountId: String(accountId) });
 
             return res.status(200).json({
                 message: "Đã hủy phân công thành công. Khách hàng trở về trạng thái chưa được nhận.",

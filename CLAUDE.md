@@ -46,6 +46,7 @@ src/
     leave/                      # LeaveBalance — sổ cái ngày phép (adjust/get), Redis lock
     timesheet/                  # Engine đối soát ngày công — sở hữu WorkSheetModel + WorkDayStatusModel
     attendance/                 # Wifi/geofence check-in/out (thuần), CRUD wifi/shift, Excel parser
+    customer-care/              # Quy định 183A: kho khách chung, phân tự động, SLA liên hệ, thu hồi (route /customer-care)
   workflows/                    # Tầng orchestration xuyên module — xem mục "workflows/" trong "DDD + Hexagonal"
     request-side-effects/       # Side-effect theo request_type (leave/late_early/forgot_checkin/away-day)
   controllers/                  # Pattern CŨ — xử lý logic request/response trực tiếp (chưa migrate)
@@ -337,6 +338,7 @@ const memberships = await UserDepartmentPositionModel.find({ user: userInfo._id 
 | `cleanupDeviceTokens.js` | — | Dọn FCM token cũ/inactive |
 | `ensureDeptFolders.js` | Startup (1 lần) | Tạo folder disk cho dept chưa có |
 | `weeklyReportJob.js` | Thứ 6 8:00 + 17:00 | Nhắc nộp + đánh dấu missing báo cáo tuần |
+| `customerCareJob.js` | Mỗi phút + 00:05 | Quy định 183A: quét SLA chăm sóc khách (cảnh báo/thu hồi) + phân khách từ kho chung; 00:05 thu hồi khách của Sale nghỉ việc/bị khoá. Xem `docs/CRM-CUSTOMER-CARE-SLA-PLAN.md` |
 
 Tất cả cron dùng `node-cron`. Múi giờ server: `Asia/Ho_Chi_Minh` (set ở đầu `index.js`).
 

@@ -6,6 +6,7 @@ const UserInfoModel = require("../models/UserInfoModel");
 const AgentModel = require("../models/AgentModel");
 const BranchModel = require("../models/BranchModel");
 const { toMongoQuery, canOnSubject } = require("../modules/permission");
+const { syncCustomerCareInBackground } = require("../workflows/sync-customer-care.workflow");
 const {
   calculateCommission,
   getTNCNRate,
@@ -173,6 +174,7 @@ const InvestmentController = {
         await existing.save({ session });
         await session.commitTransaction();
         session.endSession();
+        syncCustomerCareInBackground(existing.customer_id);
         return res.status(200).json({
           message: "Cập nhật khoản đầu tư thành công",
           investment: existing
@@ -252,6 +254,7 @@ const InvestmentController = {
 
       await session.commitTransaction();
       session.endSession();
+      syncCustomerCareInBackground(customer._id);
 
       return res.status(201).json({
         message: "Tạo khoản đầu tư và ghi nhận hoa hồng thành công",

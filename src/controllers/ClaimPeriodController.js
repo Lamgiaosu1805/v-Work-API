@@ -3,6 +3,17 @@ const CustomerModel = require("../models/CustomerModel");
 const CustomerInteractionModel = require("../models/CustomerInteractionModel");
 const AppModel = require("../models/AppModel");
 const UserInfoModel = require("../models/UserInfoModel");
+const { getCarePolicyView } = require("../modules/customer-care");
+
+// Quy định 183A: app đã bật phân khách tự động (vd TIKLUY) thì bỏ "đợt nhận khách" (ai nhanh người đó
+// được) — khách chưa có Sale nằm trong kho chung và do hệ thống phân. App khác giữ quy trình cũ.
+async function isAutoAllocationApp(appCode) {
+    const policy = await getCarePolicyView(appCode);
+    return policy.configured && policy.enabled;
+}
+
+const AUTO_ALLOCATION_MESSAGE =
+    "Ứng dụng này đã chuyển sang phân khách tự động theo Quy định 183A, không dùng đợt nhận khách nữa";
 
 // Helper: kiểm tra claim period có đang mở không
 async function getActivePeriod(app_id) {
@@ -33,6 +44,9 @@ const ClaimPeriodController = {
             const app = await AppModel.findOne({ code: app_code, is_active: true });
             if (!app) {
                 return res.status(404).json({ message: "App không tồn tại" });
+            }
+            if (await isAutoAllocationApp(app.code)) {
+                return res.status(409).json({ message: AUTO_ALLOCATION_MESSAGE, is_open: false });
             }
 
             // Kiểm tra đã có period đang active chưa
@@ -97,6 +111,14 @@ const ClaimPeriodController = {
             if (!app) {
                 return res.status(404).json({ message: "App không tồn tại" });
             }
+            if (await isAutoAllocationApp(app.code)) {
+                return res.status(200).json({
+                    is_open: false,
+                    period: null,
+                    auto_allocation: true,
+                    message: AUTO_ALLOCATION_MESSAGE,
+                });
+            }
 
             const period = await getActivePeriod(app._id);
 
@@ -122,7 +144,6 @@ const ClaimPeriodController = {
             if (!app) {
                 return res.status(404).json({ message: "App không tồn tại" });
             }
-
             const skip = (Number(page) - 1) * Number(limit);
             const [periods, total] = await Promise.all([
                 ClaimPeriodModel.find({ app_id: app._id })
@@ -160,6 +181,9 @@ const ClaimPeriodController = {
             const app = await AppModel.findOne({ code: app_code, is_active: true });
             if (!app) {
                 return res.status(404).json({ message: "App không tồn tại" });
+            }
+            if (await isAutoAllocationApp(app.code)) {
+                return res.status(409).json({ message: AUTO_ALLOCATION_MESSAGE, is_open: false });
             }
 
             // Kiểm tra claim period có đang mở không
@@ -228,6 +252,9 @@ const ClaimPeriodController = {
             const app = await AppModel.findOne({ code: app_code, is_active: true });
             if (!app) {
                 return res.status(404).json({ message: "App không tồn tại" });
+            }
+            if (await isAutoAllocationApp(app.code)) {
+                return res.status(409).json({ message: AUTO_ALLOCATION_MESSAGE, is_open: false });
             }
 
             // Kiểm tra claim period

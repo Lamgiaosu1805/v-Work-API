@@ -6,6 +6,9 @@ import { normalizePhoneNumber } from "../domain/normalize-phone-number";
 import { resolveCustomerForCall } from "./resolve-customer-for-call";
 import { incrementCustomerCallStats } from "./increment-customer-call-stats";
 import { getIO } from "../../../sockets/ioRegistry";
+import { eventBus } from "../../../core/events/event-bus";
+import { logger } from "../../../config/logger";
+import { CallLogEndedDomainEvent } from "../domain/events/call-log-ended.domain-event";
 
 const callLogRepository = new CallLogRepository();
 const saleOmicallProfileRepository = new SaleOmicallProfileRepository();
@@ -81,6 +84,7 @@ export async function handleOmicallWebhook(payload: OmicallWebhookPayload): Prom
   const existing = await callLogRepository.findByTransactionId(payload.transaction_id);
 
   let callLogId: string;
+  const wasEnded = !!existing?.getProps().timeEndCall;
   if (existing) {
     existing.applyWebhookPayload(callLogPayload);
     await callLogRepository.updateById(existing.id, existing);
@@ -97,11 +101,34 @@ export async function handleOmicallWebhook(payload: OmicallWebhookPayload): Prom
 
   if (callLogPayload.timeEndCall && callLogPayload.saleId) {
     const io = getIO();
-    io?.to(`user:${callLogPayload.saleId}`).emit("customer_call:rate", {
+    const socketPayload = {
       callLogId,
+      customerId: callLogPayload.customerId,
       phoneNumber: callLogPayload.phoneNumber,
       direction: callLogPayload.direction,
       duration: callLogPayload.duration
-    });
+    };
+    // Web nghe "customer_call:ended" (form ghi chú sau cuộc gọi); giữ "customer_call:rate" cho client cũ
+    io?.to(`user:${callLogPayload.saleId}`).emit("customer_call:ended", socketPayload);
+    io?.to(`user:${callLogPayload.saleId}`).emit("customer_call:rate", socketPayload);
+  }
+
+  // Phát đúng 1 lần / cuộc gọi: lần đầu webhook mang thời điểm kết thúc
+  if (callLogPayload.timeEndCall && !wasEnded) {
+    eventBus
+      .emitAsync(
+        CallLogEndedDomainEvent.name,
+        new CallLogEndedDomainEvent({
+          aggregateId: callLogId,
+          saleId: callLogPayload.saleId,
+          customerId: callLogPayload.customerId,
+          direction: callLogPayload.direction,
+          timeStartCall: callLogPayload.timeStartCall,
+          answerSec: callLogPayload.answerSec
+        })
+      )
+      .catch((error) =>
+        logger.error("Xử lý sự kiện kết thúc cuộc gọi thất bại", { error, callLogId })
+      );
   }
 }

@@ -247,8 +247,14 @@ Permission mới seed vào `seedPermissionCrmRoles.ts`: Sale/Team lead `customer
 - Web, App (mục 5); named flag mới cho `usePermissions.js` + `getPermissions()`.
 - `/customer/bulk-upsert` (đồng bộ batch, cron phía TIKLUY đang tắt) chưa gọi đồng bộ Pool.
 - Thông báo quản lý khi Pool tồn không có Sale nhận (hiện chỉ thấy trên dashboard).
-- Xác nhận với phía TIKLUY: khách 13–17 tuổi có luôn đi qua eKYC và gửi `date_of_birth` không (session
-  TIKLUY không mở lúc chốt — nếu không gửi thì khách này không được nhận diện ưu tiên thấp).
+- ĐÃ XÁC NHẬN với phía TIKLUY (07/10/2026, đọc code ms001 nhánh LIVE): khách 13–17 tuổi đi chung luồng
+  eKYC với người lớn (không có luồng giám hộ/chặn tuổi) và được gửi `date_of_birth` (`yyyy-MM-dd`) đúng 1 lần
+  lúc eKYC lần đầu. Lưu ý:
+  - Trước eKYC không có ngày sinh → khách chưa eKYC luôn ở ưu tiên bình thường (~70% khách có eKYC).
+  - Ngày sinh lỗi được gửi là chuỗi rỗng `""` → Mongoose cast thành `null` → coi như chưa biết tuổi.
+  - Sửa eKYC lại (`updateEKYC`) phía TIKLUY KHÔNG gọi vWork → ngày sinh sửa sau không sang vWork.
+  - Có dữ liệu bẩn (vd năm sinh 2021): đang coi như dưới 18 tuổi → ưu tiên thấp.
+  - Quy mô (06/10): 360/2.721 CIF dưới 18 tuổi.
 
 ### Quyết định đã chốt (07/10/2026) — thay cho mục 9.1–9.3
 1. **Khách dưới 18 tuổi**: vẫn vào kho nhưng **ưu tiên thấp** — `customer_care_state.low_priority = true`

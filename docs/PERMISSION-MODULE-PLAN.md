@@ -453,6 +453,7 @@ tương ứng với API màn đó cần gọi — không cần permission riêng
 | Employee | employee.create | WRITE | |
 | Employee | employee.update | WRITE | |
 | Employee | employee.set_status | STRUCTURAL | PATCH employment-status |
+| Employee | employee.resign | STRUCTURAL | GET/PATCH /user/:id/resignation (đánh dấu nghỉ việc) |
 | Department | department.view | READ | |
 | Department | department.manage | WRITE | create+update gộp |
 | Department | department.delete | STRUCTURAL | |

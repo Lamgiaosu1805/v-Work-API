@@ -264,3 +264,25 @@ describe("getApprovalChain — theo sơ đồ khối", () => {
     expect(chain[0].full_name).toBe("Phó TGĐ Lam");
   });
 });
+
+describe("updateUser — không cho ghi ngày nghỉ việc", () => {
+  test("bỏ qua resignation_date, các trường khác vẫn cập nhật", async () => {
+    const { userInfo: employee } = await createEmployee("NV Sửa hồ sơ");
+    const res = makeRes();
+
+    await UserController.updateUser(
+      {
+        params: { id: String(employee._id) },
+        body: { full_name: "NV Đã đổi tên", resignation_date: "2026-10-20" },
+        account: { _id: new mongoose.Types.ObjectId(), role: "admin" }
+      },
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const saved = await UserInfoModel.findById(employee._id);
+    expect(saved.full_name).toBe("NV Đã đổi tên");
+    // Ngày nghỉ việc chỉ đặt qua PATCH /user/:id/resignation (quyền employee.resign)
+    expect(saved.resignation_date).toBeNull();
+  });
+});

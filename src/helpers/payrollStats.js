@@ -103,8 +103,16 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
 
   const rows = users.map((u) => {
     const uid = u._id.toString();
-    const wss = wsByUser.get(uid) || [];
-    const dss = dsByUser.get(uid) || [];
+    // Ngày nghỉ việc = ngày làm việc cuối cùng (vẫn tính công) → mọi dữ liệu công SAU ngày đó bị bỏ
+    // qua (kể cả worksheet đã lỡ tạo khi HR nhập ngày nghỉ muộn, và công mặc định ngày lễ sau khi nghỉ)
+    const lastWorkingKey = u.resignation_date
+      ? moment.tz(u.resignation_date, TZ).format("YYYY-MM-DD")
+      : null;
+    const isEmployedOn = (dateKey) => !lastWorkingKey || dateKey <= lastWorkingKey;
+    const dateKeyOf = (date) => moment.tz(date, TZ).format("YYYY-MM-DD");
+
+    const wss = (wsByUser.get(uid) || []).filter((ws) => isEmployedOn(dateKeyOf(ws.date)));
+    const dss = (dsByUser.get(uid) || []).filter((ds) => isEmployedOn(dateKeyOf(ds.date)));
 
     const wsByDate = new Map();
     for (const ws of wss) {
@@ -149,7 +157,7 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
 
     const holidayDefaultMap = holidayDefaultMapForBranch(u.branch_id);
     for (const [dateStr, wu] of holidayDefaultMap) {
-      if (wsByDate.has(dateStr)) continue;
+      if (wsByDate.has(dateStr) || !isEmployedOn(dateStr)) continue;
       work_unit_total += wu;
       const isProbation = probationEnd && moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
       if (isProbation) work_unit_probation += wu;
@@ -190,6 +198,9 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
       probation_end_date: u.probation_end_date
         ? moment.tz(u.probation_end_date, TZ).format("DD/MM/YYYY")
         : null,
+      resignation_date: u.resignation_date
+        ? moment.tz(u.resignation_date, TZ).format("DD/MM/YYYY")
+        : null,
       standard_work_units: standardUnitsForBranch(u.branch_id),
       work_unit_total,
       work_unit_official,
@@ -220,12 +231,18 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
       while (cursor.isSameOrBefore(periodEnd, "day")) {
         const key = cursor.format("YYYY-MM-DD");
         const ws = wsByDate.get(key);
-        daily.set(key, {
-          // null = chưa chốt công (worksheet chưa được tính) — khác với 0 công
-          work_unit: ws ? ws.work_unit : (holidayDefaultMap.get(key) ?? null),
-          statuses: correctedByDate.get(key) || [],
-          is_holiday: holidayDates.has(key)
-        });
+        daily.set(
+          key,
+          isEmployedOn(key)
+            ? {
+                // null = chưa chốt công (worksheet chưa được tính) — khác với 0 công
+                work_unit: ws ? ws.work_unit : (holidayDefaultMap.get(key) ?? null),
+                statuses: correctedByDate.get(key) || [],
+                is_holiday: holidayDates.has(key)
+              }
+            : // Đã nghỉ việc → ô trống (không ghi K / L)
+              { work_unit: null, statuses: [], is_holiday: false }
+        );
         cursor.add(1, "day");
       }
       row.daily = daily;

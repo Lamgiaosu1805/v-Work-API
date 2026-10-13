@@ -6,6 +6,7 @@ const WorkSheet = require("../models/WorkSheetModel");
 const WorkDayStatus = require("../models/WorkDayStatusModel");
 const HolidayModel = require("../models/HolidayModel");
 const Shift = require("../models/ShiftModel");
+const { stillEmployedAtFilter } = require("../shared-kernel/resignation");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -57,7 +58,8 @@ async function createDailyWorkSheets(targetDate) {
       `[Cron] Bắt đầu tạo worksheet cho ngày ${moment.tz(today, TZ).format("DD/MM/YYYY")}`
     );
 
-    const users = await UserInfo.find({ isDeleted: false });
+    // Sau ngày làm việc cuối cùng (resignation_date) không tạo worksheet nữa — tránh ngày "vắng" giả
+    const users = await UserInfo.find({ isDeleted: false, ...stillEmployedAtFilter(today) });
 
     const isOnHoliday = (user) =>
       branchHolidayIds.size > 0 &&

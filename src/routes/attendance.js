@@ -62,6 +62,12 @@ router.get(
   AttendanceController.getPayrollStatsAll
 );
 router.get(
+  "/payroll-stats-all/export",
+  authenticate,
+  requirePermission("payroll.view", "Payroll"),
+  AttendanceController.exportPayrollTimesheet
+);
+router.get(
   "/payroll-stats/:userId",
   authenticate,
   requirePermission("payroll.view", "Payroll"),

@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const QRCode = require("qrcode");
 const heicConvert = require("heic-convert");
+const moment = require("moment-timezone");
 const AccountModel = require("../models/AccountModel");
 const EmploymentStatusModel = require("../models/EmploymentStatusModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
@@ -25,6 +26,53 @@ const AppModel = require("../models/AppModel");
 const {
   resolveEmployeeScopeFilter
 } = require("../core/authorization/resolve-employee-scope-filter");
+const {
+  stillEmployedAtFilter,
+  resignedAtFilter,
+  parseResignationDate
+} = require("../shared-kernel/resignation");
+const WorkSheetModel = require("../models/WorkSheetModel");
+
+const TZ_VN = "Asia/Ho_Chi_Minh";
+const toDateKey = (date) => (date ? moment.tz(date, TZ_VN).format("YYYY-MM-DD") : null);
+const formatDateKey = (key) => moment.tz(key, "YYYY-MM-DD", TZ_VN).format("DD/MM/YYYY");
+
+// Nhân sự trong phạm vi quyền employee.resign (đánh dấu nghỉ việc) của người thao tác.
+// Trả { user } hoặc { status, message } để controller trả lỗi.
+async function findUserForResignation(permissionAbility, id) {
+  if (!mongoose.Types.ObjectId.isValid(id)) return { status: 400, message: "ID không hợp lệ" };
+  const scopeFilter = await resolveEmployeeScopeFilter(permissionAbility, "employee.resign");
+  const user = await UserInfoModel.findOne({ $and: [scopeFilter, { _id: id, isDeleted: false }] });
+  if (user) return { user };
+  const exists = await UserInfoModel.exists({ _id: id, isDeleted: false });
+  return exists
+    ? { status: 403, message: "Bạn không có quyền đánh dấu nghỉ việc cho nhân sự này" }
+    : { status: 404, message: "Không tìm thấy nhân viên" };
+}
+
+// Giới hạn chọn ngày làm việc cuối: không trước ngày vào làm, và không trước ngày gần nhất (tính tới
+// hôm nay) nhân sự đã có công — worksheet có số công > 0 hoặc có giờ chấm vào/ra. Nếu cho chọn sớm
+// hơn, công đã có sau ngày đó sẽ bị loại khỏi bảng công/file Excel.
+async function getResignationBounds(user) {
+  const lastWorked = await WorkSheetModel.findOne({
+    user_id: user._id,
+    isDeleted: false,
+    date: { $lte: moment.tz(TZ_VN).endOf("day").toDate() },
+    $or: [{ work_unit: { $gt: 0 } }, { check_in: { $ne: null } }, { check_out: { $ne: null } }]
+  })
+    .sort({ date: -1 })
+    .select("date")
+    .lean();
+
+  const startDate = toDateKey(user.start_date);
+  const lastWorkDate = toDateKey(lastWorked?.date);
+  const minResignationDate = [startDate, lastWorkDate].filter(Boolean).sort().pop() ?? null;
+  return {
+    start_date: startDate,
+    last_work_date: lastWorkDate,
+    min_resignation_date: minResignationDate
+  };
+}
 
 const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 
@@ -469,7 +517,8 @@ const UserController = {
         department_id,
         from_date,
         to_date,
-        module
+        module,
+        work_status // "active" = đang làm | "resigned" = đã nghỉ việc | bỏ trống = tất cả
       } = req.query;
 
       const skip = (Number(page) - 1) * Number(limit);
@@ -479,6 +528,10 @@ const UserController = {
 
       const scopeFilter = await resolveEmployeeScopeFilter(req.permissionAbility, "employee.view");
       if (Object.keys(scopeFilter).length > 0) scopeConditions.push(scopeFilter);
+
+      const now = new Date();
+      if (work_status === "active") scopeConditions.push(stillEmployedAtFilter(now));
+      else if (work_status === "resigned") scopeConditions.push(resignedAtFilter(now));
 
       if (module) {
         const accountIds = await AccountModel.find({
@@ -553,10 +606,27 @@ const UserController = {
         ).map(String)
       );
 
+      // Dòng nào được đánh dấu / huỷ nghỉ việc (quyền employee.resign trong phạm vi dữ liệu)
+      let resignableIds = new Set();
+      if (req.permissionAbility?.can("employee.resign", "Employee")) {
+        const resignScopeFilter = await resolveEmployeeScopeFilter(
+          req.permissionAbility,
+          "employee.resign"
+        );
+        resignableIds = new Set(
+          (
+            await UserInfoModel.find({
+              $and: [resignScopeFilter, { _id: { $in: userIds } }]
+            }).distinct("_id")
+          ).map(String)
+        );
+      }
+
       const data = users.map((u) => ({
         ...serializeUser(u),
         departments: udpMap[u._id.toString()] || [],
-        can_edit: editableIds.has(u._id.toString())
+        can_edit: editableIds.has(u._id.toString()),
+        can_resign: resignableIds.has(u._id.toString())
       }));
 
       return res.status(200).json({
@@ -723,8 +793,9 @@ const UserController = {
         "employment_type",
         "branch_id",
         "start_date",
-        "probation_end_date",
-        "resignation_date"
+        "probation_end_date"
+        // resignation_date KHÔNG sửa ở đây — chỉ qua PATCH /user/:id/resignation (quyền employee.resign,
+        // kiểm tra ngày đã có công, lưu cuối ngày làm việc cuối cùng)
       ];
 
       const updates = {};
@@ -1168,6 +1239,82 @@ const UserController = {
       await session.abortTransaction();
       session.endSession();
       res.status(500).json({ message: "Lỗi server", error: err.message });
+    }
+  },
+
+  // PATCH /user/:id/resignation — đánh dấu / huỷ nghỉ việc (quyền employee.resign, trong phạm vi dữ liệu)
+  // body: { resignation_date: "YYYY-MM-DD" } = ngày làm việc cuối cùng; null = huỷ nghỉ việc.
+  // Hồ sơ và tài khoản giữ nguyên — chỉ ghi ngày; bảng công, cron tạo worksheet và CRM tự đọc ngày này.
+  setResignationDate: async (req, res) => {
+    try {
+      const rawDate = req.body?.resignation_date;
+      if (rawDate === undefined) {
+        return res.status(400).json({
+          message: "resignation_date là bắt buộc (YYYY-MM-DD, hoặc null để huỷ nghỉ việc)"
+        });
+      }
+      let resignationDate = null;
+      if (rawDate !== null && rawDate !== "") {
+        resignationDate = parseResignationDate(String(rawDate));
+        if (!resignationDate) {
+          return res.status(400).json({ message: "Ngày nghỉ việc phải có định dạng YYYY-MM-DD" });
+        }
+      }
+
+      const { user, status, message } = await findUserForResignation(
+        req.permissionAbility,
+        req.params.id
+      );
+      if (!user) return res.status(status).json({ message });
+
+      if (resignationDate) {
+        const bounds = await getResignationBounds(user);
+        const resignationKey = toDateKey(resignationDate);
+        if (bounds.start_date && resignationKey < bounds.start_date) {
+          return res.status(400).json({
+            message: `Ngày làm việc cuối không được trước ngày vào làm (${formatDateKey(bounds.start_date)})`
+          });
+        }
+        if (bounds.last_work_date && resignationKey < bounds.last_work_date) {
+          return res.status(400).json({
+            message: `Nhân sự đã có công tới ngày ${formatDateKey(
+              bounds.last_work_date
+            )}, ngày làm việc cuối không được trước ngày này`
+          });
+        }
+      }
+
+      user.resignation_date = resignationDate;
+      await user.save();
+
+      return res.json({
+        message: resignationDate ? "Đã đánh dấu nghỉ việc" : "Đã huỷ nghỉ việc",
+        data: { _id: user._id, resignation_date: user.resignation_date }
+      });
+    } catch (err) {
+      console.error("Error in setResignationDate:", err);
+      return res.status(500).json({ message: "Lỗi server", error: err.message });
+    }
+  },
+
+  // GET /user/:id/resignation — thông tin cho hộp thoại đánh dấu nghỉ việc: ngày nghỉ hiện tại và
+  // ngày sớm nhất được chọn (không trước ngày vào làm / ngày gần nhất đã có công). Ngày dạng YYYY-MM-DD.
+  getResignationInfo: async (req, res) => {
+    try {
+      const { user, status, message } = await findUserForResignation(
+        req.permissionAbility,
+        req.params.id
+      );
+      if (!user) return res.status(status).json({ message });
+
+      const bounds = await getResignationBounds(user);
+      return res.json({
+        message: "OK",
+        data: { resignation_date: toDateKey(user.resignation_date), ...bounds }
+      });
+    } catch (err) {
+      console.error("Error in getResignationInfo:", err);
+      return res.status(500).json({ message: "Lỗi server", error: err.message });
     }
   }
 };

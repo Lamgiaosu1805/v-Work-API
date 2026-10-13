@@ -83,4 +83,18 @@ router.patch(
   UserController.setEmploymentStatus
 );
 
+router.get(
+  "/:id/resignation",
+  authenticate,
+  requirePermission("employee.resign", "Employee"),
+  UserController.getResignationInfo
+);
+
+router.patch(
+  "/:id/resignation",
+  authenticate,
+  requirePermission("employee.resign", "Employee"),
+  UserController.setResignationDate
+);
+
 module.exports = router;

@@ -36,12 +36,59 @@ const { getPayrollPeriodRange, calcStandardWorkUnits } = require("../helpers/pay
 const { sendExceptionResponse } = require("../core/http/handle-exception");
 const { mapWithConcurrency } = require("../core/async/map-with-concurrency");
 const { buildPayrollRows, getPayrollPeriodByMonth } = require("../helpers/payrollStats");
-const { buildTimesheetWorkbook } = require("../helpers/timesheetExcel");
+const { buildTimesheetWorkbook, isFixedCtv } = require("../helpers/timesheetExcel");
+const { stillEmployedAtFilter } = require("../shared-kernel/resignation");
 
 const IMPORT_EXCEL_DAY_CONCURRENCY = 10;
 
-// Điều kiện lọc nhân viên cho bảng công: phạm vi quyền payroll.view + phòng ban + từ khoá (tên/mã NV)
-async function buildPayrollUserFilter(permissionAbility, { department, q }) {
+const PAYROLL_USER_FIELDS =
+  "ma_nv full_name probation_end_date resignation_date employment_type branch_id";
+
+// Nhân sự nghỉ việc TRONG kỳ (ngày làm cuối nằm trong kỳ) nhưng không có công nào → không đưa vào
+// bảng công. CTV (chức vụ "CTV") giữ lại vì tính công cố định, không dựa trên chấm công.
+async function findResignedWithoutWorkIds(baseFilter, periodStart, periodEnd) {
+  const candidates = await UserInfoModel.find(
+    {
+      $and: [
+        baseFilter,
+        { resignation_date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() } }
+      ]
+    },
+    PAYROLL_USER_FIELDS
+  );
+  if (!candidates.length) return [];
+
+  const [{ rows }, memberships] = await Promise.all([
+    buildPayrollRows({ users: candidates, periodStart, periodEnd }),
+    UserDepartmentPositionModel.find({
+      user: { $in: candidates.map((u) => u._id) },
+      isDeleted: false
+    })
+      .populate("position", "position_name")
+      .lean()
+  ]);
+  const positionsByUser = new Map();
+  for (const m of memberships) {
+    const key = m.user.toString();
+    if (!positionsByUser.has(key)) positionsByUser.set(key, []);
+    positionsByUser.get(key).push(m.position?.position_name);
+  }
+
+  return rows
+    .filter(
+      (row) =>
+        row.work_unit_total <= 0 && !isFixedCtv(positionsByUser.get(row.user_id.toString()) || [])
+    )
+    .map((row) => row.user_id);
+}
+
+// Điều kiện lọc nhân viên cho bảng công của 1 kỳ: phạm vi quyền payroll.view + phòng ban + từ khoá
+// (tên/mã NV) + trạng thái nghỉ việc — bỏ người có ngày làm cuối trước kỳ, và người nghỉ trong kỳ mà
+// không có công nào.
+async function buildPayrollUserFilter(
+  permissionAbility,
+  { department, q, periodStart, periodEnd }
+) {
   const userFilter = { isDeleted: false };
   const scopeConditions = [];
   const scopeFilter = toMongoQuery(permissionAbility, "payroll.view", "Payroll");
@@ -54,15 +101,19 @@ async function buildPayrollUserFilter(permissionAbility, { department, q }) {
     scopeConditions.push({ _id: { $in: deptUserIds } });
   }
 
-  if (scopeConditions.length > 0) userFilter.$and = scopeConditions;
+  scopeConditions.push(stillEmployedAtFilter(periodStart.toDate()));
 
   if (q && q.trim()) {
     const kw = q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    userFilter.$or = [
-      { full_name: { $regex: kw, $options: "i" } },
-      { ma_nv: { $regex: kw, $options: "i" } }
-    ];
+    scopeConditions.push({
+      $or: [{ full_name: { $regex: kw, $options: "i" } }, { ma_nv: { $regex: kw, $options: "i" } }]
+    });
   }
+
+  userFilter.$and = scopeConditions;
+
+  const excludedIds = await findResignedWithoutWorkIds(userFilter, periodStart, periodEnd);
+  if (excludedIds.length) userFilter.$and.push({ _id: { $nin: excludedIds } });
 
   return userFilter;
 }
@@ -706,13 +757,15 @@ const AttendanceController = {
       const { department, q } = req.query;
 
       const { periodStart, periodEnd } = getPayrollPeriodByMonth(month, year);
-      const userFilter = await buildPayrollUserFilter(req.permissionAbility, { department, q });
+      const userFilter = await buildPayrollUserFilter(req.permissionAbility, {
+        department,
+        q,
+        periodStart,
+        periodEnd
+      });
 
       const totalUsers = await UserInfoModel.countDocuments(userFilter);
-      const users = await UserInfoModel.find(
-        userFilter,
-        "ma_nv full_name probation_end_date employment_type branch_id"
-      )
+      const users = await UserInfoModel.find(userFilter, PAYROLL_USER_FIELDS)
         .sort({ ma_nv: 1 })
         .skip((page - 1) * limit)
         .limit(limit);
@@ -751,11 +804,13 @@ const AttendanceController = {
       const { department, q } = req.query;
 
       const { periodStart, periodEnd } = getPayrollPeriodByMonth(month, year);
-      const userFilter = await buildPayrollUserFilter(req.permissionAbility, { department, q });
-      const users = await UserInfoModel.find(
-        userFilter,
-        "ma_nv full_name probation_end_date employment_type branch_id"
-      ).sort({ ma_nv: 1 });
+      const userFilter = await buildPayrollUserFilter(req.permissionAbility, {
+        department,
+        q,
+        periodStart,
+        periodEnd
+      });
+      const users = await UserInfoModel.find(userFilter, PAYROLL_USER_FIELDS).sort({ ma_nv: 1 });
 
       const [{ rows, holidays }, memberships, departmentDoc] = await Promise.all([
         buildPayrollRows({ users, periodStart, periodEnd, includeDaily: true }),

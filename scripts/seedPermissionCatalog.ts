@@ -82,6 +82,16 @@ const DEFINITIONS: PermissionDef[] = [
     validDataScopePolicies: EMPLOYEE_SCOPES_MANAGE
   },
   {
+    // Đặt / sửa / huỷ ngày làm việc cuối — kéo theo dừng tạo bảng công, ẩn khỏi bảng công các kỳ
+    // sau và CRM thu hồi khách, nên tách riêng khỏi employee.set_status (đổi loại hợp đồng)
+    code: "employee.resign",
+    module: "hrm",
+    name: "Đánh dấu nghỉ việc",
+    entity: "Employee",
+    actionKind: "STRUCTURAL",
+    validDataScopePolicies: EMPLOYEE_SCOPES_MANAGE
+  },
+  {
     code: "department.view",
     module: "hrm",
     name: "Xem phòng ban",

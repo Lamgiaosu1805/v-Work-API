@@ -85,6 +85,11 @@ const HRM_MANAGER_GRANTS: PermissionGrantDoc[] = [
     fieldScopePolicyCode: null
   },
   {
+    permissionCode: "employee.resign",
+    dataScopePolicyCode: "EMPLOYEE_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
     permissionCode: "employment_status.delete",
     dataScopePolicyCode: "EMPLOYMENT_STATUS_ALL_COMPANY",
     fieldScopePolicyCode: null

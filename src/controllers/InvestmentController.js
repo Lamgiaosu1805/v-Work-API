@@ -13,6 +13,7 @@ const {
   CIF_COMMISSION_AMOUNT,
   EKYC_COMMISSION_AMOUNT
 } = require("../helpers/commissionCalculator");
+const { parseCommissionFilter } = require("../helpers/commissionFilter");
 
 function getISOWeek(date) {
   const d = new Date(date);
@@ -87,6 +88,81 @@ function buildPeriodRange(period) {
     groupId: { year: { $year: "$invested_at" }, month: { $month: "$invested_at" } },
     formatKey: (id) => `${id.year}-${String(id.month).padStart(2, "0")}`
   };
+}
+
+const EMPTY_INVESTMENT_SUMMARY = {
+  total_investment_amount: 0,
+  total_gross: 0,
+  total_tncn: 0,
+  total_net: 0,
+  count: 0
+};
+
+const INVESTMENT_LIST_FIELDS =
+  "product_name amount term_type term_value interest_rate invested_at maturity_at status commission createdAt";
+
+const CUSTOMER_COMMISSION_FIELDS = { cif: "cif_commission", ekyc: "ekyc_commission" };
+
+function summarizeInvestments(match) {
+  return InvestmentModel.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: null,
+        total_investment_amount: { $sum: "$amount" },
+        total_gross: { $sum: "$commission.gross_amount" },
+        total_tncn: { $sum: "$commission.tncn_amount" },
+        total_net: { $sum: "$commission.net_amount" },
+        count: { $sum: 1 }
+      }
+    }
+  ]).then((rows) => rows[0] ?? EMPTY_INVESTMENT_SUMMARY);
+}
+
+function buildCustomerCommissionSummary(cifCount, ekycCount) {
+  return {
+    cif_count: cifCount,
+    cif_amount: cifCount * CIF_COMMISSION_AMOUNT,
+    ekyc_count: ekycCount,
+    ekyc_amount: ekycCount * EKYC_COMMISSION_AMOUNT,
+    total_amount: cifCount * CIF_COMMISSION_AMOUNT + ekycCount * EKYC_COMMISSION_AMOUNT
+  };
+}
+
+// HH CIF/eKYC của 1 sale trong [filter.from, filter.to]. Mỗi khách chỉ giữ lại phần HH khớp bộ lọc
+// (đúng loại, đúng sale, granted_at trong khoảng) — phần không khớp trả về null để client không
+// hiển thị nhầm HH của tháng khác / loại khác / sale khác.
+async function loadSaleCustomerCommissions(saleId, filter) {
+  const kinds = ["cif", "ekyc"].filter((kind) => filter.types.includes(kind));
+  if (!kinds.length) return { customerCommissions: [], cifCount: 0, ekycCount: 0 };
+
+  const docs = await CustomerModel.find({
+    isDeleted: false,
+    $or: kinds.map((kind) => ({
+      [`${CUSTOMER_COMMISSION_FIELDS[kind]}.sale_id`]: saleId,
+      [`${CUSTOMER_COMMISSION_FIELDS[kind]}.granted_at`]: { $gte: filter.from, $lte: filter.to }
+    }))
+  })
+    .select("phone_number external_id identity.full_name cif_commission ekyc_commission")
+    .lean();
+
+  const counts = { cif: 0, ekyc: 0 };
+  const customerCommissions = docs.map((doc) => {
+    const result = { ...doc };
+    Object.entries(CUSTOMER_COMMISSION_FIELDS).forEach(([kind, field]) => {
+      const commission = doc[field];
+      const matches =
+        kinds.includes(kind) &&
+        String(commission?.sale_id) === String(saleId) &&
+        commission.granted_at >= filter.from &&
+        commission.granted_at <= filter.to;
+      if (matches) counts[kind] += 1;
+      else result[field] = null;
+    });
+    return result;
+  });
+
+  return { customerCommissions, cifCount: counts.cif, ekycCount: counts.ekyc };
 }
 
 const InvestmentController = {
@@ -270,6 +346,9 @@ const InvestmentController = {
 
   // GET /investments/my-commission
   // Sale nội bộ xem lịch sử HH dự kiến của mình
+  // ?month=&year=                  → theo tháng (mặc định tháng hiện tại)
+  // ?date_from=&date_to=           → theo khoảng "Ngày ghi nhận" (YYYY-MM-DD), ưu tiên hơn month/year
+  // ?type=cif,ekyc,investment      → lọc theo loại HH, bỏ trống = tất cả
   getMyCommission: async (req, res) => {
     try {
       const accountId = req.account._id;
@@ -279,8 +358,22 @@ const InvestmentController = {
         limit = 20,
         month = now.getMonth() + 1, // default tháng hiện tại
         year = now.getFullYear(), // default năm hiện tại
+        date_from, // YYYY-MM-DD — có cả date_from + date_to thì bỏ qua month/year
+        date_to, // YYYY-MM-DD
+        type, // cif | ekyc | investment, nhiều loại cách nhau dấu phẩy; bỏ trống = tất cả
         app_code
       } = req.query;
+
+      const commissionFilter = parseCommissionFilter({
+        month,
+        year,
+        dateFrom: date_from,
+        dateTo: date_to,
+        type
+      });
+      if (commissionFilter.error) {
+        return res.status(400).json({ message: commissionFilter.error });
+      }
 
       const sale = await UserInfoModel.findOne({ id_account: accountId });
       if (!sale) {
@@ -290,8 +383,7 @@ const InvestmentController = {
       const filter = {
         "commission.sale_id": sale._id,
         "commission.status": "pending",
-        "commission.period_month": Number(month),
-        "commission.period_year": Number(year)
+        ...commissionFilter.investmentMatch
       };
 
       if (app_code) {
@@ -300,85 +392,36 @@ const InvestmentController = {
       }
 
       const skip = (Number(page) - 1) * Number(limit);
+      const includeInvestment = commissionFilter.types.includes("investment");
 
-      const [investments, total] = await Promise.all([
-        InvestmentModel.find(filter)
-          .populate({
-            path: "customer_id",
-            select: "phone_number identity.full_name"
-          })
-          .populate("app_id", "name code")
-          .select(
-            "product_name amount term_type term_value interest_rate invested_at maturity_at status commission createdAt"
-          )
-          .sort({ invested_at: -1 })
-          .skip(skip)
-          .limit(Number(limit)),
-        InvestmentModel.countDocuments(filter)
-      ]);
+      const [investments, total, summary] = includeInvestment
+        ? await Promise.all([
+            InvestmentModel.find(filter)
+              .populate({
+                path: "customer_id",
+                select: "phone_number identity.full_name"
+              })
+              .populate("app_id", "name code")
+              .select(INVESTMENT_LIST_FIELDS)
+              .sort({ invested_at: -1 })
+              .skip(skip)
+              .limit(Number(limit)),
+            InvestmentModel.countDocuments(filter),
+            summarizeInvestments(filter)
+          ])
+        : [[], 0, EMPTY_INVESTMENT_SUMMARY];
 
-      const summary = await InvestmentModel.aggregate([
-        { $match: filter },
-        {
-          $group: {
-            _id: null,
-            total_investment_amount: { $sum: "$amount" },
-            total_gross: { $sum: "$commission.gross_amount" },
-            total_tncn: { $sum: "$commission.tncn_amount" },
-            total_net: { $sum: "$commission.net_amount" },
-            count: { $sum: 1 }
-          }
-        }
-      ]);
-
-      // HH CIF/eKYC trong cùng tháng/năm
-      const startOfMonth = new Date(Number(year), Number(month) - 1, 1);
-      const endOfMonth = new Date(Number(year), Number(month), 0, 23, 59, 59, 999);
-
-      const customerCommissions = await CustomerModel.find({
-        $or: [
-          {
-            "cif_commission.sale_id": sale._id,
-            "cif_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth }
-          },
-          {
-            "ekyc_commission.sale_id": sale._id,
-            "ekyc_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth }
-          }
-        ]
-      }).select("phone_number external_id identity.full_name cif_commission ekyc_commission");
-
-      const cifCount = customerCommissions.filter(
-        (c) =>
-          c.cif_commission?.sale_id?.toString() === sale._id.toString() &&
-          c.cif_commission?.granted_at >= startOfMonth
-      ).length;
-      const ekycCount = customerCommissions.filter(
-        (c) =>
-          c.ekyc_commission?.sale_id?.toString() === sale._id.toString() &&
-          c.ekyc_commission?.granted_at >= startOfMonth
-      ).length;
+      const { customerCommissions, cifCount, ekycCount } = await loadSaleCustomerCommissions(
+        sale._id,
+        commissionFilter
+      );
 
       return res.status(200).json({
         message: "Lấy lịch sử hoa hồng thành công",
-        period: {
-          month: Number(month),
-          year: Number(year)
-        },
-        summary: summary[0] ?? {
-          total_investment_amount: 0,
-          total_gross: 0,
-          total_tncn: 0,
-          total_net: 0,
-          count: 0
-        },
-        customer_commission_summary: {
-          cif_count: cifCount,
-          cif_amount: cifCount * CIF_COMMISSION_AMOUNT,
-          ekyc_count: ekycCount,
-          ekyc_amount: ekycCount * EKYC_COMMISSION_AMOUNT,
-          total_amount: cifCount * CIF_COMMISSION_AMOUNT + ekycCount * EKYC_COMMISSION_AMOUNT
-        },
+        period: commissionFilter.period,
+        types: commissionFilter.types,
+        summary,
+        customer_commission_summary: buildCustomerCommissionSummary(cifCount, ekycCount),
         customer_commissions: customerCommissions,
         data: investments,
         pagination: {
@@ -397,15 +440,30 @@ const InvestmentController = {
   // GET /investments/staff-commission — Manager/Admin xem HH của từng nhân viên
   // ?month=X&year=Y                  → tổng quan tất cả sale
   // ?month=X&year=Y&sale_id=XXX      → chi tiết 1 sale (cùng format getMyCommission)
+  // Nhận thêm date_from/date_to + type giống getMyCommission
   getStaffCommission: async (req, res) => {
     try {
-      const { month, year, sale_id } = req.query;
       const now = new Date();
-      const m = Number(month) || now.getMonth() + 1;
-      const y = Number(year) || now.getFullYear();
+      const {
+        month = now.getMonth() + 1, // default tháng hiện tại
+        year = now.getFullYear(), // default năm hiện tại
+        date_from, // YYYY-MM-DD — có cả date_from + date_to thì bỏ qua month/year
+        date_to, // YYYY-MM-DD
+        type, // cif | ekyc | investment, nhiều loại cách nhau dấu phẩy; bỏ trống = tất cả
+        sale_id // có → chi tiết 1 sale, không có → tổng quan tất cả sale
+      } = req.query;
 
-      const startOfMonth = new Date(y, m - 1, 1);
-      const endOfMonth = new Date(y, m, 0, 23, 59, 59, 999);
+      const commissionFilter = parseCommissionFilter({
+        month,
+        year,
+        dateFrom: date_from,
+        dateTo: date_to,
+        type
+      });
+      if (commissionFilter.error) {
+        return res.status(400).json({ message: commissionFilter.error });
+      }
+      const { types, period, from, to, investmentMatch } = commissionFilter;
 
       if (sale_id) {
         // ── Chi tiết 1 sale ───────────────────────────────────────────
@@ -414,58 +472,26 @@ const InvestmentController = {
 
         const invFilter = {
           "commission.sale_id": sale._id,
-          "commission.period_month": m,
-          "commission.period_year": y,
+          ...investmentMatch,
           isDeleted: false
         };
 
-        const [investments, total, summary] = await Promise.all([
-          InvestmentModel.find(invFilter)
-            .populate({ path: "customer_id", select: "phone_number identity.full_name" })
-            .populate("app_id", "name code")
-            .select(
-              "product_name amount term_type term_value interest_rate invested_at maturity_at status commission createdAt"
-            )
-            .sort({ invested_at: -1 }),
-          InvestmentModel.countDocuments(invFilter),
-          InvestmentModel.aggregate([
-            { $match: invFilter },
-            {
-              $group: {
-                _id: null,
-                total_investment_amount: { $sum: "$amount" },
-                total_gross: { $sum: "$commission.gross_amount" },
-                total_tncn: { $sum: "$commission.tncn_amount" },
-                total_net: { $sum: "$commission.net_amount" },
-                count: { $sum: 1 }
-              }
-            }
-          ])
-        ]);
+        const [investments, total, summary] = types.includes("investment")
+          ? await Promise.all([
+              InvestmentModel.find(invFilter)
+                .populate({ path: "customer_id", select: "phone_number identity.full_name" })
+                .populate("app_id", "name code")
+                .select(INVESTMENT_LIST_FIELDS)
+                .sort({ invested_at: -1 }),
+              InvestmentModel.countDocuments(invFilter),
+              summarizeInvestments(invFilter)
+            ])
+          : [[], 0, EMPTY_INVESTMENT_SUMMARY];
 
-        const customerCommissions = await CustomerModel.find({
-          $or: [
-            {
-              "cif_commission.sale_id": sale._id,
-              "cif_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth }
-            },
-            {
-              "ekyc_commission.sale_id": sale._id,
-              "ekyc_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth }
-            }
-          ]
-        }).select("phone_number identity.full_name cif_commission ekyc_commission");
-
-        const cifCount = customerCommissions.filter(
-          (c) =>
-            c.cif_commission?.sale_id?.toString() === String(sale._id) &&
-            c.cif_commission?.granted_at >= startOfMonth
-        ).length;
-        const ekycCount = customerCommissions.filter(
-          (c) =>
-            c.ekyc_commission?.sale_id?.toString() === String(sale._id) &&
-            c.ekyc_commission?.granted_at >= startOfMonth
-        ).length;
+        const { customerCommissions, cifCount, ekycCount } = await loadSaleCustomerCommissions(
+          sale._id,
+          commissionFilter
+        );
 
         return res.json({
           sale: {
@@ -474,21 +500,10 @@ const InvestmentController = {
             ma_nv: sale.ma_nv,
             phone_number: sale.phone_number
           },
-          period: { month: m, year: y },
-          summary: summary[0] ?? {
-            total_investment_amount: 0,
-            total_gross: 0,
-            total_tncn: 0,
-            total_net: 0,
-            count: 0
-          },
-          customer_commission_summary: {
-            cif_count: cifCount,
-            cif_amount: cifCount * CIF_COMMISSION_AMOUNT,
-            ekyc_count: ekycCount,
-            ekyc_amount: ekycCount * EKYC_COMMISSION_AMOUNT,
-            total_amount: cifCount * CIF_COMMISSION_AMOUNT + ekycCount * EKYC_COMMISSION_AMOUNT
-          },
+          period,
+          types,
+          summary,
+          customer_commission_summary: buildCustomerCommissionSummary(cifCount, ekycCount),
           customer_commissions: customerCommissions,
           data: investments,
           pagination: { total, page: 1, limit: total, total_pages: 1 }
@@ -497,44 +512,49 @@ const InvestmentController = {
 
       // ── Tổng quan tất cả sale ─────────────────────────────────────────
       const [invAgg, cifAgg, ekycAgg] = await Promise.all([
-        InvestmentModel.aggregate([
-          {
-            $match: {
-              "commission.sale_id": { $exists: true, $ne: null },
-              "commission.period_month": m,
-              "commission.period_year": y,
-              isDeleted: false
-            }
-          },
-          {
-            $group: {
-              _id: "$commission.sale_id",
-              inv_count: { $sum: 1 },
-              inv_net: { $sum: "$commission.net_amount" },
-              inv_gross: { $sum: "$commission.gross_amount" }
-            }
-          }
-        ]),
-        CustomerModel.aggregate([
-          {
-            $match: {
-              "cif_commission.sale_id": { $exists: true, $ne: null },
-              "cif_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth },
-              isDeleted: false
-            }
-          },
-          { $group: { _id: "$cif_commission.sale_id", cif_count: { $sum: 1 } } }
-        ]),
-        CustomerModel.aggregate([
-          {
-            $match: {
-              "ekyc_commission.sale_id": { $exists: true, $ne: null },
-              "ekyc_commission.granted_at": { $gte: startOfMonth, $lte: endOfMonth },
-              isDeleted: false
-            }
-          },
-          { $group: { _id: "$ekyc_commission.sale_id", ekyc_count: { $sum: 1 } } }
-        ])
+        types.includes("investment")
+          ? InvestmentModel.aggregate([
+              {
+                $match: {
+                  "commission.sale_id": { $exists: true, $ne: null },
+                  ...investmentMatch,
+                  isDeleted: false
+                }
+              },
+              {
+                $group: {
+                  _id: "$commission.sale_id",
+                  inv_count: { $sum: 1 },
+                  inv_net: { $sum: "$commission.net_amount" },
+                  inv_gross: { $sum: "$commission.gross_amount" }
+                }
+              }
+            ])
+          : [],
+        types.includes("cif")
+          ? CustomerModel.aggregate([
+              {
+                $match: {
+                  "cif_commission.sale_id": { $exists: true, $ne: null },
+                  "cif_commission.granted_at": { $gte: from, $lte: to },
+                  isDeleted: false
+                }
+              },
+              { $group: { _id: "$cif_commission.sale_id", cif_count: { $sum: 1 } } }
+            ])
+          : [],
+        types.includes("ekyc")
+          ? CustomerModel.aggregate([
+              {
+                $match: {
+                  "ekyc_commission.sale_id": { $exists: true, $ne: null },
+                  "ekyc_commission.granted_at": { $gte: from, $lte: to },
+                  isDeleted: false
+                }
+              },
+              { $group: { _id: "$ekyc_commission.sale_id", ekyc_count: { $sum: 1 } } }
+            ])
+          : []
       ]);
 
       const allSaleIds = [
@@ -587,7 +607,7 @@ const InvestmentController = {
         })
         .sort((a, b) => b.total_net - a.total_net);
 
-      return res.json({ period: { month: m, year: y }, data: rows });
+      return res.json({ period, types, data: rows });
     } catch (err) {
       console.error("getStaffCommission error:", err);
       return res.status(500).json({ message: "Internal server error", error: err.message });
@@ -1047,7 +1067,7 @@ const InvestmentController = {
 // ── Cảnh báo đáo hạn ─────────────────────────────────────────────────────────
 InvestmentController.getExpiring = async (req, res) => {
   try {
-    const days = Math.min(parseInt(req.query.days) || 30, 90);
+    const days = Math.min(parseInt(req.query.days, 10) || 30, 90);
     const now = new Date();
     const until = new Date();
     until.setDate(until.getDate() + days);

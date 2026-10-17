@@ -121,6 +121,81 @@ describe("parseDayRows", () => {
     expect(rows[0].rawIn).toBeNull();
   });
 
+  // Bug thật (file "ChiTietTungNguoiTungNgay" 16/10/2026, xuất từ máy Windows để vùng English US):
+  // ngày ghi dạng chuỗi tháng/ngày không đệm số 0 — "10/8/2026" là 08/10/2026 (Thứ Năm).
+  test("ngày dạng chuỗi M/D/YYYY (Windows vùng US): nhận ra nhờ cột Thứ, chuẩn hoá về DD/MM/YYYY", () => {
+    const rows = parseDayRows({
+      rows: [
+        ["10/8/2026", "Năm", "07:49", "17:00", "", "", "", ""],
+        ["10/9/2026", "Sáu", "07:35", "", "", "", "", ""],
+        ["10/10/2026", "Bảy", "", "", "", "", "", ""],
+        ["10/11/2026", "CN", "", "", "", "", "", ""],
+        ["10/12/2026", "Hai", "07:47", "17:22", "", "", "", ""],
+        ["10/15/2026", "Năm", "07:51", "18:23", "", "", "", ""]
+      ]
+    });
+
+    expect(rows.map((r) => r.dateStr)).toEqual([
+      "08/10/2026",
+      "09/10/2026",
+      "10/10/2026",
+      "11/10/2026",
+      "12/10/2026",
+      "15/10/2026"
+    ]);
+    expect(rows[0].rawIn).toBe("07:49");
+    expect(rows[0].rawOut).toBe("17:00");
+  });
+
+  test("ngày dạng chuỗi M/D/YYYY không có cột Thứ: nhận ra nhờ ngày > 12 trong cùng block", () => {
+    const rows = parseDayRows({
+      rows: [
+        ["10/8/2026", "", "07:49", "", "", "", "", "17:00"],
+        ["10/13/2026", "", "07:33", "", "", "", "", "17:06"]
+      ]
+    });
+
+    expect(rows.map((r) => r.dateStr)).toEqual(["08/10/2026", "13/10/2026"]);
+  });
+
+  test("ngày dạng chuỗi D/M/YYYY không đệm số 0: chuẩn hoá về DD/MM/YYYY", () => {
+    const rows = parseDayRows({
+      rows: [["8/10/2026", "Năm", "07:49", "", "", "", "", "17:00"]]
+    });
+
+    expect(rows[0].dateStr).toBe("08/10/2026");
+  });
+
+  // User sửa tay cột ngày trong Excel -> cell thành ngày thật, SheetJS đọc ra số serial
+  test("ngày là kiểu Date thật của Excel (số serial): chuẩn hoá về DD/MM/YYYY", () => {
+    const ws = xlsx.utils.aoa_to_sheet([
+      ["Mã nhân viên: M001", "", "", "", "", "", "", ""],
+      [46303, "Năm", "07:49", "17:00", "", "", "", ""]
+    ]);
+    ws.A2.z = "dd/mm/yyyy";
+    const wb = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(wb, ws, "Sheet1");
+    const buffer: Buffer = xlsx.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    const rows = parseDayRows(parseExcelToBlocks(buffer)[0]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].dateStr).toBe("08/10/2026");
+    expect(rows[0].rawIn).toBe("07:49");
+    expect(rows[0].rawOut).toBe("17:00");
+  });
+
+  test("ngày không tồn tại hoặc lệch cột Thứ: bỏ dòng, không import nhầm sang ngày khác", () => {
+    const rows = parseDayRows({
+      rows: [
+        ["31/02/2026", "", "08:01", "", "", "", "", "17:31"],
+        ["05/10/2026", "Năm", "08:01", "", "", "", "", "17:31"] // 05/10/2026 là Thứ Hai
+      ]
+    });
+
+    expect(rows).toEqual([]);
+  });
+
   // Bug nghiệp vụ có sẵn (KHÔNG sửa ở đây, xem note task 1.8.4.5 trong
   // docs/DDD-HEXAGONAL-MIGRATION-PLAN.md): khi chỉ có ĐÚNG 1 lần quét trong ngày, việc phân loại
   // in/out theo vị trí cột cố định có thể sai nếu quét đó thực chất thuộc phía ngược lại — test này

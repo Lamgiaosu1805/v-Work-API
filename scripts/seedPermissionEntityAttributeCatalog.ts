@@ -90,6 +90,11 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
         path: "subject.departmentColleagueUserIds",
         label: "Danh sách user cùng phòng ban",
         type: "reference"
+      },
+      {
+        path: "subject.branchColleagueUserIds",
+        label: "Danh sách user cùng chi nhánh",
+        type: "reference"
       }
     ],
     resourceAttributes: [
@@ -603,7 +608,12 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
   {
     entity: "CustomerInteraction",
     subjectAttributes: [
-      { path: "subject.userId", label: "ID nhân viên (chính mình)", type: "reference" }
+      { path: "subject.userId", label: "ID nhân viên (chính mình)", type: "reference" },
+      {
+        path: "subject.branchColleagueUserIds",
+        label: "Danh sách user cùng chi nhánh",
+        type: "reference"
+      }
     ],
     resourceAttributes: [
       { path: "resource.sale_id", label: "Sale phụ trách tương tác", type: "reference" }
@@ -625,6 +635,11 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
       {
         path: "subject.departmentColleagueUserIds",
         label: "Danh sách user cùng phòng ban",
+        type: "reference"
+      },
+      {
+        path: "subject.branchColleagueUserIds",
+        label: "Danh sách user cùng chi nhánh",
         type: "reference"
       }
     ],

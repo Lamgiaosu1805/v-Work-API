@@ -104,6 +104,8 @@ const callSalesChart = (saleKey: SaleKey, query: Record<string, unknown> = {}) =
 const callLeaderboard = (saleKey: SaleKey) =>
   callAs(saleKey, InvestmentController.getLeaderboard, { period: "month" });
 
+const callConversion = (saleKey: SaleKey) => callAs(saleKey, InvestmentController.getConversion);
+
 beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri());
@@ -321,5 +323,38 @@ describe("GET /investments/leaderboard — xếp hạng theo data scope", () => 
       ["Sale SCB01", 200],
       ["Sale SCA01", 100]
     ]);
+  });
+});
+
+describe("GET /investments/conversion — phễu chuyển đổi theo data scope", () => {
+  const saleNames = (body: { rows: { sale_name: string }[] }) =>
+    body.rows.map((row) => row.sale_name).sort();
+
+  it("INVESTMENT_SELF_ASSIGNED → phễu cá nhân", async () => {
+    await grantInvestmentPermission("A", "investment.view", "INVESTMENT_SELF_ASSIGNED");
+
+    const body = await callConversion("A");
+
+    expect(body.mode).toBe("personal");
+    expect(body.funnel.map((step: { count: number }) => step.count)).toEqual([1, 0, 1]);
+  });
+
+  it("INVESTMENT_OWN_BRANCH → xếp hạng như manager nhưng chỉ sale cùng chi nhánh", async () => {
+    await grantInvestmentPermission("A", "investment.view", "INVESTMENT_OWN_BRANCH");
+
+    const body = await callConversion("A");
+
+    expect(body.mode).toBe("manager");
+    expect(saleNames(body)).toEqual(["Sale SCA01", "Sale SCB01", "Sale SCD01"]);
+    expect(body.rows.every((row: { invested: number }) => row.invested === 1)).toBe(true);
+  });
+
+  it("INVESTMENT_ALL_COMPANY → xếp hạng toàn công ty", async () => {
+    await grantInvestmentPermission("C", "investment.view", "INVESTMENT_ALL_COMPANY");
+
+    const body = await callConversion("C");
+
+    expect(body.mode).toBe("manager");
+    expect(saleNames(body)).toEqual(["Sale SCA01", "Sale SCB01", "Sale SCC01", "Sale SCD01"]);
   });
 });

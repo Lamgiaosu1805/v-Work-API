@@ -147,12 +147,30 @@ const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
   }
 ];
 
-// Chỉ mở rộng phạm vi xem doanh số (khoản đầu tư) ra cả chi nhánh — gán KÈM Sale CRM, không thay
-// thế. Không tự gán cho nhóm account nào: gán đích danh trên màn Phân quyền chi tiết.
+// Quyền của Sale CRM, mở rộng ra cả chi nhánh ở các chức năng mà API giới hạn được theo chi nhánh.
+// Chức năng dùng chung toàn công ty (nhận khách, ghi tương tác, gửi yêu cầu nhận khách, gọi điện,
+// AI insight, hoa hồng...) giữ đúng phạm vi của Sale CRM; các quyền chỉ dành cho toàn công ty của
+// Sale CRM Manager (phân khách, duyệt yêu cầu nhận khách, kỳ nhận khách, quản lý CSKH, dashboard,
+// giao dịch, AI chat...) không cấp. Không tự gán cho nhóm account nào: gán đích danh trên màn
+// Phân quyền chi tiết.
+const BRANCH_SCOPE_BY_PERMISSION: Record<string, string> = {
+  "customer.view": "CUSTOMER_OWN_BRANCH",
+  "customer_care.view": "CUSTOMER_OWN_BRANCH",
+  "customer_call.view": "CUSTOMER_OWN_BRANCH",
+  "customer_interaction.view": "CUSTOMER_INTERACTION_OWN_BRANCH",
+  "call_log.view": "CALL_LOG_OWN_BRANCH",
+  "call_log.update_note": "CALL_LOG_OWN_BRANCH",
+  "investment.view": "INVESTMENT_OWN_BRANCH"
+};
+
 const BRANCH_MANAGER_GRANTS: PermissionGrantDoc[] = [
+  ...SALE_GRANTS.map((grant) => {
+    const branchScope = BRANCH_SCOPE_BY_PERMISSION[grant.permissionCode];
+    return branchScope ? { ...grant, dataScopePolicyCode: branchScope } : grant;
+  }),
   {
-    permissionCode: "investment.view",
-    dataScopePolicyCode: "INVESTMENT_OWN_BRANCH",
+    permissionCode: "customer.export",
+    dataScopePolicyCode: "CUSTOMER_OWN_BRANCH",
     fieldScopePolicyCode: null
   }
 ];

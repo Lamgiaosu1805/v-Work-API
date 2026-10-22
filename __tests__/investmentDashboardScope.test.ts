@@ -24,12 +24,14 @@ const UserDepartmentPositionModel = require("../src/models/UserDepartmentPositio
 
 let mongod: MongoMemoryServer;
 
-// saleA, saleB cùng phòng ban + chi nhánh 1; saleC khác phòng ban, chi nhánh 2.
-// Mỗi sale có 1 khách, mỗi khách 1 khoản đầu tư: A = 100, B = 200, C = 400.
+// saleA, saleB cùng phòng ban 1 + chi nhánh 1; saleD phòng ban 2 nhưng cùng chi nhánh 1;
+// saleC phòng ban 2, chi nhánh 2.
+// Mỗi sale có 1 khách, mỗi khách 1 khoản đầu tư: A = 100, B = 200, C = 400, D = 800.
 const accounts = {
   A: new mongoose.Types.ObjectId(),
   B: new mongoose.Types.ObjectId(),
-  C: new mongoose.Types.ObjectId()
+  C: new mongoose.Types.ObjectId(),
+  D: new mongoose.Types.ObjectId()
 };
 type SaleKey = keyof typeof accounts;
 const sales = {} as Record<SaleKey, mongoose.Types.ObjectId>;
@@ -40,7 +42,8 @@ const INVESTMENT_PERMISSIONS = ["investment.view", "investment.leaderboard"];
 const INVESTMENT_POLICIES = [
   { code: "INVESTMENT_ALL_COMPANY", conditionTree: null },
   { code: "INVESTMENT_SELF_ASSIGNED", path: "subject.managedCustomerIds" },
-  { code: "INVESTMENT_OWN_DEPARTMENT", path: "subject.departmentColleagueCustomerIds" }
+  { code: "INVESTMENT_OWN_DEPARTMENT", path: "subject.departmentColleagueCustomerIds" },
+  { code: "INVESTMENT_OWN_BRANCH", path: "subject.branchColleagueCustomerIds" }
 ];
 
 function saleInfo(idAccount: mongoose.Types.ObjectId, maNv: string, branchId: unknown) {
@@ -101,6 +104,8 @@ const callSalesChart = (saleKey: SaleKey, query: Record<string, unknown> = {}) =
 const callLeaderboard = (saleKey: SaleKey) =>
   callAs(saleKey, InvestmentController.getLeaderboard, { period: "month" });
 
+const callConversion = (saleKey: SaleKey) => callAs(saleKey, InvestmentController.getConversion);
+
 beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri());
@@ -144,14 +149,16 @@ beforeAll(async () => {
   branches.one = branch1._id;
   branches.two = branch2._id;
 
-  const [saleA, saleB, saleC] = await UserInfoModel.create([
+  const [saleA, saleB, saleC, saleD] = await UserInfoModel.create([
     saleInfo(accounts.A, "SCA01", branch1._id),
     saleInfo(accounts.B, "SCB01", branch1._id),
-    saleInfo(accounts.C, "SCC01", branch2._id)
+    saleInfo(accounts.C, "SCC01", branch2._id),
+    saleInfo(accounts.D, "SCD01", branch1._id)
   ]);
   sales.A = saleA._id;
   sales.B = saleB._id;
   sales.C = saleC._id;
+  sales.D = saleD._id;
 
   const [deptSale, deptOther] = await DepartmentModel.create([
     { department_name: "Phòng Sale 1", department_code: "PS1" },
@@ -161,14 +168,16 @@ beforeAll(async () => {
   await UserDepartmentPositionModel.create([
     { user: saleA._id, department: deptSale._id, position },
     { user: saleB._id, department: deptSale._id, position },
-    { user: saleC._id, department: deptOther._id, position }
+    { user: saleC._id, department: deptOther._id, position },
+    { user: saleD._id, department: deptOther._id, position }
   ]);
 
   const appDoc = await AppModel.create({ name: "TikLuy", code: "tikluy-investment-scope-test" });
-  const [customerA, customerB, customerC] = await CustomerModel.create([
+  const [customerA, customerB, customerC, customerD] = await CustomerModel.create([
     { app_id: appDoc._id, phone_number: "0912000001", referred_by: saleA._id },
     { app_id: appDoc._id, phone_number: "0912000002", referred_by: saleB._id },
-    { app_id: appDoc._id, phone_number: "0912000003", referred_by: saleC._id }
+    { app_id: appDoc._id, phone_number: "0912000003", referred_by: saleC._id },
+    { app_id: appDoc._id, phone_number: "0912000004", referred_by: saleD._id }
   ]);
 
   const now = new Date();
@@ -187,7 +196,8 @@ beforeAll(async () => {
   await InvestmentModel.create([
     investment(customerA._id, 100),
     investment(customerB._id, 200),
-    investment(customerC._id, 400)
+    investment(customerC._id, 400),
+    investment(customerD._id, 800)
   ]);
 });
 
@@ -235,13 +245,33 @@ describe("GET /investments/sales-chart — mode theo data scope", () => {
     expect(body.branch_options).toEqual([]);
   });
 
+  it("INVESTMENT_OWN_BRANCH → branch, gồm sale cùng chi nhánh khác phòng ban", async () => {
+    await grantInvestmentPermission("A", "investment.view", "INVESTMENT_OWN_BRANCH");
+
+    const body = await callSalesChart("A");
+
+    expect(body.mode).toBe("branch");
+    expect(body.summary.total_amount).toBe(1100);
+    expect(body.breakdown.map((row: { amount: number }) => row.amount)).toEqual([800, 200, 100]);
+    expect(body.branch_options).toEqual([]);
+  });
+
+  it("INVESTMENT_OWN_BRANCH thì bỏ qua branch_id của chi nhánh khác", async () => {
+    await grantInvestmentPermission("A", "investment.view", "INVESTMENT_OWN_BRANCH");
+
+    const body = await callSalesChart("A", { branch_id: String(branches.two) });
+
+    expect(body.mode).toBe("branch");
+    expect(body.summary.total_amount).toBe(1100);
+  });
+
   it("INVESTMENT_ALL_COMPANY → all, trả danh sách chi nhánh để lọc", async () => {
     await grantInvestmentPermission("C", "investment.view", "INVESTMENT_ALL_COMPANY");
 
     const body = await callSalesChart("C");
 
     expect(body.mode).toBe("all");
-    expect(body.summary.total_amount).toBe(700);
+    expect(body.summary.total_amount).toBe(1500);
     expect(body.branch_options.map((b: { branch_name: string }) => b.branch_name).sort()).toEqual([
       "Chi nhánh 1",
       "Chi nhánh 2"
@@ -254,7 +284,7 @@ describe("GET /investments/sales-chart — mode theo data scope", () => {
     const body = await callSalesChart("C", { branch_id: String(branches.one) });
 
     expect(body.mode).toBe("branch");
-    expect(body.summary.total_amount).toBe(300);
+    expect(body.summary.total_amount).toBe(1100);
     expect(body.branch_options).toHaveLength(2);
   });
 });
@@ -288,9 +318,43 @@ describe("GET /investments/leaderboard — xếp hạng theo data scope", () => 
     const body = await callLeaderboard("C");
 
     expect(ranking(body)).toEqual([
+      ["Sale SCD01", 800],
       ["Sale SCC01", 400],
       ["Sale SCB01", 200],
       ["Sale SCA01", 100]
     ]);
+  });
+});
+
+describe("GET /investments/conversion — phễu chuyển đổi theo data scope", () => {
+  const saleNames = (body: { rows: { sale_name: string }[] }) =>
+    body.rows.map((row) => row.sale_name).sort();
+
+  it("INVESTMENT_SELF_ASSIGNED → phễu cá nhân", async () => {
+    await grantInvestmentPermission("A", "investment.view", "INVESTMENT_SELF_ASSIGNED");
+
+    const body = await callConversion("A");
+
+    expect(body.mode).toBe("personal");
+    expect(body.funnel.map((step: { count: number }) => step.count)).toEqual([1, 0, 1]);
+  });
+
+  it("INVESTMENT_OWN_BRANCH → xếp hạng như manager nhưng chỉ sale cùng chi nhánh", async () => {
+    await grantInvestmentPermission("A", "investment.view", "INVESTMENT_OWN_BRANCH");
+
+    const body = await callConversion("A");
+
+    expect(body.mode).toBe("manager");
+    expect(saleNames(body)).toEqual(["Sale SCA01", "Sale SCB01", "Sale SCD01"]);
+    expect(body.rows.every((row: { invested: number }) => row.invested === 1)).toBe(true);
+  });
+
+  it("INVESTMENT_ALL_COMPANY → xếp hạng toàn công ty", async () => {
+    await grantInvestmentPermission("C", "investment.view", "INVESTMENT_ALL_COMPANY");
+
+    const body = await callConversion("C");
+
+    expect(body.mode).toBe("manager");
+    expect(saleNames(body)).toEqual(["Sale SCA01", "Sale SCB01", "Sale SCC01", "Sale SCD01"]);
   });
 });

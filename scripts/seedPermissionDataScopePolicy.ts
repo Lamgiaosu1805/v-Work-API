@@ -45,6 +45,20 @@ const ownDepartmentColleaguesCondition = (resourceUserPath: string): ConditionTr
   ]
 });
 
+// resource.<x> IN ${subject.branchColleagueUserIds} — bản chi nhánh của
+// ownDepartmentColleaguesCondition: resource gắn với sale (referred_by, sale_id...) thuộc cùng
+// chi nhánh với mình (user_info.branch_id), kể cả chính mình.
+const ownBranchColleaguesCondition = (resourceUserPath: string): ConditionTreeProps => ({
+  operator: "AND",
+  clauses: [
+    {
+      left: resourceUserPath,
+      operator: "IN",
+      right: { type: "SUBJECT_REF", path: "subject.branchColleagueUserIds" }
+    }
+  ]
+});
+
 // resource.<x> IN ${subject.departmentColleagueCustomerIds} — biến thể của
 // ownDepartmentColleaguesCondition, dùng khi resource gắn trực tiếp với khách hàng (customer_id)
 // thay vì gắn với user (sale) — vd Investment.customer_id.
@@ -55,6 +69,21 @@ const ownDepartmentColleagueCustomersCondition = (resourceCustomerPath: string):
       left: resourceCustomerPath,
       operator: "IN",
       right: { type: "SUBJECT_REF", path: "subject.departmentColleagueCustomerIds" }
+    }
+  ]
+});
+
+// resource.<x> IN ${subject.branchColleagueCustomerIds} — khách của mọi sale cùng chi nhánh (kể cả
+// chính mình), dùng khi resource gắn trực tiếp với khách hàng (customer_id) — vd Investment.customer_id.
+const ownBranchColleagueCustomersCondition = (
+  resourceCustomerPath: string
+): ConditionTreeProps => ({
+  operator: "AND",
+  clauses: [
+    {
+      left: resourceCustomerPath,
+      operator: "IN",
+      right: { type: "SUBJECT_REF", path: "subject.branchColleagueCustomerIds" }
     }
   ]
 });
@@ -184,6 +213,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     label: "Cùng phòng ban",
     conditionTree: ownDepartmentColleaguesCondition("resource.referred_by")
   },
+  {
+    code: "CUSTOMER_OWN_BRANCH",
+    entity: "Customer",
+    label: "Cùng chi nhánh",
+    conditionTree: ownBranchColleaguesCondition("resource.referred_by")
+  },
 
   // ---- Investment ----
   { code: "INVESTMENT_ALL_COMPANY", entity: "Investment", label: "Toàn công ty", conditionTree: null },
@@ -198,6 +233,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     entity: "Investment",
     label: "Cùng phòng ban (leaderboard)",
     conditionTree: ownDepartmentColleagueCustomersCondition("resource.customer_id")
+  },
+  {
+    code: "INVESTMENT_OWN_BRANCH",
+    entity: "Investment",
+    label: "Cùng chi nhánh",
+    conditionTree: ownBranchColleagueCustomersCondition("resource.customer_id")
   },
 
   // ---- Commission (backed bởi collection investment) ----
@@ -270,6 +311,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     label: "Cùng phòng ban",
     conditionTree: ownDepartmentColleaguesCondition("resource.sale_id")
   },
+  {
+    code: "CUSTOMER_INTERACTION_OWN_BRANCH",
+    entity: "CustomerInteraction",
+    label: "Cùng chi nhánh",
+    conditionTree: ownBranchColleaguesCondition("resource.sale_id")
+  },
 
   // ---- CallLog ----
   { code: "CALL_LOG_ALL_COMPANY", entity: "CallLog", label: "Toàn công ty", conditionTree: null },
@@ -284,6 +331,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     entity: "CallLog",
     label: "Cùng phòng ban",
     conditionTree: ownDepartmentColleaguesCondition("resource.sale_id")
+  },
+  {
+    code: "CALL_LOG_OWN_BRANCH",
+    entity: "CallLog",
+    label: "Cùng chi nhánh",
+    conditionTree: ownBranchColleaguesCondition("resource.sale_id")
   }
 ];
 

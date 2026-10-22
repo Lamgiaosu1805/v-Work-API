@@ -29,17 +29,25 @@ const CUSTOMER_CALL_SCOPES = [
   "CUSTOMER_OWN_DEPARTMENT",
   "CUSTOMER_SELF_ASSIGNED"
 ];
+// Phạm vi *_OWN_BRANCH luôn để CUỐI danh sách: seedPermissionAdminRole lấy phần tử đầu tiên
+// (ALL_COMPANY) làm phạm vi cho role admin.
 const CUSTOMER_INTERACTION_SCOPES_VIEW = [
   "CUSTOMER_INTERACTION_ALL_COMPANY",
   "CUSTOMER_INTERACTION_OWN_DEPARTMENT",
-  "CUSTOMER_INTERACTION_SELF_ASSIGNED"
+  "CUSTOMER_INTERACTION_SELF_ASSIGNED",
+  "CUSTOMER_INTERACTION_OWN_BRANCH"
 ];
 const COMMISSION_SCOPES_VIEW = ["COMMISSION_ALL_COMPANY", "COMMISSION_SELF_ASSIGNED"];
 const CALL_LOG_SCOPES = [
   "CALL_LOG_ALL_COMPANY",
   "CALL_LOG_OWN_DEPARTMENT",
-  "CALL_LOG_SELF_ASSIGNED"
+  "CALL_LOG_SELF_ASSIGNED",
+  "CALL_LOG_OWN_BRANCH"
 ];
+// Chỉ các quyền có API áp đúng phạm vi mới được chọn CUSTOMER_OWN_BRANCH — customer.ai_insight và
+// customer_call.update_relationship_status chưa lọc theo phạm vi nên giữ danh sách cũ.
+const CUSTOMER_SCOPES_VIEW_WITH_BRANCH = [...CUSTOMER_SCOPES_VIEW, "CUSTOMER_OWN_BRANCH"];
+const CUSTOMER_CALL_SCOPES_WITH_BRANCH = [...CUSTOMER_CALL_SCOPES, "CUSTOMER_OWN_BRANCH"];
 const SALE_OMICALL_PROFILE_SCOPES = ["SALE_OMICALL_PROFILE_ALL_COMPANY"];
 const ATTENDANCE_SCOPES_VIEW = [
   "ATTENDANCE_ALL_COMPANY",
@@ -594,7 +602,7 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xem khách hàng",
     entity: "Customer",
     actionKind: "READ",
-    validDataScopePolicies: CUSTOMER_SCOPES_VIEW
+    validDataScopePolicies: CUSTOMER_SCOPES_VIEW_WITH_BRANCH
   },
   {
     code: "customer.assign",
@@ -626,7 +634,7 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xem danh sách khách hàng cần gọi",
     entity: "Customer",
     actionKind: "READ",
-    validDataScopePolicies: CUSTOMER_CALL_SCOPES
+    validDataScopePolicies: CUSTOMER_CALL_SCOPES_WITH_BRANCH
   },
   {
     code: "call_log.view",
@@ -682,7 +690,7 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xuất Excel danh sách khách hàng",
     entity: "Customer",
     actionKind: "READ",
-    validDataScopePolicies: CUSTOMER_SCOPES_VIEW
+    validDataScopePolicies: CUSTOMER_SCOPES_VIEW_WITH_BRANCH
   },
   {
     code: "customer_care.view",
@@ -690,7 +698,7 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xem khách cần xử lý (SLA chăm sóc) của mình",
     entity: "Customer",
     actionKind: "READ",
-    validDataScopePolicies: CUSTOMER_SCOPES_VIEW
+    validDataScopePolicies: CUSTOMER_SCOPES_VIEW_WITH_BRANCH
   },
   {
     code: "customer_care.manage",
@@ -738,7 +746,11 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xem khoản đầu tư",
     entity: "Investment",
     actionKind: "READ",
-    validDataScopePolicies: ["INVESTMENT_ALL_COMPANY", "INVESTMENT_SELF_ASSIGNED"]
+    validDataScopePolicies: [
+      "INVESTMENT_ALL_COMPANY",
+      "INVESTMENT_SELF_ASSIGNED",
+      "INVESTMENT_OWN_BRANCH"
+    ]
   },
   {
     code: "investment.leaderboard",

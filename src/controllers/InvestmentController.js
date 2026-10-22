@@ -5,6 +5,7 @@ const AppModel = require("../models/AppModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const AgentModel = require("../models/AgentModel");
 const BranchModel = require("../models/BranchModel");
+const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const { toMongoQuery, canOnSubject } = require("../modules/permission");
 const { castObjectIdFields } = require("../core/db/cast-object-id-fields");
 const { syncCustomerCareInBackground } = require("../workflows/sync-customer-care.workflow");
@@ -118,6 +119,55 @@ function summarizeInvestments(match) {
       }
     }
   ]).then((rows) => rows[0] ?? EMPTY_INVESTMENT_SUMMARY);
+}
+
+// Mode của sales-chart khi scope investment.view KHÔNG phải toàn công ty — theo phạm vi rộng nhất
+// scope thực sự phủ: chỉ khách của mình → "personal"; thêm khách đồng nghiệp cùng phòng ban →
+// "department"; rộng hơn phòng ban → "branch" (với các subject attribute hiện có, scope rộng hơn
+// phòng ban mà không phải toàn công ty chỉ có thể là INVESTMENT_OWN_BRANCH).
+// Xét trên toàn bộ investment, không lọc kỳ, để nhãn không nhảy khi đổi tab ngày/tuần/tháng.
+async function resolveRestrictedSalesMode(accountId, scopeFilter) {
+  const me = await UserInfoModel.findOne({ id_account: accountId }).select("_id").lean();
+  if (!me) return "personal";
+
+  const coversCustomersOutside = async (saleIds) => {
+    const customerIds = await CustomerModel.distinct("_id", {
+      referred_by: { $in: saleIds },
+      isDeleted: false
+    });
+    return InvestmentModel.exists({
+      $and: [scopeFilter, { isDeleted: false, customer_id: { $nin: customerIds } }]
+    });
+  };
+
+  if (!(await coversCustomersOutside([me._id]))) return "personal";
+
+  const myDepartmentIds = await UserDepartmentPositionModel.distinct("department", {
+    user: me._id,
+    isDeleted: false
+  });
+  const departmentColleagueIds = myDepartmentIds.length
+    ? await UserDepartmentPositionModel.distinct("user", {
+        department: { $in: myDepartmentIds },
+        isDeleted: false
+      })
+    : [];
+
+  return (await coversCustomersOutside([me._id, ...departmentColleagueIds]))
+    ? "branch"
+    : "department";
+}
+
+// Đổi tên field trong filter Mongo (đệ quy qua $or/$and/$nor) — để dùng scope của Investment
+// (lọc theo customer_id) lọc thẳng collection customer (theo _id).
+function renameFilterField(filter, from, to) {
+  return Object.fromEntries(
+    Object.entries(filter).map(([key, value]) =>
+      (key === "$or" || key === "$and" || key === "$nor") && Array.isArray(value)
+        ? [key, value.map((clause) => renameFilterField(clause, from, to))]
+        : [key === from ? to : key, value]
+    )
+  );
 }
 
 function buildCustomerCommissionSummary(cifCount, ekycCount) {
@@ -957,20 +1007,9 @@ const InvestmentController = {
         }
         // mode 'all': không lọc customer — tính toàn bộ hệ thống
       } else {
+        // Scope giới hạn (vd INVESTMENT_OWN_BRANCH) thì bỏ qua branch_id — không xem được chi nhánh khác
         Object.assign(matchFilter, scopeFilter);
-        // "personal" nếu scope chỉ gồm khách do chính mình giới thiệu (INVESTMENT_SELF_ASSIGNED),
-        // "department" nếu scope còn phủ khách của người khác (vd INVESTMENT_OWN_DEPARTMENT).
-        // Không lọc theo kỳ để nhãn không nhảy khi đổi tab ngày/tuần/tháng.
-        const me = await UserInfoModel.findOne({ id_account: req.account._id })
-          .select("_id")
-          .lean();
-        const myCustomerIds = me
-          ? await CustomerModel.distinct("_id", { referred_by: me._id, isDeleted: false })
-          : [];
-        const coversOthers = await InvestmentModel.exists({
-          $and: [scopeFilter, { isDeleted: false, customer_id: { $nin: myCustomerIds } }]
-        });
-        mode = coversOthers ? "department" : "personal";
+        mode = await resolveRestrictedSalesMode(req.account._id, scopeFilter);
       }
 
       // Chạy song song: time-series + tổng
@@ -1236,7 +1275,20 @@ InvestmentController.getConversion = async (req, res) => {
       customer_id: new mongoose.Types.ObjectId()
     });
 
+    // Scope giới hạn: chỉ khách của mình → phễu cá nhân; rộng hơn (phòng ban / chi nhánh) → xếp hạng
+    // chuyển đổi theo sale như manager nhưng chỉ trong các khách thuộc scope
+    let customerScope = {};
     if (!isUnrestricted) {
+      const scopeFilter = castObjectIdFields(
+        toMongoQuery(req.permissionAbility, "investment.view", "Investment"),
+        ["customer_id"]
+      );
+      if ((await resolveRestrictedSalesMode(req.account._id, scopeFilter)) !== "personal") {
+        customerScope = renameFilterField(scopeFilter, "customer_id", "_id");
+      }
+    }
+
+    if (!isUnrestricted && !Object.keys(customerScope).length) {
       // Phễu cá nhân — đếm theo quan hệ khách hàng (referred_by) thay vì commission.sale_id
       // để bao gồm cả week investment không sinh hoa hồng
       const userInfo = await UserInfoModel.findOne({ id_account: req.account._id })
@@ -1268,10 +1320,14 @@ InvestmentController.getConversion = async (req, res) => {
       });
     }
 
-    // Manager/admin: xếp hạng chuyển đổi theo sale
+    // Manager/admin (hoặc scope phòng ban/chi nhánh): xếp hạng chuyển đổi theo sale
     // Đếm đầu tư qua customer_id (bao gồm cả week investment)
     const rows = await CustomerModel.aggregate([
-      { $match: { isDeleted: false, referred_by: { $exists: true, $ne: null } } },
+      {
+        $match: {
+          $and: [{ isDeleted: false, referred_by: { $exists: true, $ne: null } }, customerScope]
+        }
+      },
       {
         $group: {
           _id: "$referred_by",

@@ -78,7 +78,7 @@ async function resolveSubjectContext(employeeId: string): Promise<Record<string,
       user: employeeId,
       isDeleted: false
     }).lean(),
-    UserInfoModel.findById(employeeId).select("id_account").lean(),
+    UserInfoModel.findById(employeeId).select("id_account branch_id").lean(),
     CustomerModel.find({ referred_by: employeeId, isDeleted: false }).select("_id").lean(),
     resolveManagedEmployeeUserIds(employeeId)
   ]);
@@ -109,6 +109,26 @@ async function resolveSubjectContext(employeeId: string): Promise<Record<string,
     String(customer._id)
   );
 
+  // Nhân viên cùng chi nhánh (kể cả chính mình) và khách do họ giới thiệu — dữ liệu CRM không có
+  // branch_id nên phạm vi chi nhánh phải đi qua sale phụ trách → user_info.branch_id
+  const branchId = (userInfo as { branch_id?: unknown } | null)?.branch_id;
+  const branchColleagueUserIds: string[] = branchId
+    ? (await UserInfoModel.find({ branch_id: branchId, isDeleted: false }).distinct("_id")).map(
+        String
+      )
+    : [];
+  const branchColleagueCustomers = branchColleagueUserIds.length
+    ? await CustomerModel.find({
+        referred_by: { $in: branchColleagueUserIds },
+        isDeleted: false
+      })
+        .select("_id")
+        .lean()
+    : [];
+  const branchColleagueCustomerIds = branchColleagueCustomers.map((customer: any) =>
+    String(customer._id)
+  );
+
   return {
     userId: employeeId,
     accountId: userInfo ? String((userInfo as { id_account: unknown }).id_account) : null,
@@ -117,6 +137,8 @@ async function resolveSubjectContext(employeeId: string): Promise<Record<string,
     departmentColleagueUserIds,
     managedCustomerIds,
     departmentColleagueCustomerIds,
+    branchColleagueUserIds,
+    branchColleagueCustomerIds,
     managedEmployeeUserIds
   };
 }

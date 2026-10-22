@@ -9,6 +9,7 @@ import UserInfoModel from "../src/models/UserInfoModel";
 const SALE_ROLE_CODE = "CRM_SALE";
 const SALE_MANAGER_ROLE_CODE = "CRM_SALE_MANAGER";
 const TEAM_LEAD_ROLE_CODE = "CRM_SALE_TEAM_LEAD";
+const BRANCH_MANAGER_ROLE_CODE = "CRM_BRANCH_MANAGER";
 
 const SALE_GRANTS: PermissionGrantDoc[] = [
   {
@@ -142,6 +143,34 @@ const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
   {
     permissionCode: "customer_interaction.view",
     dataScopePolicyCode: "CUSTOMER_INTERACTION_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  }
+];
+
+// Quyền của Sale CRM, mở rộng ra cả chi nhánh ở các chức năng mà API giới hạn được theo chi nhánh.
+// Chức năng dùng chung toàn công ty (nhận khách, ghi tương tác, gửi yêu cầu nhận khách, gọi điện,
+// AI insight, hoa hồng...) giữ đúng phạm vi của Sale CRM; các quyền chỉ dành cho toàn công ty của
+// Sale CRM Manager (phân khách, duyệt yêu cầu nhận khách, kỳ nhận khách, quản lý CSKH, dashboard,
+// giao dịch, AI chat...) không cấp. Không tự gán cho nhóm account nào: gán đích danh trên màn
+// Phân quyền chi tiết.
+const BRANCH_SCOPE_BY_PERMISSION: Record<string, string> = {
+  "customer.view": "CUSTOMER_OWN_BRANCH",
+  "customer_care.view": "CUSTOMER_OWN_BRANCH",
+  "customer_call.view": "CUSTOMER_OWN_BRANCH",
+  "customer_interaction.view": "CUSTOMER_INTERACTION_OWN_BRANCH",
+  "call_log.view": "CALL_LOG_OWN_BRANCH",
+  "call_log.update_note": "CALL_LOG_OWN_BRANCH",
+  "investment.view": "INVESTMENT_OWN_BRANCH"
+};
+
+const BRANCH_MANAGER_GRANTS: PermissionGrantDoc[] = [
+  ...SALE_GRANTS.map((grant) => {
+    const branchScope = BRANCH_SCOPE_BY_PERMISSION[grant.permissionCode];
+    return branchScope ? { ...grant, dataScopePolicyCode: branchScope } : grant;
+  }),
+  {
+    permissionCode: "customer.export",
+    dataScopePolicyCode: "CUSTOMER_OWN_BRANCH",
     fieldScopePolicyCode: null
   }
 ];
@@ -413,6 +442,12 @@ async function seed(): Promise<void> {
     "Sale CRM Team Lead",
     "Xem/gọi khách hàng trong phạm vi cùng phòng ban.",
     TEAM_LEAD_GRANTS
+  );
+  await upsertRole(
+    BRANCH_MANAGER_ROLE_CODE,
+    "Sale CRM Quản lý chi nhánh",
+    "Xem doanh số của toàn bộ sale cùng chi nhánh. Gán kèm vai trò Sale CRM.",
+    BRANCH_MANAGER_GRANTS
   );
 
   console.log("");

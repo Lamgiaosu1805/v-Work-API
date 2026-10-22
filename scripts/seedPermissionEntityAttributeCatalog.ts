@@ -547,6 +547,11 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
         path: "subject.departmentColleagueCustomerIds",
         label: "Danh sách khách hàng do đồng nghiệp cùng phòng ban giới thiệu",
         type: "reference"
+      },
+      {
+        path: "subject.branchColleagueCustomerIds",
+        label: "Danh sách khách hàng do sale cùng chi nhánh giới thiệu",
+        type: "reference"
       }
     ],
     resourceAttributes: [

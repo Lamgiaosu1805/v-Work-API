@@ -147,15 +147,14 @@ const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
   }
 ];
 
-// Chỉ mở rộng phạm vi xem doanh số (khoản đầu tư) ra cả chi nhánh — gán KÈM Sale CRM, không thay
-// thế. Không tự gán cho nhóm account nào: gán đích danh trên màn Phân quyền chi tiết.
-const BRANCH_MANAGER_GRANTS: PermissionGrantDoc[] = [
-  {
-    permissionCode: "investment.view",
-    dataScopePolicyCode: "INVESTMENT_OWN_BRANCH",
-    fieldScopePolicyCode: null
-  }
-];
+// Giống hệt Sale CRM, chỉ mở rộng xem doanh số (investment.view) ra cả chi nhánh — các chức năng
+// khác chưa có phạm vi chi nhánh nên giữ phạm vi của Sale CRM. Không tự gán cho nhóm account nào:
+// gán đích danh trên màn Phân quyền chi tiết.
+const BRANCH_MANAGER_GRANTS: PermissionGrantDoc[] = SALE_GRANTS.map((grant) =>
+  grant.permissionCode === "investment.view"
+    ? { ...grant, dataScopePolicyCode: "INVESTMENT_OWN_BRANCH" }
+    : grant
+);
 
 const SALE_MANAGER_GRANTS: PermissionGrantDoc[] = [
   {

@@ -158,6 +158,18 @@ async function resolveRestrictedSalesMode(accountId, scopeFilter) {
     : "department";
 }
 
+// Đổi tên field trong filter Mongo (đệ quy qua $or/$and/$nor) — để dùng scope của Investment
+// (lọc theo customer_id) lọc thẳng collection customer (theo _id).
+function renameFilterField(filter, from, to) {
+  return Object.fromEntries(
+    Object.entries(filter).map(([key, value]) =>
+      (key === "$or" || key === "$and" || key === "$nor") && Array.isArray(value)
+        ? [key, value.map((clause) => renameFilterField(clause, from, to))]
+        : [key === from ? to : key, value]
+    )
+  );
+}
+
 function buildCustomerCommissionSummary(cifCount, ekycCount) {
   return {
     cif_count: cifCount,
@@ -1263,7 +1275,20 @@ InvestmentController.getConversion = async (req, res) => {
       customer_id: new mongoose.Types.ObjectId()
     });
 
+    // Scope giới hạn: chỉ khách của mình → phễu cá nhân; rộng hơn (phòng ban / chi nhánh) → xếp hạng
+    // chuyển đổi theo sale như manager nhưng chỉ trong các khách thuộc scope
+    let customerScope = {};
     if (!isUnrestricted) {
+      const scopeFilter = castObjectIdFields(
+        toMongoQuery(req.permissionAbility, "investment.view", "Investment"),
+        ["customer_id"]
+      );
+      if ((await resolveRestrictedSalesMode(req.account._id, scopeFilter)) !== "personal") {
+        customerScope = renameFilterField(scopeFilter, "customer_id", "_id");
+      }
+    }
+
+    if (!isUnrestricted && !Object.keys(customerScope).length) {
       // Phễu cá nhân — đếm theo quan hệ khách hàng (referred_by) thay vì commission.sale_id
       // để bao gồm cả week investment không sinh hoa hồng
       const userInfo = await UserInfoModel.findOne({ id_account: req.account._id })
@@ -1295,10 +1320,14 @@ InvestmentController.getConversion = async (req, res) => {
       });
     }
 
-    // Manager/admin: xếp hạng chuyển đổi theo sale
+    // Manager/admin (hoặc scope phòng ban/chi nhánh): xếp hạng chuyển đổi theo sale
     // Đếm đầu tư qua customer_id (bao gồm cả week investment)
     const rows = await CustomerModel.aggregate([
-      { $match: { isDeleted: false, referred_by: { $exists: true, $ne: null } } },
+      {
+        $match: {
+          $and: [{ isDeleted: false, referred_by: { $exists: true, $ne: null } }, customerScope]
+        }
+      },
       {
         $group: {
           _id: "$referred_by",

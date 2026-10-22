@@ -4,7 +4,8 @@ const AppModel = require("../models/AppModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const InvestmentModel = require("../models/InvestmentModel");
 const AgentModel = require("../models/AgentModel");
-const { resolveCustomerScope } = require("./crmScope");
+const { toMongoQuery } = require("../modules/permission");
+const { castObjectIdFields } = require("../core/db/cast-object-id-fields");
 
 const decrypt = (encryptedText) => {
   if (!encryptedText) return null;
@@ -76,14 +77,16 @@ async function buildCustomerPipeline(req, query) {
     ];
   }
 
-  const { myEmployeeId: scopedSaleId } = await resolveCustomerScope(
-    req.permissionAbility,
-    req.account._id,
-    "customer.view"
+  // Scope theo Data Scope Policy của customer.view (của mình / phòng ban / chi nhánh / toàn công ty).
+  // Phải áp ở $match đầu: các bước $lookup sau ghi đè referred_by thành object sale. aggregate không
+  // tự cast string → ObjectId như find() nên cast tay referred_by.
+  const scopeFilter = castObjectIdFields(
+    toMongoQuery(req.permissionAbility, "customer.view", "Customer"),
+    ["referred_by"]
   );
 
   const pipeline = [
-    { $match: initialMatch },
+    { $match: { $and: [initialMatch, scopeFilter] } },
     {
       $addFields: {
         effective_registered_at: { $ifNull: ["$registeredAt", "$createdAt"] }
@@ -226,9 +229,6 @@ async function buildCustomerPipeline(req, query) {
   if (branch_id && mongoose.Types.ObjectId.isValid(branch_id))
     advancedMatch["referred_by.branch_id"] = new mongoose.Types.ObjectId(branch_id);
   if (selectedSaleIds.length) advancedMatch["referred_by._id"] = { $in: selectedSaleIds };
-  if (scopedSaleId) {
-    advancedMatch["referred_by._id"] = scopedSaleId;
-  }
   if (Object.keys(advancedMatch).length) pipeline.push({ $match: advancedMatch });
 
   if (from_date || to_date) {

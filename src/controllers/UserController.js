@@ -76,6 +76,20 @@ async function getResignationBounds(user) {
 
 const decodeFilename = (name) => Buffer.from(name, "latin1").toString("utf8");
 
+// Phạm vi chi nhánh (subject.branchColleagueUserIds / branchColleagueCustomerIds) được tính sẵn
+// trong cache quyền không hạn — thành viên chi nhánh thay đổi thì xoá cache của mọi người trong các
+// chi nhánh liên quan (kèm `extraEmployeeIds`, vd người vừa rời chi nhánh cũ).
+const invalidateBranchPermissionCache = async (branchIds, extraEmployeeIds = []) => {
+  // multipart có thể gửi "" / "null" — bỏ qua giá trị không phải ObjectId để không lỗi cast sau commit
+  const ids = branchIds.filter((branchId) => mongoose.Types.ObjectId.isValid(branchId));
+  if (!ids.length) return;
+  const members = await UserInfoModel.distinct("_id", {
+    branch_id: { $in: ids },
+    isDeleted: false
+  });
+  await invalidatePermissionCache([...members, ...extraEmployeeIds].map(String));
+};
+
 // "" / "null" (multipart gửi dạng chuỗi) / null -> bỏ gán quản lý trực tiếp.
 const normalizeDirectManager = (value) =>
   value === "" || value === "null" || value === null ? null : value;
@@ -314,6 +328,8 @@ const UserController = {
 
       await session.commitTransaction();
       session.endSession();
+
+      await invalidateBranchPermissionCache([branch_id]);
 
       return res.status(201).json({
         message: "Tạo user, userInfo, documents, mapping và WorkSchedule thành công",
@@ -805,6 +821,11 @@ const UserController = {
         }
       }
 
+      const previousBranchId = user.branch_id;
+      const hasBranchChange =
+        updates.branch_id !== undefined &&
+        String(updates.branch_id || "") !== String(previousBranchId || "");
+
       const hasDirectManager = req.body.direct_manager !== undefined;
       const previousDirectManager = user.direct_manager;
       if (hasDirectManager) {
@@ -1039,6 +1060,10 @@ const UserController = {
         );
         managers.forEach((m) => invalidateRbacCache(m.id_account));
         await invalidatePermissionCache(managerIds.map(String));
+      }
+
+      if (hasBranchChange) {
+        await invalidateBranchPermissionCache([previousBranchId, updates.branch_id], [id]);
       }
 
       const leaveBalance = await getLeaveBalance(id);

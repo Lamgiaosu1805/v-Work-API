@@ -109,11 +109,13 @@ async function resolveSubjectContext(employeeId: string): Promise<Record<string,
     String(customer._id)
   );
 
-  // Khách của mọi sale cùng chi nhánh (kể cả chính mình) — Investment không có branch_id nên
-  // phạm vi chi nhánh phải đi qua customer.referred_by → user_info.branch_id
+  // Nhân viên cùng chi nhánh (kể cả chính mình) và khách do họ giới thiệu — dữ liệu CRM không có
+  // branch_id nên phạm vi chi nhánh phải đi qua sale phụ trách → user_info.branch_id
   const branchId = (userInfo as { branch_id?: unknown } | null)?.branch_id;
-  const branchColleagueUserIds = branchId
-    ? await UserInfoModel.find({ branch_id: branchId, isDeleted: false }).distinct("_id")
+  const branchColleagueUserIds: string[] = branchId
+    ? (await UserInfoModel.find({ branch_id: branchId, isDeleted: false }).distinct("_id")).map(
+        String
+      )
     : [];
   const branchColleagueCustomers = branchColleagueUserIds.length
     ? await CustomerModel.find({
@@ -135,6 +137,7 @@ async function resolveSubjectContext(employeeId: string): Promise<Record<string,
     departmentColleagueUserIds,
     managedCustomerIds,
     departmentColleagueCustomerIds,
+    branchColleagueUserIds,
     branchColleagueCustomerIds,
     managedEmployeeUserIds
   };

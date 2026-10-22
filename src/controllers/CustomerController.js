@@ -9,6 +9,9 @@ const AgentModel = require("../models/AgentModel");
 const CustomerClaimRequestModel = require("../models/CustomerClaimRequestModel");
 const InvestmentModel = require("../models/InvestmentModel");
 const DataExportLogModel = require("../models/DataExportLogModel");
+const AccountModel = require("../models/AccountModel");
+const BranchModel = require("../models/BranchModel");
+const { canOnSubject } = require("../modules/permission");
 const {
   createCifCommission,
   createEkycCommission,
@@ -1128,6 +1131,48 @@ const CustomerController = {
       await session.abortTransaction();
       session.endSession();
       console.error("Error in applyReferral:", error);
+      return res.status(500).json({
+        message: "Internal server error",
+        error: error.message
+      });
+    }
+  },
+  // GET /customer/filter-options — chi nhánh + sale cho bộ lọc danh sách khách, giới hạn theo scope
+  // customer.view: toàn công ty → mọi chi nhánh + mọi sale CRM; scope giới hạn (của mình / phòng ban /
+  // chi nhánh) → chỉ sale thuộc scope và chi nhánh của các sale đó
+  getFilterOptions: async (req, res) => {
+    try {
+      const ability = req.permissionAbility;
+      // Cùng định nghĩa "nhân viên CRM" với GET /user?module=crm
+      const crmAccountIds = await AccountModel.find({
+        $or: [{ role: "admin" }, { module_access: "crm" }],
+        isDeleted: false
+      }).distinct("_id");
+      const crmSales = await UserInfoModel.find({
+        id_account: { $in: crmAccountIds },
+        isDeleted: false
+      })
+        .select("_id full_name ma_nv branch_id")
+        .sort({ full_name: 1 })
+        .lean();
+      const sales = crmSales.filter((sale) =>
+        canOnSubject(ability, "customer.view", "Customer", { referred_by: sale._id })
+      );
+
+      const isUnrestricted = canOnSubject(ability, "customer.view", "Customer", {
+        referred_by: new mongoose.Types.ObjectId()
+      });
+      const branchFilter = isUnrestricted
+        ? { isDeleted: false }
+        : { isDeleted: false, _id: { $in: sales.map((sale) => sale.branch_id).filter(Boolean) } };
+      const branches = await BranchModel.find(branchFilter).select("_id branch_name").lean();
+
+      return res.status(200).json({
+        branches,
+        sales: sales.map(({ _id, full_name, ma_nv }) => ({ _id, full_name, ma_nv }))
+      });
+    } catch (error) {
+      console.error("Error in getFilterOptions:", error);
       return res.status(500).json({
         message: "Internal server error",
         error: error.message

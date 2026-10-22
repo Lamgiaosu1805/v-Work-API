@@ -86,7 +86,7 @@ flowchart LR
     C --> B["buildRawRules()<br/>→ RawCaslRule[]"]
 ```
 
-- **`subject.xxx` lấy từ đâu:** `resolveSubjectContext()` (dòng 29-61) query 1 lần: `userId`, `accountId`, `departmentIds`, `departmentColleagueUserIds` (đồng nghiệp cùng phòng ban), `managedCustomerIds` (khách hàng do chính mình giới thiệu), `departmentColleagueCustomerIds`.
+- **`subject.xxx` lấy từ đâu:** `resolveSubjectContext()` (dòng 29-61) query 1 lần: `userId`, `accountId`, `departmentIds`, `departmentColleagueUserIds` (đồng nghiệp cùng phòng ban), `managedCustomerIds` (khách hàng do chính mình giới thiệu), `departmentColleagueCustomerIds`, `branchColleagueCustomerIds` (khách hàng do sale cùng chi nhánh giới thiệu — dùng cho `INVESTMENT_OWN_BRANCH`).
 - **Compile điều kiện:** `condition-compiler.service.ts:70` (`compile()`) đổi `ConditionTree` tĩnh → Mongo operator (`$eq`/`$in`...), rồi `condition-compiler.service.ts:121` (`interpolate()`) thay `${subject.xxx}` bằng giá trị thật.
 - **Gộp rule:** `ability-rule-builder.service.ts:65-78` (`buildRawRules()`) gộp grant + override (ALLOW/BLOCK) thành `RawCaslRule[]` — đây chính là thứ được cache.
 

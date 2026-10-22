@@ -738,7 +738,11 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xem khoản đầu tư",
     entity: "Investment",
     actionKind: "READ",
-    validDataScopePolicies: ["INVESTMENT_ALL_COMPANY", "INVESTMENT_SELF_ASSIGNED"]
+    validDataScopePolicies: [
+      "INVESTMENT_ALL_COMPANY",
+      "INVESTMENT_SELF_ASSIGNED",
+      "INVESTMENT_OWN_BRANCH"
+    ]
   },
   {
     code: "investment.leaderboard",

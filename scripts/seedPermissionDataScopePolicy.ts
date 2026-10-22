@@ -59,6 +59,21 @@ const ownDepartmentColleagueCustomersCondition = (resourceCustomerPath: string):
   ]
 });
 
+// resource.<x> IN ${subject.branchColleagueCustomerIds} — khách của mọi sale cùng chi nhánh (kể cả
+// chính mình), dùng khi resource gắn trực tiếp với khách hàng (customer_id) — vd Investment.customer_id.
+const ownBranchColleagueCustomersCondition = (
+  resourceCustomerPath: string
+): ConditionTreeProps => ({
+  operator: "AND",
+  clauses: [
+    {
+      left: resourceCustomerPath,
+      operator: "IN",
+      right: { type: "SUBJECT_REF", path: "subject.branchColleagueCustomerIds" }
+    }
+  ]
+});
+
 // resource.<x> IN ${subject.managedCustomerIds} — dùng cho entity gắn với khách hàng đang được
 // mình phụ trách hiện tại (customer.referred_by), không phải "do chính mình tạo ra bản ghi này".
 const managedCustomersCondition = (resourceCustomerPath: string): ConditionTreeProps => ({
@@ -198,6 +213,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     entity: "Investment",
     label: "Cùng phòng ban (leaderboard)",
     conditionTree: ownDepartmentColleagueCustomersCondition("resource.customer_id")
+  },
+  {
+    code: "INVESTMENT_OWN_BRANCH",
+    entity: "Investment",
+    label: "Cùng chi nhánh",
+    conditionTree: ownBranchColleagueCustomersCondition("resource.customer_id")
   },
 
   // ---- Commission (backed bởi collection investment) ----

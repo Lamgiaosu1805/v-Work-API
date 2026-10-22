@@ -9,6 +9,7 @@ import UserInfoModel from "../src/models/UserInfoModel";
 const SALE_ROLE_CODE = "CRM_SALE";
 const SALE_MANAGER_ROLE_CODE = "CRM_SALE_MANAGER";
 const TEAM_LEAD_ROLE_CODE = "CRM_SALE_TEAM_LEAD";
+const BRANCH_MANAGER_ROLE_CODE = "CRM_BRANCH_MANAGER";
 
 const SALE_GRANTS: PermissionGrantDoc[] = [
   {
@@ -142,6 +143,16 @@ const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
   {
     permissionCode: "customer_interaction.view",
     dataScopePolicyCode: "CUSTOMER_INTERACTION_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  }
+];
+
+// Chỉ mở rộng phạm vi xem doanh số (khoản đầu tư) ra cả chi nhánh — gán KÈM Sale CRM, không thay
+// thế. Không tự gán cho nhóm account nào: gán đích danh trên màn Phân quyền chi tiết.
+const BRANCH_MANAGER_GRANTS: PermissionGrantDoc[] = [
+  {
+    permissionCode: "investment.view",
+    dataScopePolicyCode: "INVESTMENT_OWN_BRANCH",
     fieldScopePolicyCode: null
   }
 ];
@@ -413,6 +424,12 @@ async function seed(): Promise<void> {
     "Sale CRM Team Lead",
     "Xem/gọi khách hàng trong phạm vi cùng phòng ban.",
     TEAM_LEAD_GRANTS
+  );
+  await upsertRole(
+    BRANCH_MANAGER_ROLE_CODE,
+    "Sale CRM Quản lý chi nhánh",
+    "Xem doanh số của toàn bộ sale cùng chi nhánh. Gán kèm vai trò Sale CRM.",
+    BRANCH_MANAGER_GRANTS
   );
 
   console.log("");

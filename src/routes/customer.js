@@ -15,7 +15,6 @@ router.get("/my-customers", authenticate, viewCustomer, CustomerController.getMy
 router.get("/agent-customers", verifyInternalRequest, CustomerController.getMyCustomersAsAgent);
 router.get("/my-info", authenticate, CustomerController.getMyInfo);
 router.get("/all", authenticate, viewCustomer, CustomerController.getAll);
-router.get("/filter-options", authenticate, viewCustomer, CustomerController.getFilterOptions);
 // Xuất dữ liệu cần quyền riêng + ghi nhật ký (Quy định 183A, Điều 11); phạm vi dữ liệu vẫn theo customer.view
 router.get(
   "/export-excel",

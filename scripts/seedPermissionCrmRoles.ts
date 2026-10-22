@@ -47,6 +47,11 @@ const SALE_GRANTS: PermissionGrantDoc[] = [
     fieldScopePolicyCode: null
   },
   {
+    permissionCode: "investment.view",
+    dataScopePolicyCode: "INVESTMENT_SELF_ASSIGNED",
+    fieldScopePolicyCode: null
+  },
+  {
     permissionCode: "customer_claim_request.create",
     dataScopePolicyCode: "CUSTOMER_CLAIM_REQUEST_ALL_COMPANY",
     fieldScopePolicyCode: null
@@ -75,7 +80,7 @@ const SALE_GRANTS: PermissionGrantDoc[] = [
     permissionCode: "customer_call.update_relationship_status",
     dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED",
     fieldScopePolicyCode: null
-  },
+  }
 ];
 
 const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [

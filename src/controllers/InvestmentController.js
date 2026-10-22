@@ -6,6 +6,7 @@ const UserInfoModel = require("../models/UserInfoModel");
 const AgentModel = require("../models/AgentModel");
 const BranchModel = require("../models/BranchModel");
 const { toMongoQuery, canOnSubject } = require("../modules/permission");
+const { castObjectIdFields } = require("../core/db/cast-object-id-fields");
 const { syncCustomerCareInBackground } = require("../workflows/sync-customer-care.workflow");
 const {
   calculateCommission,
@@ -927,14 +928,22 @@ const InvestmentController = {
       const { from, buckets, groupId, formatKey } = buildPeriodRange(period);
 
       const matchFilter = { invested_at: { $gte: from }, isDeleted: false };
-      const scopeFilter = toMongoQuery(req.permissionAbility, "investment.view", "Investment");
+      // aggregate không tự cast string → ObjectId như find() — phải cast tay customer_id của scope
+      const scopeFilter = castObjectIdFields(
+        toMongoQuery(req.permissionAbility, "investment.view", "Investment"),
+        ["customer_id"]
+      );
       const isUnrestricted = canOnSubject(req.permissionAbility, "investment.view", "Investment", {
         customer_id: new mongoose.Types.ObjectId()
       });
 
       let mode;
+      let branchDocs = [];
       if (isUnrestricted) {
         mode = branch_id ? "branch" : "all";
+        // Chỉ scope toàn công ty mới được lọc theo chi nhánh — trả kèm danh sách chi nhánh để FE
+        // dựng dropdown, không phụ thuộc quyền branch.view
+        branchDocs = await BranchModel.find({ isDeleted: false }).select("_id branch_name").lean();
         if (branch_id) {
           const branchSaleIds = await UserInfoModel.distinct("_id", {
             branch_id: new mongoose.Types.ObjectId(branch_id),
@@ -948,8 +957,20 @@ const InvestmentController = {
         }
         // mode 'all': không lọc customer — tính toàn bộ hệ thống
       } else {
-        mode = "personal";
         Object.assign(matchFilter, scopeFilter);
+        // "personal" nếu scope chỉ gồm khách do chính mình giới thiệu (INVESTMENT_SELF_ASSIGNED),
+        // "department" nếu scope còn phủ khách của người khác (vd INVESTMENT_OWN_DEPARTMENT).
+        // Không lọc theo kỳ để nhãn không nhảy khi đổi tab ngày/tuần/tháng.
+        const me = await UserInfoModel.findOne({ id_account: req.account._id })
+          .select("_id")
+          .lean();
+        const myCustomerIds = me
+          ? await CustomerModel.distinct("_id", { referred_by: me._id, isDeleted: false })
+          : [];
+        const coversOthers = await InvestmentModel.exists({
+          $and: [scopeFilter, { isDeleted: false, customer_id: { $nin: myCustomerIds } }]
+        });
+        mode = coversOthers ? "department" : "personal";
       }
 
       // Chạy song song: time-series + tổng
@@ -974,7 +995,7 @@ const InvestmentController = {
         count: seriesMap[b.key]?.count ?? 0
       }));
 
-      // Breakdown: per-branch (admin all) hoặc per-member (manager/branch)
+      // Breakdown: per-branch (mode all) hoặc per-member (mode branch/department)
       // Dùng customer.referred_by để resolve sale thay vì commission.sale_id
       let breakdown = [];
 
@@ -1006,7 +1027,6 @@ const InvestmentController = {
           { $group: { _id: "$branch_id", amount: { $sum: "$amount" }, count: { $sum: 1 } } },
           { $sort: { amount: -1 } }
         ]);
-        const branchDocs = await BranchModel.find({ isDeleted: false }).lean();
         const branchMap = Object.fromEntries(branchDocs.map((b) => [String(b._id), b.branch_name]));
         breakdown = branchBreakRaw.map((r) => ({
           id: r._id,
@@ -1014,7 +1034,7 @@ const InvestmentController = {
           amount: r.amount,
           count: r.count
         }));
-      } else if (mode === "branch") {
+      } else if (mode === "branch" || mode === "department") {
         const memberRaw = await InvestmentModel.aggregate([
           { $match: matchFilter },
           {
@@ -1055,7 +1075,8 @@ const InvestmentController = {
         summary: {
           total_amount: summaryRaw[0]?.amount ?? 0,
           total_count: summaryRaw[0]?.count ?? 0
-        }
+        },
+        branch_options: branchDocs
       });
     } catch (error) {
       console.error("Error in getSalesChart:", error);
@@ -1155,10 +1176,14 @@ InvestmentController.getLeaderboard = async (req, res) => {
     };
 
     // Scope theo Data Scope Policy của "investment.leaderboard" — INVESTMENT_ALL_COMPANY
-    // (manager/admin) hoặc INVESTMENT_OWN_DEPARTMENT (sale thường — xếp hạng cùng phòng ban)
+    // (manager/admin) hoặc INVESTMENT_OWN_DEPARTMENT (sale thường — xếp hạng cùng phòng ban).
+    // aggregate không tự cast string → ObjectId như find() — phải cast tay customer_id của scope
     Object.assign(
       matchInvestment,
-      toMongoQuery(req.permissionAbility, "investment.leaderboard", "Investment")
+      castObjectIdFields(
+        toMongoQuery(req.permissionAbility, "investment.leaderboard", "Investment"),
+        ["customer_id"]
+      )
     );
 
     // Xếp hạng theo customer.referred_by thay vì commission.sale_id

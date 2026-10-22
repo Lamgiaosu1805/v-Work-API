@@ -21,6 +21,10 @@ const BranchModel = require("../src/models/BranchModel");
 const DepartmentModel = require("../src/models/DepartmentModel");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const UserDepartmentPositionModel = require("../src/models/UserDepartmentPositionModel");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const AccountModel = require("../src/models/AccountModel");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const CustomerController = require("../src/controllers/CustomerController");
 
 let mongod: MongoMemoryServer;
 
@@ -125,6 +129,23 @@ async function listCustomerPhones(saleKey: SaleKey, query: Record<string, unknow
 
 const phonesOf = (...saleKeys: SaleKey[]) => saleKeys.map((key) => customerPhoneBySale[key]).sort();
 
+async function getFilterOptions(saleKey: SaleKey) {
+  const req = { permissionAbility: await resolveEffectiveAbility(String(sales[saleKey])) };
+  let body: any;
+  const res = {
+    status: () => res,
+    json: (payload: unknown) => {
+      body = payload;
+      return res;
+    }
+  };
+  await CustomerController.getFilterOptions(req, res);
+  return {
+    branches: body.branches.map((branch: { branch_name: string }) => branch.branch_name).sort(),
+    sales: body.sales.map((sale: { ma_nv: string }) => sale.ma_nv).sort()
+  };
+}
+
 beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri());
@@ -154,6 +175,14 @@ beforeAll(async () => {
     saleInfo(accounts.D, "CRD01", branch1._id)
   ]);
   Object.assign(sales, { A: saleA._id, B: saleB._id, C: saleC._id, D: saleD._id });
+  await AccountModel.create(
+    (Object.keys(accounts) as SaleKey[]).map((key) => ({
+      _id: accounts[key],
+      username: `crm-branch-${key}`,
+      password: "x",
+      module_access: ["crm"]
+    }))
+  );
 
   const [dept1, dept2] = await DepartmentModel.create([
     { department_name: "Phòng Sale 1", department_code: "CRMPS1" },
@@ -252,5 +281,31 @@ describe("Lịch sử cuộc gọi — CALL_LOG_OWN_BRANCH", () => {
       .map((row) => String((row.sale_id as { _id?: unknown })?._id ?? row.sale_id))
       .sort();
     expect(saleIds).toEqual([sales.A, sales.B, sales.D].map(String).sort());
+  });
+});
+
+describe("GET /customer/filter-options — bộ lọc chi nhánh/sale theo scope customer.view", () => {
+  it("CUSTOMER_OWN_BRANCH → chỉ chi nhánh của mình và sale cùng chi nhánh", async () => {
+    await grant("A", "customer.view", "CUSTOMER_OWN_BRANCH");
+
+    expect(await getFilterOptions("A")).toEqual({
+      branches: ["Chi nhánh 1"],
+      sales: ["CRA01", "CRB01", "CRD01"]
+    });
+  });
+
+  it("CUSTOMER_SELF_ASSIGNED → chỉ chính mình", async () => {
+    await grant("A", "customer.view", "CUSTOMER_SELF_ASSIGNED");
+
+    expect(await getFilterOptions("A")).toEqual({ branches: ["Chi nhánh 1"], sales: ["CRA01"] });
+  });
+
+  it("CUSTOMER_ALL_COMPANY → mọi chi nhánh và mọi sale CRM", async () => {
+    await grant("C", "customer.view", "CUSTOMER_ALL_COMPANY");
+
+    expect(await getFilterOptions("C")).toEqual({
+      branches: ["Chi nhánh 1", "Chi nhánh 2"],
+      sales: ["CRA01", "CRB01", "CRC01", "CRD01"]
+    });
   });
 });

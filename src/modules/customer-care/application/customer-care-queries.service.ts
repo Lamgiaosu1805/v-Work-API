@@ -9,7 +9,7 @@ import { ForbiddenException } from "../../../core/exceptions/exceptions";
 import { parsePagination, PaginationQuery } from "../../../core/http/parse-pagination";
 import { castObjectIdFields } from "../../../core/db/cast-object-id-fields";
 import { REVOKE_REASONS } from "../domain/customer-assignment.entity";
-import { startOfVnDay } from "../domain/working-calendar";
+import { startOfVnDay } from "../../../shared-kernel/working-calendar";
 import { resolveAppId } from "../infrastructure/care-context";
 
 const CUSTOMER_FIELDS =

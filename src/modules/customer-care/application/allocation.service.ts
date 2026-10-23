@@ -7,7 +7,7 @@ import {
   SaleAllocationProfileEntity,
   SaleAllocationStatus
 } from "../domain/sale-allocation-profile.entity";
-import { startOfVnDay } from "../domain/working-calendar";
+import { startOfVnDay } from "../../../shared-kernel/working-calendar";
 import { CustomerCareStateRepository } from "../infrastructure/customer-care-state.repository";
 import { SaleAllocationProfileRepository } from "../infrastructure/sale-allocation-profile.repository";
 import { loadCarePolicy, loadWorkingCalendar, resolveAppId } from "../infrastructure/care-context";

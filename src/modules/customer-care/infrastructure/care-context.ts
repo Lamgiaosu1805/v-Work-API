@@ -4,7 +4,7 @@ import AppModel from "../../../models/AppModel";
 import HolidayModel from "../../../models/HolidayModel";
 import CustomerCarePolicyModel from "../../../models/CustomerCarePolicyModel";
 import { buildCarePolicy, CarePolicy } from "../domain/care-policy";
-import { WorkingCalendar, toVnDateKey } from "../domain/working-calendar";
+import { WorkingCalendar, toVnDateKey } from "../../../shared-kernel/working-calendar";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

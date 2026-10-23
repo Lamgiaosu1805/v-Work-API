@@ -65,6 +65,11 @@ const BASELINE_GRANTS: PermissionGrantDoc[] = [
     permissionCode: "shared_folder.view",
     dataScopePolicyCode: "SHARED_FOLDER_ALL_COMPANY",
     fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "handbook_assistant.use",
+    dataScopePolicyCode: "HANDBOOK_ASSISTANT_ALL_COMPANY",
+    fieldScopePolicyCode: null
   }
 ];
 

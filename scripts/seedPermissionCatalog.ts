@@ -594,6 +594,14 @@ const DEFINITIONS: PermissionDef[] = [
     actionKind: "WRITE",
     validDataScopePolicies: ["PRINT_JOB_ALL_COMPANY"]
   },
+  {
+    code: "handbook_assistant.use",
+    module: "workplace",
+    name: "Hỏi Trợ lý Nội quy (AI)",
+    entity: "HandbookAssistant",
+    actionKind: "WRITE",
+    validDataScopePolicies: ["HANDBOOK_ASSISTANT_ALL_COMPANY"]
+  },
 
   // ==================== CRM ====================
   {

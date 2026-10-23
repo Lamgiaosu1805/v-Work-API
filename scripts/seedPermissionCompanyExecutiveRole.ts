@@ -55,6 +55,32 @@ const COMPANY_EXECUTIVE_GRANTS: PermissionGrantDoc[] = [
     permissionCode: "position.view",
     dataScopePolicyCode: "POSITION_ALL_COMPANY",
     fieldScopePolicyCode: null
+  },
+  // Ticket: ban lãnh đạo giao việc cho phòng ban / người bất kỳ, xem ticket hạn chế và file nhạy cảm
+  {
+    permissionCode: "ticket.assign_department",
+    dataScopePolicyCode: "TICKET_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "ticket.assign_member",
+    dataScopePolicyCode: "TICKET_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "ticket.manage",
+    dataScopePolicyCode: "TICKET_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "ticket.view_restricted",
+    dataScopePolicyCode: "TICKET_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "ticket.view_sensitive",
+    dataScopePolicyCode: "TICKET_ALL_COMPANY",
+    fieldScopePolicyCode: null
   }
 ];
 

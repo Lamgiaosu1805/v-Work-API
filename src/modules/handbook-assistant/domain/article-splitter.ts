@@ -20,8 +20,9 @@ export interface SplitResult {
 
 const ARTICLE_HEADING = /^(?:điều)\s+(\d{1,3})\s*([.:\-–—])?\s*(.*)$/iu;
 const CHAPTER_HEADING = /^(?:chương)\s+([ivxlcdm]+|\d{1,3})\s*([.:\-–—])?\s*(.*)$/iu;
-// Khoản "1." / "1)", điểm "a)", gạch đầu dòng.
-const BLOCK_MARKER = /^(?:\d{1,2}[.)]|[a-zđ]\)|[-•–])\s+\S/u;
+// Khoản "1." / "1)", khoản đánh số theo Điều "5.1." (có thể dính liền chữ, vd "5.1.Khối"), điểm "a)",
+// gạch đầu dòng. Số theo Điều bắt buộc có dấu chấm cuối để không nhầm "0.5 ngày" đầu dòng.
+const BLOCK_MARKER = /^(?:\d{1,3}\.\d{1,3}\.\s*|(?:\d{1,2}[.)]|[a-zđ]\)|[-•–])\s+)\S/u;
 const SENTENCE_END = /[.;:!?…”"]$/u;
 const MAX_TITLE_LENGTH = 150;
 const MAX_CHAPTER_TITLE_LENGTH = 120;

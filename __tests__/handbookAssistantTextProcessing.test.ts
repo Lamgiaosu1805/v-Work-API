@@ -172,6 +172,30 @@ describe("splitArticles", () => {
     ]);
   });
 
+  it("khoản đánh số theo Điều (5.1.) là từng khối riêng, kể cả khi dính liền chữ; số thập phân đầu dòng không phải khoản", () => {
+    const { articles, warnings } = splitArticles(
+      [
+        "Điều 5. Thời giờ làm việc bình thường",
+        "5.1. Khối văn phòng làm việc 38,5 giờ trong một",
+        "tuần theo lịch sau.",
+        "5.2.Thời gian nghỉ trưa không tính vào thời giờ làm việc.",
+        "Điều 6. Nghỉ hằng năm",
+        "6.3. Phần thập phân được làm tròn: từ",
+        "0.5 ngày trở lên tính tròn 01 ngày.",
+        "6.10. Khoản hai chữ số."
+      ].join("\n")
+    );
+    expect(articles[0].blocks).toEqual([
+      "5.1. Khối văn phòng làm việc 38,5 giờ trong một tuần theo lịch sau.",
+      "5.2.Thời gian nghỉ trưa không tính vào thời giờ làm việc."
+    ]);
+    expect(articles[1].blocks).toEqual([
+      "6.3. Phần thập phân được làm tròn: từ 0.5 ngày trở lên tính tròn 01 ngày.",
+      "6.10. Khoản hai chữ số."
+    ]);
+    expect(warnings).toEqual([]);
+  });
+
   it("văn bản không có Điều nào → cảnh báo", () => {
     const { articles, warnings } = splitArticles("Chỉ là một đoạn văn.");
     expect(articles).toEqual([]);

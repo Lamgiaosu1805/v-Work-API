@@ -47,6 +47,7 @@ src/
     timesheet/                  # Engine đối soát ngày công — sở hữu WorkSheetModel + WorkDayStatusModel
     attendance/                 # Wifi/geofence check-in/out (thuần), CRUD wifi/shift, Excel parser
     customer-care/              # Quy định 183A: kho khách chung, phân tự động, SLA liên hệ, thu hồi (route /customer-care)
+    ticket/                     # Ticket hỗ trợ nội bộ: nhóm xử lý chủ trì + phối hợp, tờ trình (file), cảnh báo vàng thay SLA (route /tickets). Xem docs/TICKET-MODULE-PLAN.md
   workflows/                    # Tầng orchestration xuyên module — xem mục "workflows/" trong "DDD + Hexagonal"
     request-side-effects/       # Side-effect theo request_type (leave/late_early/forgot_checkin/away-day)
   controllers/                  # Pattern CŨ — xử lý logic request/response trực tiếp (chưa migrate)
@@ -163,6 +164,7 @@ BÊN TRONG `src/modules/`.
 | `INTERNAL_DIR_DEV` / `INTERNAL_DIR_PROD` | Thư mục ổ file nội bộ theo phòng ban |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Redis config |
 | `TIKLUY_API_KEY`, `TIKLUY_ALLOWED_IPS` | Xác thực app nội bộ Tikluy |
+| `TICKET_DIR_DEV` / `TICKET_DIR_PROD` | Thư mục RIÊNG lưu file đính kèm ticket (CCCD, tờ trình...; mặc định `uploads/ticket`). Prod cần mount volume + sao lưu, file không tự xoá |
 
 Mọi path resolve dùng `path.resolve(dir)` — tương thích cả relative (dev) và absolute (prod).
 
@@ -339,6 +341,7 @@ const memberships = await UserDepartmentPositionModel.find({ user: userInfo._id 
 | `ensureDeptFolders.js` | Startup (1 lần) | Tạo folder disk cho dept chưa có |
 | `weeklyReportJob.js` | Thứ 6 8:00 + 17:00 | Nhắc nộp + đánh dấu missing báo cáo tuần |
 | `customerCareJob.js` | Mỗi phút + 00:05 | Quy định 183A: quét SLA chăm sóc khách (cảnh báo/thu hồi) + phân khách từ kho chung; 00:05 thu hồi khách của Sale nghỉ việc/bị khoá. Xem `docs/CRM-CUSTOMER-CARE-SLA-PLAN.md` |
+| `ticketSweepJob.js` | Mỗi 5 phút | Ticket hỗ trợ: tự đóng ticket quá hạn (đã xử lý không xác nhận / chờ bổ sung không phản hồi) + nhắc 1 lần. Cảnh báo vàng KHÔNG nằm ở cron (chỉ là mốc `alert_at`). Khoá Redis có tiền tố môi trường |
 
 Tất cả cron dùng `node-cron`. Múi giờ server: `Asia/Ho_Chi_Minh` (set ở đầu `index.js`).
 
@@ -421,6 +424,7 @@ Các trường hợp **bắt buộc** dùng transaction:
 | `/notification` | notification.js | `authenticate` | FCM device token |
 | `/internal-files` | internalFile.js | `authenticate` | Ổ file nội bộ theo phòng ban |
 | `/weekly-reports` | weeklyReport.js | `authenticate` | Báo cáo tuần |
+| `/tickets` | modules/ticket/interface | `authenticate` + `requirePermission(ticket.*)` | Ticket hỗ trợ nội bộ (+ `/tickets/config/*` quyền `ticket.config`) |
 
 ---
 

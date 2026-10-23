@@ -10,30 +10,30 @@ nhận, giao việc, trao đổi, cảnh báo và kết quả xử lý — nên 
 
 ## 0. Phạm vi đã chốt với chủ hệ thống
 
-| Quyết định | Nội dung |
-|---|---|
-| Ai tạo ticket | **Mọi nhân viên** đều tạo được. Khách không tự tạo: khách báo lỗi qua fanpage/Sale/CSKH → Sale/CSKH vào vWork tạo ticket. Khách không đăng nhập vWork, không có bình luận công khai |
-| Ai xem/nhận | Ticket thường: **mọi nhân viên xem và nhận được** (cấp qua quyền, sau này thu hẹp chỉ cần sửa role) |
-| Phân loại | Tiêu đề tự do (bắt buộc) + nhãn **sản phẩm** + **loại yêu cầu** + **mẫu yêu cầu** (không bắt buộc). Tất cả là dữ liệu cấu hình, không hard-code |
-| SLA | **Không dùng SLA/hạn chót cứng.** Thay bằng **cảnh báo vàng**: ticket bị bỏ quên được **bôi vàng trên giao diện cho mọi người thấy**, không gửi thông báo (mục 8) |
-| Nhóm xử lý | Ai trong nhóm (chủ trì + phối hợp) cũng đổi trạng thái, kết luận được. Chủ trì chỉ là đầu mối (mục 3.2) |
-| Tờ trình | Giai đoạn này **chưa duyệt điện tử**: tờ trình gửi qua email, người tạo tải **file/ảnh tờ trình có chữ ký** lên ticket. Chừa sẵn đường cho duyệt điện tử (mục 5) |
-| Thông báo | Chỉ gửi **đúng người cần**, theo bảng quy tắc (mục 7). Không bản tin hằng ngày, không người theo dõi |
-| Tự đóng / mở lại | Đồng bộ **3 ngày làm việc** (mục 4.5) |
-| File CCCD | **Không xoá**, không ghi log mở/tải. Chỉ giới hạn người xem (mục 6) |
-| SĐT khách | Hiện **đầy đủ** ngay trong danh sách |
-| Hoãn sang sau | Đánh giá hài lòng, xuất Excel, duyệt tờ trình điện tử, app mobile (web trước) |
+| Quyết định       | Nội dung                                                                                                                                                                            |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ai tạo ticket    | **Mọi nhân viên** đều tạo được. Khách không tự tạo: khách báo lỗi qua fanpage/Sale/CSKH → Sale/CSKH vào vWork tạo ticket. Khách không đăng nhập vWork, không có bình luận công khai |
+| Ai xem/nhận      | Ticket thường: **mọi nhân viên xem và nhận được** (cấp qua quyền, sau này thu hẹp chỉ cần sửa role)                                                                                 |
+| Phân loại        | Tiêu đề tự do (bắt buộc) + nhãn **sản phẩm** + **loại yêu cầu** + **mẫu yêu cầu** (không bắt buộc). Tất cả là dữ liệu cấu hình, không hard-code                                     |
+| SLA              | **Không dùng SLA/hạn chót cứng.** Thay bằng **cảnh báo vàng**: ticket bị bỏ quên được **bôi vàng trên giao diện cho mọi người thấy**, không gửi thông báo (mục 8)                   |
+| Nhóm xử lý       | Ai trong nhóm (chủ trì + phối hợp) cũng đổi trạng thái, kết luận được. Chủ trì chỉ là đầu mối (mục 3.2)                                                                             |
+| Tờ trình         | Giai đoạn này **chưa duyệt điện tử**: tờ trình gửi qua email, người tạo tải **file/ảnh tờ trình có chữ ký** lên ticket. Chừa sẵn đường cho duyệt điện tử (mục 5)                    |
+| Thông báo        | Chỉ gửi **đúng người cần**, theo bảng quy tắc (mục 7). Không bản tin hằng ngày, không người theo dõi                                                                                |
+| Tự đóng / mở lại | Đồng bộ **3 ngày làm việc** (mục 4.5)                                                                                                                                               |
+| File CCCD        | **Không xoá**, không ghi log mở/tải. Chỉ giới hạn người xem (mục 6)                                                                                                                 |
+| SĐT khách        | Hiện **đầy đủ** ngay trong danh sách                                                                                                                                                |
+| Hoãn sang sau    | Đánh giá hài lòng, xuất Excel, duyệt tờ trình điện tử, app mobile (web trước)                                                                                                       |
 
 ## 1. Vai trò
 
-| Vai trò | Việc làm |
-|---|---|
-| Người tạo (nhân viên; Sale/CSKH tạo cho khách) | Tạo, sửa, bổ sung, **xác nhận đã xong**, mở lại, **huỷ** |
-| Nhóm xử lý (chủ trì + phối hợp) | Ai trong nhóm cũng: xử lý, trao đổi, đính kèm, đổi trạng thái, kết luận, thêm người phối hợp |
-| Người chủ trì | Thành viên đầu mối của nhóm: tên hiện ở danh sách, nhận thông báo thay cả nhóm |
-| Ban lãnh đạo | Giao cho **phòng ban** hoặc **người cụ thể** (một hoặc nhiều) |
-| Trưởng bộ phận | Giao cho **người cụ thể** (một hoặc nhiều) **trong phòng mình** (kể cả phòng con) |
-| Quản trị cấu hình | Sản phẩm, loại, mẫu, người phụ trách, ngưỡng cảnh báo, thời gian tự đóng |
+| Vai trò                                        | Việc làm                                                                                     |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Người tạo (nhân viên; Sale/CSKH tạo cho khách) | Tạo, sửa, bổ sung, **xác nhận đã xong**, mở lại, **huỷ**                                     |
+| Nhóm xử lý (chủ trì + phối hợp)                | Ai trong nhóm cũng: xử lý, trao đổi, đính kèm, đổi trạng thái, kết luận, thêm người phối hợp |
+| Người chủ trì                                  | Thành viên đầu mối của nhóm: tên hiện ở danh sách, nhận thông báo thay cả nhóm               |
+| Ban lãnh đạo                                   | Giao cho **phòng ban** hoặc **người cụ thể** (một hoặc nhiều)                                |
+| Trưởng bộ phận                                 | Giao cho **người cụ thể** (một hoặc nhiều) **trong phòng mình** (kể cả phòng con)            |
+| Quản trị cấu hình                              | Sản phẩm, loại, mẫu, người phụ trách, ngưỡng cảnh báo, thời gian tự đóng                     |
 
 - **Xác nhận đã xong** ≠ **Huỷ**: xác nhận = đồng ý IT đã xử lý xong → đóng "Đã giải quyết". Huỷ = rút yêu
   cầu **trước khi** xử lý xong (tạo nhầm, khách tự làm được) → "Đã huỷ". Báo cáo tách riêng 2 số này.
@@ -47,11 +47,11 @@ nhận, giao việc, trao đổi, cảnh báo và kết quả xử lý — nên 
   sẵn (vd `[TIKLUY APP] Reset thiết bị – 0912345678`), vẫn sửa được.
 - **Sản phẩm** (lỗi ở đâu) — danh mục cấu hình, có nhóm cha:
 
-  | Sản phẩm | Nhóm | `app_code` (để tìm khách trong CRM) |
-  |---|---|---|
-  | VNFITE APP, VNFITE CMS | VNFITE | `vnfite` |
-  | TIKLUY APP, TIKLUY CMS | TIKLUY | `tikluy` |
-  | CRM, HRM, Workplace | vWork | — |
+  | Sản phẩm               | Nhóm   | `app_code` (để tìm khách trong CRM) |
+  | ---------------------- | ------ | ----------------------------------- |
+  | VNFITE APP, VNFITE CMS | VNFITE | `vnfite`                            |
+  | TIKLUY APP, TIKLUY CMS | TIKLUY | `tikluy`                            |
+  | CRM, HRM, Workplace    | vWork  | —                                   |
 
 - **Loại yêu cầu**: lỗi/sự cố, hỗ trợ tài khoản khách, giao dịch & lãi, thay đổi thông tin khách, quyền &
   tài khoản nội bộ, thiết bị & mạng, đề xuất tính năng, hỏi đáp, **khác**.
@@ -62,17 +62,17 @@ nhận, giao việc, trao đổi, cảnh báo và kết quả xử lý — nên 
 Mỗi mẫu là **cấu hình**: trường bắt buộc, giấy tờ (đánh dấu nhạy cảm), có cần tờ trình, mức khẩn mặc
 định, người phụ trách, hướng dẫn tự xử lý. Thêm mẫu mới không sửa code.
 
-| Mẫu | Thông tin bắt buộc | Giấy tờ | Tờ trình | Mức khẩn |
-|---|---|---|---|---|
-| Quên mật khẩu / bị khoá đăng nhập | SĐT khách, lý do khách không tự đặt lại được | — | Không | Khẩn |
-| Reset thiết bị | SĐT khách | **CCCD 2 mặt** (nhạy cảm) | Không | Khẩn |
-| Không cộng lãi / sai lãi | SĐT. TIKLUY: **mã khoản đầu tư (VNF + 13 số)**, sản phẩm, ngày & số tiền dự kiến. VNFITE: mã khoản vay, kỳ, số tiền dự kiến | Ảnh chụp màn hình | Không | Bình thường |
-| Rút/nạp tiền bị treo | SĐT, số tiền, thời gian, ngân hàng, mã giao dịch (nếu có) | Ảnh chuyển khoản (nhạy cảm) | Không | Khẩn |
-| Mở khoá / làm lại eKYC | SĐT | — | Không | Bình thường |
-| **Đổi số điện thoại** | SĐT cũ, SĐT mới, số CCCD | CCCD 2 mặt, bằng chứng chính chủ SIM | **Bắt buộc** | Bình thường |
-| **Tất toán trước hạn (ngoại lệ)** | Mã khoản đầu tư, lý do ngoại lệ | — | **Bắt buộc** | Bình thường |
-| **Tăng lãi / ngoại lệ về luồng, tiền** | Mã khoản đầu tư, lãi hiện tại → đề xuất, ngày hiệu lực, căn cứ (số QĐ) | — | **Bắt buộc** | Bình thường |
-| Khác | Tiêu đề, mô tả | Tuỳ | Người xử lý có thể yêu cầu | Bình thường |
+| Mẫu | Thông tin bắt buộc                                                                                                          | Giấy tờ                              | Tờ trình                   | Mức khẩn    |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | -------------------------- | ----------- |
+| Quên mật khẩu / bị khoá đăng nhập      | SĐT khách, lý do khách không tự đặt lại được                                                                                | —                                    | Không                      | Khẩn        |
+| Reset thiết bị                         | SĐT khách                                                                                                                   | **CCCD 2 mặt** (nhạy cảm)            | Không                      | Khẩn        |
+| Không cộng lãi / sai lãi               | SĐT. TIKLUY: **mã khoản đầu tư (VNF + 13 số)**, sản phẩm, ngày & số tiền dự kiến. VNFITE: mã khoản vay, kỳ, số tiền dự kiến | Ảnh chụp màn hình                    | Không                      | Bình thường |
+| Rút/nạp tiền bị treo                   | SĐT, số tiền, thời gian, ngân hàng, mã giao dịch (nếu có)                                                                   | Ảnh chuyển khoản (nhạy cảm)          | Không                      | Khẩn        |
+| Mở khoá / làm lại eKYC                 | SĐT                                                                                                                         | —                                    | Không                      | Bình thường |
+| **Đổi số điện thoại**                  | SĐT cũ, SĐT mới, số CCCD                                                                                                    | CCCD 2 mặt, bằng chứng chính chủ SIM | **Bắt buộc**               | Bình thường |
+| **Tất toán trước hạn (ngoại lệ)**      | Mã khoản đầu tư, lý do ngoại lệ                                                                                             | —                                    | **Bắt buộc**               | Bình thường |
+| **Tăng lãi / ngoại lệ về luồng, tiền** | Mã khoản đầu tư, lãi hiện tại → đề xuất, ngày hiệu lực, căn cứ (số QĐ)                                                      | —                                    | **Bắt buộc**               | Bình thường |
+| Khác                                   | Tiêu đề, mô tả                                                                                                              | Tuỳ                                  | Người xử lý có thể yêu cầu | Bình thường |
 
 ### 2.3 Điều rút ra từ code VNFITE / TIKLUY (khảo sát 23/10/2026)
 
@@ -83,8 +83,8 @@ Mỗi mẫu là **cấu hình**: trường bắt buộc, giấy tờ (đánh d�
   bộ của TIKLUY, không phải mã khách thấy) → form phải hỏi. Đặt nhãn rõ để không nhầm với **số tài khoản
   VNF** (cũng bắt đầu bằng "VNF"). VNFITE chưa đồng bộ khoản đầu tư sang vWork.
 - **Hướng dẫn tự xử lý trong mẫu** (giảm ticket): quên mật khẩu — cả 2 app cho khách tự đặt lại (SĐT + CCCD
-  + OTP); reset thiết bị — VNFITE có tự làm, TIKLUY chưa; tất toán đủ 70% kỳ hạn — TIKLUY tự làm trên app.
-  Chỉ tạo ticket khi khách không tự làm được.
+  - OTP); reset thiết bị — VNFITE có tự làm, TIKLUY chưa; tất toán đủ 70% kỳ hạn — TIKLUY tự làm trên app.
+    Chỉ tạo ticket khi khách không tự làm được.
 - **Không có API đổi SĐT** ở cả 2 sản phẩm → IT sửa tay trong DB sản phẩm **và** sửa khách trong CRM vWork
   (`CustomerModel` unique theo app + SĐT).
 - **CMS cả 2 sản phẩm không ghi ai đã reset mật khẩu/thiết bị/mở khoá** → ticket vWork là nơi duy nhất còn
@@ -98,11 +98,11 @@ Mỗi mẫu là **cấu hình**: trường bắt buộc, giấy tờ (đánh d�
 
 ### 3.1 Hai cách nhận
 
-| Tình huống | Ai nhận được |
-|---|---|
-| Không ai giao | Mọi người có `ticket.handle` bấm "Nhận xử lý" |
-| Ban lãnh đạo giao cho **phòng ban** | Thành viên phòng đó tự nhận (tab "Giao cho phòng tôi"), hoặc trưởng phòng chỉ định tiếp |
-| Ban lãnh đạo / trưởng bộ phận giao cho **người cụ thể** | **Chỉ** những người được chỉ định |
+| Tình huống                                              | Ai nhận được                                                                            |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Không ai giao                                           | Mọi người có `ticket.handle` bấm "Nhận xử lý"                                           |
+| Ban lãnh đạo giao cho **phòng ban**                     | Thành viên phòng đó tự nhận (tab "Giao cho phòng tôi"), hoặc trưởng phòng chỉ định tiếp |
+| Ban lãnh đạo / trưởng bộ phận giao cho **người cụ thể** | **Chỉ** những người được chỉ định                                                       |
 
 ### 3.2 Nhóm xử lý: chủ trì và phối hợp
 
@@ -115,11 +115,11 @@ Mỗi mẫu là **cấu hình**: trường bắt buộc, giấy tờ (đánh d�
 
 ### 3.3 Người phối hợp vào nhóm thế nào
 
-| Cách | Diễn ra |
-|---|---|
-| **Được giao từ đầu** | Sếp giao cho nhiều người: người giao chọn sẵn chủ trì, hoặc **người đầu tiên bấm "Nhận" thành chủ trì**; những người còn lại trong danh sách **tự động là phối hợp**, không cần bấm gì |
-| **Người trong nhóm thêm vào** | Bất kỳ ai trong nhóm bấm "Thêm phối hợp" và chọn người (không giới hạn phòng ban — đây là mời phối hợp, không phải giao việc của sếp). Người được thêm nhận thông báo |
-| **Người ngoài muốn tham gia** | **Không tự vào được** (giữ nguyên tắc chống nhận trùng). Nhắn/@nhắc tên trong phần trao đổi → người trong nhóm thêm vào |
+| Cách                          | Diễn ra                                                                                                                                                                                |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Được giao từ đầu**          | Sếp giao cho nhiều người: người giao chọn sẵn chủ trì, hoặc **người đầu tiên bấm "Nhận" thành chủ trì**; những người còn lại trong danh sách **tự động là phối hợp**, không cần bấm gì |
+| **Người trong nhóm thêm vào** | Bất kỳ ai trong nhóm bấm "Thêm phối hợp" và chọn người (không giới hạn phòng ban — đây là mời phối hợp, không phải giao việc của sếp). Người được thêm nhận thông báo                  |
+| **Người ngoài muốn tham gia** | **Không tự vào được** (giữ nguyên tắc chống nhận trùng). Nhắn/@nhắc tên trong phần trao đổi → người trong nhóm thêm vào                                                                |
 
 - Rời nhóm: phối hợp tự bấm "Rời", hoặc người trong nhóm bỏ ra.
 - Chủ trì bấm "Trả lại": còn phối hợp thì người được thêm sớm nhất thành chủ trì; không còn ai thì ticket về
@@ -147,26 +147,26 @@ Mỗi mẫu là **cấu hình**: trường bắt buộc, giấy tờ (đánh d�
 
 ### 4.1 Trạng thái
 
-| Trạng thái | Ý nghĩa | Đang chờ ai |
-|---|---|---|
-| `open` — Mới | Chưa có chủ trì (có thể đã giao cho phòng/nhóm người) | IT / người được giao |
-| `in_progress` — Đang xử lý | Đã có chủ trì | Nhóm xử lý |
-| `waiting_info` — Chờ bổ sung | Trả về người tạo: thiếu thông tin, giấy tờ, tờ trình | Người tạo |
-| `on_hold` — Tạm hoãn | Chờ bên khác (dev release, ngân hàng, đối tác). **Bắt buộc lý do**, ngày dự kiến tiếp tục **không bắt buộc** | Bên thứ ba |
-| `resolved` — Đã xử lý | Chờ người tạo xác nhận | Người tạo |
-| `closed` — Đã đóng | Kèm kết quả | — |
-| `cancelled` — Đã huỷ | Người tạo rút yêu cầu | — |
+| Trạng thái                   | Ý nghĩa                                                                                                      | Đang chờ ai          |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------- |
+| `open` — Mới                 | Chưa có chủ trì (có thể đã giao cho phòng/nhóm người)                                                        | IT / người được giao |
+| `in_progress` — Đang xử lý   | Đã có chủ trì                                                                                                | Nhóm xử lý           |
+| `waiting_info` — Chờ bổ sung | Trả về người tạo: thiếu thông tin, giấy tờ, tờ trình                                                         | Người tạo            |
+| `on_hold` — Tạm hoãn         | Chờ bên khác (dev release, ngân hàng, đối tác). **Bắt buộc lý do**, ngày dự kiến tiếp tục **không bắt buộc** | Bên thứ ba           |
+| `resolved` — Đã xử lý        | Chờ người tạo xác nhận                                                                                       | Người tạo            |
+| `closed` — Đã đóng           | Kèm kết quả                                                                                                  | —                    |
+| `cancelled` — Đã huỷ         | Người tạo rút yêu cầu                                                                                        | —                    |
 
 ### 4.2 Kết quả khi đóng
 
-| Kết quả | Ý nghĩa |
-|---|---|
-| Đã giải quyết | Bình thường |
-| Không giải quyết | Bắt buộc ghi lý do |
-| Chưa đủ cơ sở | Đã xem xét, không đủ căn cứ để thực hiện |
-| Không phải lỗi | Hệ thống chạy đúng nghiệp vụ |
-| Trùng | Chỉ khi cùng khách + cùng sự việc, kèm ticket gốc |
-| Người tạo không bổ sung | Hệ thống tự đóng từ `waiting_info` |
+| Kết quả                 | Ý nghĩa                                           |
+| ----------------------- | ------------------------------------------------- |
+| Đã giải quyết           | Bình thường                                       |
+| Không giải quyết        | Bắt buộc ghi lý do                                |
+| Chưa đủ cơ sở           | Đã xem xét, không đủ căn cứ để thực hiện          |
+| Không phải lỗi          | Hệ thống chạy đúng nghiệp vụ                      |
+| Trùng                   | Chỉ khi cùng khách + cùng sự việc, kèm ticket gốc |
+| Người tạo không bổ sung | Hệ thống tự đóng từ `waiting_info`                |
 
 Không có "Giải quyết tạm". Thay bằng dấu **"Cần theo dõi thêm"** khi báo đã xử lý (mục 4.4).
 
@@ -193,13 +193,13 @@ báo đã xử lý thì ghi đã làm gì, có vấn đề gì phát sinh. **Ch�
 
 Người trong nhóm xử lý chọn mục còn thiếu theo checklist (+ ghi thêm cho từng mục):
 
-| Nhóm | Mục |
-|---|---|
-| Chung | Mô tả rõ hơn, ảnh/video lỗi, các bước tái hiện |
-| Khách hàng | SĐT, mã khách, số CCCD; CCCD 2 mặt; xác nhận của khách (tin nhắn/ghi âm đồng ý) |
-| Tài chính | Mã khoản đầu tư/khoản vay; chứng từ (sao kê, UNC, ảnh chuyển khoản, mã giao dịch); số tiền & thời điểm; căn cứ áp dụng (số QĐ, chính sách) |
-| Phê duyệt | Tờ trình có chữ ký; tờ trình thiếu chữ ký / sai nội dung |
-| Khác | Ghi rõ |
+| Nhóm       | Mục                                                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Chung      | Mô tả rõ hơn, ảnh/video lỗi, các bước tái hiện                                                                                             |
+| Khách hàng | SĐT, mã khách, số CCCD; CCCD 2 mặt; xác nhận của khách (tin nhắn/ghi âm đồng ý)                                                            |
+| Tài chính  | Mã khoản đầu tư/khoản vay; chứng từ (sao kê, UNC, ảnh chuyển khoản, mã giao dịch); số tiền & thời điểm; căn cứ áp dụng (số QĐ, chính sách) |
+| Phê duyệt  | Tờ trình có chữ ký; tờ trình thiếu chữ ký / sai nội dung                                                                                   |
+| Khác       | Ghi rõ                                                                                                                                     |
 
 Người tạo nhận thông báo → tải bổ sung → bấm "Đã bổ sung" → ticket tự về `in_progress`, báo chủ trì.
 
@@ -209,13 +209,13 @@ Người tạo nhận thông báo → tải bổ sung → bấm "Đã bổ sung"
 
 ### 4.5 Tự đóng và mở lại — đồng bộ 3 ngày làm việc
 
-| Quy tắc | Giá trị (cấu hình được) |
-|---|---|
-| `resolved` không xác nhận → tự đóng "Đã giải quyết" | **3 ngày làm việc** (giờ làm việc, mục 8.4) |
-| `waiting_info` không bổ sung → tự đóng "Người tạo không bổ sung" | **3 ngày làm việc**, nhắc người tạo 1 lần trước 1 ngày |
-| Mở lại sau khi đóng | Trong **3 ngày làm việc** kể từ lúc đóng |
-| Người tạo **đã bấm xác nhận** đã xong | **Không mở lại được nữa** |
-| Quá hạn mở lại | Bắt buộc tạo ticket mới — có nút **"Tạo ticket mới từ ticket này"** |
+| Quy tắc                                                          | Giá trị (cấu hình được)                                             |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `resolved` không xác nhận → tự đóng "Đã giải quyết"              | **3 ngày làm việc** (giờ làm việc, mục 8.4)                         |
+| `waiting_info` không bổ sung → tự đóng "Người tạo không bổ sung" | **3 ngày làm việc**, nhắc người tạo 1 lần trước 1 ngày              |
+| Mở lại sau khi đóng                                              | Trong **3 ngày làm việc** kể từ lúc đóng                            |
+| Người tạo **đã bấm xác nhận** đã xong                            | **Không mở lại được nữa**                                           |
+| Quá hạn mở lại                                                   | Bắt buộc tạo ticket mới — có nút **"Tạo ticket mới từ ticket này"** |
 
 "Tạo ticket mới từ ticket này": chép sản phẩm, loại, mẫu, khách, mô tả, tự gắn "Liên quan đến TK-…".
 **Không** chép file nhạy cảm — người tạo đính kèm lại.
@@ -240,8 +240,8 @@ Người tạo nhận thông báo → tải bổ sung → bấm "Đã bổ sung"
 - Sau này thêm `mode = "electronic"`: các cấp duyệt, hàng chờ duyệt của sếp, trạng thái ticket
   `pending_approval`; dùng lại chuỗi duyệt của đơn từ
   (`core/authorization/resolve-request-approval-candidates.ts`).
-- Trong domain, mỗi mode là 1 "cổng duyệt" (`ApprovalGate`) trả lời đúng 1 câu: *đã đủ điều kiện thực hiện
-  chưa?* Ticket cũ giữ `mode = "document"` và vẫn hợp lệ.
+- Trong domain, mỗi mode là 1 "cổng duyệt" (`ApprovalGate`) trả lời đúng 1 câu: _đã đủ điều kiện thực hiện
+  chưa?_ Ticket cũ giữ `mode = "document"` và vẫn hợp lệ.
 - **Mọi chỗ chừa cho duyệt điện tử trong code gắn cùng 1 nhãn để grep được**:
 
   ```ts
@@ -256,12 +256,12 @@ Người tạo nhận thông báo → tải bổ sung → bấm "Đã bổ sung"
 
 ### 6.1 Ai xem được gì
 
-| | Ticket thường | Ticket hạn chế (cần tờ trình / đánh dấu hạn chế) | File nhạy cảm (CCCD, chứng từ, tờ trình) |
-|---|---|---|---|
-| Mọi nhân viên | ✔ | ✘ (không thấy trong danh sách) | ✘ — chỉ thấy dòng thông tin file (6.2) |
-| Ban lãnh đạo, trưởng IT, IT (quyền) | ✔ | ✔ luôn | ✔ luôn |
-| Người tạo | ✔ | ✔ khi chưa đóng; **sau khi đóng chỉ thấy thông tin chung** | ✔ khi chưa đóng; ✘ sau khi đóng |
-| Nhóm xử lý: chủ trì, phối hợp (kể cả ngoài IT, vd Kế toán được giao) | ✔ | ✔ khi chưa đóng | ✔ khi chưa đóng; ✘ sau khi đóng |
+|                                                                      | Ticket thường | Ticket hạn chế (cần tờ trình / đánh dấu hạn chế)           | File nhạy cảm (CCCD, chứng từ, tờ trình) |
+| -------------------------------------------------------------------- | ------------- | ---------------------------------------------------------- | ---------------------------------------- |
+| Mọi nhân viên                                                        | ✔             | ✘ (không thấy trong danh sách)                             | ✘ — chỉ thấy dòng thông tin file (6.2)   |
+| Ban lãnh đạo, trưởng IT, IT (quyền)                                  | ✔             | ✔ luôn                                                     | ✔ luôn                                   |
+| Người tạo                                                            | ✔             | ✔ khi chưa đóng; **sau khi đóng chỉ thấy thông tin chung** | ✔ khi chưa đóng; ✘ sau khi đóng          |
+| Nhóm xử lý: chủ trì, phối hợp (kể cả ngoài IT, vd Kế toán được giao) | ✔             | ✔ khi chưa đóng                                            | ✔ khi chưa đóng; ✘ sau khi đóng          |
 
 - **Thông tin chung** người tạo vẫn thấy sau khi đóng ticket hạn chế: mã, tiêu đề, trạng thái, kết quả, ghi
   chú kết luận — đủ để biết kết quả và mở lại trong 3 ngày. Không thấy file, tờ trình, phần trao đổi.
@@ -272,7 +272,7 @@ Người tạo nhận thông báo → tải bổ sung → bấm "Đã bổ sung"
 Không ẩn hẳn — hiện **dòng thông tin** để người dùng biết file vẫn còn, chỉ là họ không xem được:
 
 > 🔒 Tờ trình (1 file) · tải lên bởi Nguyễn B lúc 10:20 21/10/2026 · đã xác nhận hợp lệ ·
-> *Bạn không còn quyền xem file này. Liên hệ IT nếu cần.*
+> _Bạn không còn quyền xem file này. Liên hệ IT nếu cần._
 
 Chỉ hiện **loại giấy tờ** (do mẫu/checklist đặt), người tải, thời gian, trạng thái — **không** hiện tên file
 gốc (tên file có thể chứa thông tin cá nhân).
@@ -300,20 +300,20 @@ Toàn bộ là thông báo một-một. Người tự thực hiện hành độn
 `services/notificationService.js` (socket + FCM). Bảng này là cấu hình trong **1 file chính sách** duy nhất
 (`application/ticket-notification.policy.ts`: sự kiện → cách tìm người nhận).
 
-| Sự kiện | Người nhận |
-|---|---|
-| Tạo ticket **Khẩn** | Người phụ trách (7.1) |
-| Tạo ticket Bình thường / Thấp | Không ai (chỉ hiện trong danh sách) |
-| Giao đích danh (1 hoặc nhiều người) | Những người được giao |
-| Giao cho phòng ban | Trưởng phòng đó (1 người) |
-| Có người nhận xử lý | Người tạo |
-| Yêu cầu bổ sung / thiếu tờ trình / tờ trình không hợp lệ | Người tạo |
-| Người tạo bổ sung xong, hoặc sửa nội dung sau khi đã có chủ trì | Chủ trì |
-| Đã xử lý / đã đóng / bị đóng do trùng, chưa đủ cơ sở… | Người tạo |
-| Nhắc trước khi tự đóng `waiting_info` | Người tạo |
-| Được thêm vào nhóm phối hợp | Người được thêm |
-| Tới ngày kiểm tra "Cần theo dõi thêm" | Chủ trì |
-| @nhắc tên trong trao đổi | Người được nhắc |
+| Sự kiện                                                         | Người nhận                          |
+| --------------------------------------------------------------- | ----------------------------------- |
+| Tạo ticket **Khẩn**                                             | Người phụ trách (7.1)               |
+| Tạo ticket Bình thường / Thấp                                   | Không ai (chỉ hiện trong danh sách) |
+| Giao đích danh (1 hoặc nhiều người)                             | Những người được giao               |
+| Giao cho phòng ban                                              | Trưởng phòng đó (1 người)           |
+| Có người nhận xử lý                                             | Người tạo                           |
+| Yêu cầu bổ sung / thiếu tờ trình / tờ trình không hợp lệ        | Người tạo                           |
+| Người tạo bổ sung xong, hoặc sửa nội dung sau khi đã có chủ trì | Chủ trì                             |
+| Đã xử lý / đã đóng / bị đóng do trùng, chưa đủ cơ sở…           | Người tạo                           |
+| Nhắc trước khi tự đóng `waiting_info`                           | Người tạo                           |
+| Được thêm vào nhóm phối hợp                                     | Người được thêm                     |
+| Tới ngày kiểm tra "Cần theo dõi thêm"                           | Chủ trì                             |
+| @nhắc tên trong trao đổi                                        | Người được nhắc                     |
 
 **Cảnh báo vàng không gửi thông báo** — chỉ bôi vàng trên giao diện (mục 8).
 
@@ -330,12 +330,12 @@ mà không ai đụng tới mới đáng lo.
 
 ### 8.2 Bốn tín hiệu
 
-| Tín hiệu | Thành vàng khi |
-|---|---|
-| 1. Chưa ai nhận | `open` quá ngưỡng A |
-| 2. Im lặng | `in_progress` không có hoạt động nào (trao đổi, đổi trạng thái, cập nhật) quá ngưỡng B |
-| 3. Quá ngày hẹn | Quá **ngày dự kiến do chính nhóm xử lý tự đặt** (không bắt buộc) |
-| 4. Tạm hoãn chưa xác định | `on_hold` không có ngày dự kiến tiếp tục, không cập nhật quá ngưỡng C |
+| Tín hiệu                  | Thành vàng khi                                                                         |
+| ------------------------- | -------------------------------------------------------------------------------------- |
+| 1. Chưa ai nhận           | `open` quá ngưỡng A                                                                    |
+| 2. Im lặng                | `in_progress` không có hoạt động nào (trao đổi, đổi trạng thái, cập nhật) quá ngưỡng B |
+| 3. Quá ngày hẹn           | Quá **ngày dự kiến do chính nhóm xử lý tự đặt** (không bắt buộc)                       |
+| 4. Tạm hoãn chưa xác định | `on_hold` không có ngày dự kiến tiếp tục, không cập nhật quá ngưỡng C                  |
 
 - **Ngày hẹn**: người trong nhóm xử lý tự ghi "dự kiến xong 30/10" khi nhận việc lớn → trước ngày đó không vàng vì im lặng.
   Dời ngày phải ghi lý do; số lần dời hiện trên ticket.
@@ -346,11 +346,11 @@ mà không ai đụng tới mới đáng lo.
 
 ### 8.3 Ngưỡng mặc định (cấu hình được, ghi đè được theo mẫu)
 
-| Mức khẩn | A: chưa ai nhận | B: im lặng | C: tạm hoãn chưa xác định |
-|---|---|---|---|
-| Khẩn | 1 giờ làm việc | 4 giờ làm việc | 5 ngày làm việc |
-| Bình thường | 1 ngày làm việc | 3 ngày làm việc | 5 ngày làm việc |
-| Thấp | 3 ngày làm việc | 7 ngày làm việc | 5 ngày làm việc |
+| Mức khẩn    | A: chưa ai nhận | B: im lặng      | C: tạm hoãn chưa xác định |
+| ----------- | --------------- | --------------- | ------------------------- |
+| Khẩn        | 1 giờ làm việc  | 4 giờ làm việc  | 5 ngày làm việc           |
+| Bình thường | 1 ngày làm việc | 3 ngày làm việc | 5 ngày làm việc           |
+| Thấp        | 3 ngày làm việc | 7 ngày làm việc | 5 ngày làm việc           |
 
 - Mức khẩn chỉ có 3 mức. Mẫu đặt mặc định, người tạo đổi được, nhóm xử lý điều chỉnh được (kèm ghi chú).
 - Khi chuyển vàng: ticket được **bôi vàng trên giao diện cho mọi người thấy** (danh sách + chi tiết, kèm lý
@@ -377,8 +377,8 @@ mà không ai đụng tới mới đáng lo.
 
 ## 9. Màn hình (web trước, app sau)
 
-- **Danh sách nhóm theo ngày** (Hôm nay, Hôm qua, 21/10…), mới nhất ở trên. Tab: *Chưa ai nhận*, *Tôi đang
-  xử lý*, *Tôi tạo*, *Giao cho phòng tôi*, *Giao cho tôi*, *Cảnh báo vàng*, *Tất cả*. Lọc: sản phẩm, loại,
+- **Danh sách nhóm theo ngày** (Hôm nay, Hôm qua, 21/10…), mới nhất ở trên. Tab: _Chưa ai nhận_, _Tôi đang
+  xử lý_, _Tôi tạo_, _Giao cho phòng tôi_, _Giao cho tôi_, _Cảnh báo vàng_, _Tất cả_. Lọc: sản phẩm, loại,
   mẫu, mức khẩn, trạng thái, chủ trì, khoảng ngày, từ khoá.
 - **Chi tiết ticket**: thông tin + trường theo mẫu, khách (kèm `external_id`), người tạo/chủ trì/phối hợp,
   checklist bổ sung, tờ trình, file, trao đổi (@nhắc tên, đính kèm), lịch sử.
@@ -422,15 +422,15 @@ src/jobs/ticketSweepJob.js              # cảnh báo vàng, tự đóng, nhắc
 
 ### 10.2 Collection
 
-| Collection | Nội dung chính |
-|---|---|
-| `ticket` | `code` (unique, `TK-2610-0001`), `title`, `description`, `product_id`, `category_id`, `template_id`, `custom_fields`, `urgency`, `customer` (snapshot: `customer_id`, `app_code`, `phone`, `name`, `external_id`), `created_by`, `assignment` (`mode` none/department/members, `department_id`, `member_ids`, `assigned_by`, `owner_id`, `collaborator_ids`, `claimed_at`), `status`, `resolution` (`code`, `note`, `action_taken` không bắt buộc, `by`, `at`), `follow_up` (`note`, `check_at`), `hold` (`reason`, `resume_at` nullable), `info_request` (checklist), `approval` (`required`, `source`, `mode`, `status`, `reference`, `verified_by`, `verified_at`), `visibility`, `related_ticket_ids`, `duplicate_of`, `due_hint_at`, `reschedule_count`, `last_activity_at`, `alert_at`, `alert_reason`, `auto_close_at`, `confirmed_by_requester`, `closed_at`, `reopen_until`, `reopen_count`, `version` |
-| `ticket_message` | `ticket_id`, `author_id`, `body`, `mentions`, `attachment_ids` |
-| `ticket_attachment` | `ticket_id`, `message_id`, `kind` (loại giấy tờ), `sensitive`, `original_name`, `stored_name`, `mime`, `size`, `uploaded_by` |
-| `ticket_activity` | Lịch sử **chỉ ghi thêm**: `ticket_id`, `actor_id`, `action`, `from`/`to`, `changes` (cũ → mới), `note` |
-| `ticket_product`, `ticket_category`, `ticket_template` | Cấu hình mục 2 (mẫu: `fields` động, `required_documents`, `requires_approval`, `default_urgency`, `handler_ids`, `guidance`, `title_pattern`) |
-| `ticket_setting` | 1 document: người phụ trách mặc định, ngưỡng 8.3, lịch 8.4, thời gian tự đóng/mở lại 4.5 |
-| `ticket_counter` | Sinh `code` theo tháng |
+| Collection                                             | Nội dung chính                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ticket`                                               | `code` (unique, `TK-2610-0001`), `title`, `description`, `product_id`, `category_id`, `template_id`, `custom_fields`, `urgency`, `customer` (snapshot: `customer_id`, `app_code`, `phone`, `name`, `external_id`), `created_by`, `assignment` (`mode` none/department/members, `department_id`, `member_ids`, `assigned_by`, `owner_id`, `collaborator_ids`, `claimed_at`), `status`, `resolution` (`code`, `note`, `action_taken` không bắt buộc, `by`, `at`), `follow_up` (`note`, `check_at`), `hold` (`reason`, `resume_at` nullable), `info_request` (checklist), `approval` (`required`, `source`, `mode`, `status`, `reference`, `verified_by`, `verified_at`), `visibility`, `related_ticket_ids`, `duplicate_of`, `due_hint_at`, `reschedule_count`, `last_activity_at`, `alert_at`, `alert_reason`, `auto_close_at`, `confirmed_by_requester`, `closed_at`, `reopen_until`, `reopen_count`, `version` |
+| `ticket_message`                                       | `ticket_id`, `author_id`, `body`, `mentions`, `attachment_ids`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `ticket_attachment`                                    | `ticket_id`, `message_id`, `kind` (loại giấy tờ), `sensitive`, `original_name`, `stored_name`, `mime`, `size`, `uploaded_by`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `ticket_activity`                                      | Lịch sử **chỉ ghi thêm**: `ticket_id`, `actor_id`, `action`, `from`/`to`, `changes` (cũ → mới), `note`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `ticket_product`, `ticket_category`, `ticket_template` | Cấu hình mục 2 (mẫu: `fields` động, `required_documents`, `requires_approval`, `default_urgency`, `handler_ids`, `guidance`, `title_pattern`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ticket_setting`                                       | 1 document: người phụ trách mặc định, ngưỡng 8.3, lịch 8.4, thời gian tự đóng/mở lại 4.5                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `ticket_counter`                                       | Sinh `code` theo tháng                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 Index chính: `{status, createdAt}`, `{"assignment.owner_id", status}`, `{"assignment.department_id", status}`,
 `{"assignment.member_ids", status}`, `{created_by, createdAt}`, `{alert_at}`, `{auto_close_at}`,
@@ -438,14 +438,14 @@ Index chính: `{status, createdAt}`, `{"assignment.owner_id", status}`, `{"assig
 
 ### 10.3 Quyền (thêm vào `scripts/seedPermissionCatalog.ts`, entity `Ticket`)
 
-| Code | Cấp cho (seed ban đầu) |
-|---|---|
-| `ticket.create`, `ticket.view`, `ticket.handle` | Mọi nhân viên (role baseline) |
-| `ticket.assign_department` | Ban lãnh đạo |
-| `ticket.assign_member` | Trưởng bộ phận (chỉ người trong phòng mình) + ban lãnh đạo |
-| `ticket.view_restricted`, `ticket.view_sensitive` | Ban lãnh đạo, trưởng IT, IT |
-| `ticket.manage` (đổi chủ trì, đóng hộ, sửa phân loại mọi ticket) | Ban lãnh đạo, trưởng IT |
-| `ticket.config` | Admin, trưởng IT |
+| Code                                                             | Cấp cho (seed ban đầu)                                     |
+| ---------------------------------------------------------------- | ---------------------------------------------------------- |
+| `ticket.create`, `ticket.view`, `ticket.handle`                  | Mọi nhân viên (role baseline)                              |
+| `ticket.assign_department`                                       | Ban lãnh đạo                                               |
+| `ticket.assign_member`                                           | Trưởng bộ phận (chỉ người trong phòng mình) + ban lãnh đạo |
+| `ticket.view_restricted`, `ticket.view_sensitive`                | Ban lãnh đạo, trưởng IT, IT                                |
+| `ticket.manage` (đổi chủ trì, đóng hộ, sửa phân loại mọi ticket) | Ban lãnh đạo, trưởng IT                                    |
+| `ticket.config`                                                  | Admin, trưởng IT                                           |
 
 Quyền theo vai trò trên ticket (người tạo, chủ trì, phối hợp, người được giao) do domain tính
 (`ticket-visibility.ts`), không phải permission.
@@ -500,8 +500,8 @@ GET    /tickets/:id/activities
 
 1. **MVP (web)**: cấu hình sản phẩm/loại/mẫu (seed mục 2.2); tạo, sửa, nhận, giao (phòng/người, chủ trì/phối
    hợp); đủ trạng thái, kết quả, ghi chú; checklist bổ sung; tờ trình bằng file + xác nhận hợp lệ; trao đổi
-   + file (nhạy cảm); thêm/bớt phối hợp; ticket thường/hạn chế; thông báo theo quy tắc; tự đóng/mở lại; cảnh báo
-   vàng + lịch làm việc có T7 sáng; danh sách theo ngày; lịch sử; trùng/liên quan; tạo mới từ ticket cũ.
+   - file (nhạy cảm); thêm/bớt phối hợp; ticket thường/hạn chế; thông báo theo quy tắc; tự đóng/mở lại; cảnh báo
+     vàng + lịch làm việc có T7 sáng; danh sách theo ngày; lịch sử; trùng/liên quan; tạo mới từ ticket cũ.
 2. **Giai đoạn 2**: checklist các bước thực hiện theo mẫu (vd đổi SĐT: kiểm tra SĐT mới → sửa DB sản phẩm →
    sửa CRM vWork → báo khách); báo cáo tỉ lệ xử lý kịp; API cho app mobile.
 3. **Giai đoạn 3**: duyệt tờ trình điện tử trên vWork (mục 5.2), đánh giá hài lòng, xuất Excel.
@@ -510,14 +510,14 @@ GET    /tickets/:id/activities
 
 Tìm bằng `grep -rn "CHỜ-DUYỆT-ĐIỆN-TỬ" src`. Hiện có 6 điểm:
 
-| File | Điểm chờ |
-|---|---|
-| `src/modules/ticket/domain/types.ts` | `ApprovalMode` chỉ có `"document"`; `TICKET_STATUSES` sẽ thêm `pending_approval` |
-| `src/modules/ticket/domain/ticket.entity.ts` — `_assertApprovalPassed` | "Cổng duyệt" duy nhất: tách thành `ApprovalGate` theo `approval.mode` |
-| `src/modules/ticket/domain/ticket.entity.ts` — `verifyApproval` | Lệnh xác nhận tờ trình sẽ thay bằng duyệt/từ chối theo từng cấp |
-| `src/modules/ticket/domain/ticket-capabilities.ts` | Ai được nút "xác nhận tờ trình" sẽ theo lượt duyệt hiện tại |
-| `src/models/TicketModel.ts` — `approval` | Thêm `mode: "electronic"`, danh sách cấp duyệt |
-| `docs/TICKET-MODULE-PLAN.md` mục 5.2 | Mô tả hướng chuyển đổi |
+| File                                                                   | Điểm chờ                                                                         |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `src/modules/ticket/domain/types.ts`                                   | `ApprovalMode` chỉ có `"document"`; `TICKET_STATUSES` sẽ thêm `pending_approval` |
+| `src/modules/ticket/domain/ticket.entity.ts` — `_assertApprovalPassed` | "Cổng duyệt" duy nhất: tách thành `ApprovalGate` theo `approval.mode`            |
+| `src/modules/ticket/domain/ticket.entity.ts` — `verifyApproval`        | Lệnh xác nhận tờ trình sẽ thay bằng duyệt/từ chối theo từng cấp                  |
+| `src/modules/ticket/domain/ticket-capabilities.ts`                     | Ai được nút "xác nhận tờ trình" sẽ theo lượt duyệt hiện tại                      |
+| `src/models/TicketModel.ts` — `approval`                               | Thêm `mode: "electronic"`, danh sách cấp duyệt                                   |
+| `docs/TICKET-MODULE-PLAN.md` mục 5.2                                   | Mô tả hướng chuyển đổi                                                           |
 
 ## 13. Cần chốt khi seed dữ liệu (không chặn việc code)
 
@@ -533,17 +533,17 @@ rõ ở đây).
 
 ### Code mới
 
-| Phần | File |
-|---|---|
-| Lịch làm việc dùng chung | `src/shared-kernel/working-calendar.ts` (chuyển từ customer-care, thêm `dayWindows`: T7 chỉ buổi sáng) |
-| Domain | `src/modules/ticket/domain/` — `ticket.entity.ts` (máy trạng thái), `ticket-access.ts` (quyền xem), `ticket-capabilities.ts` (nút nào hiện), `ticket-schedule.ts` (cảnh báo vàng / tự đóng / mở lại), `ticket-catalog.ts` (checklist bổ sung, nhãn kết quả) |
-| Application | `src/modules/ticket/application/` — `ticket-commands.service.ts`, `ticket-queries.service.ts`, `ticket-sweep.service.ts`, `ticket-config.service.ts`, `ticket-notification.policy.ts` (bảng ai nhận thông báo) |
-| Infrastructure | `src/modules/ticket/infrastructure/` — repository có kiểm tra `version`, mapper, directory (nhân viên/phòng ban), notifier, cấu hình |
-| HTTP | `src/modules/ticket/interface/` — route `/tickets` (đăng ký ở `src/routes/index.js`) |
-| Models | `src/models/Ticket*.ts` (9 collection: `ticket`, `ticket_message`, `ticket_attachment`, `ticket_activity`, `ticket_product`, `ticket_category`, `ticket_template`, `ticket_setting`, `ticket_counter`) |
-| Upload | `src/middlewares/uploadTicket.js` (thư mục riêng `TICKET_DIR_*`, chỉ nhận định dạng an toàn, tối đa 25MB × 10 file) |
-| Cron | `src/jobs/ticketSweepJob.js` — 5 phút/lần, khoá Redis có tiền tố môi trường |
-| Seed | `scripts/seedTicketConfig.ts`, `scripts/seedPermissionTicketRoles.ts`; thêm quyền `ticket.*` vào các seed permission có sẵn |
+| Phần                     | File                                                                                                                                                                                                                                                        |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lịch làm việc dùng chung | `src/shared-kernel/working-calendar.ts` (chuyển từ customer-care, thêm `dayWindows`: T7 chỉ buổi sáng)                                                                                                                                                      |
+| Domain                   | `src/modules/ticket/domain/` — `ticket.entity.ts` (máy trạng thái), `ticket-access.ts` (quyền xem), `ticket-capabilities.ts` (nút nào hiện), `ticket-schedule.ts` (cảnh báo vàng / tự đóng / mở lại), `ticket-catalog.ts` (checklist bổ sung, nhãn kết quả) |
+| Application              | `src/modules/ticket/application/` — `ticket-commands.service.ts`, `ticket-queries.service.ts`, `ticket-sweep.service.ts`, `ticket-config.service.ts`, `ticket-notification.policy.ts` (bảng ai nhận thông báo)                                              |
+| Infrastructure           | `src/modules/ticket/infrastructure/` — repository có kiểm tra `version`, mapper, directory (nhân viên/phòng ban), notifier, cấu hình                                                                                                                        |
+| HTTP                     | `src/modules/ticket/interface/` — route `/tickets` (đăng ký ở `src/routes/index.js`)                                                                                                                                                                        |
+| Models                   | `src/models/Ticket*.ts` (9 collection: `ticket`, `ticket_message`, `ticket_attachment`, `ticket_activity`, `ticket_product`, `ticket_category`, `ticket_template`, `ticket_setting`, `ticket_counter`)                                                      |
+| Upload                   | `src/middlewares/uploadTicket.js` (thư mục riêng `TICKET_DIR_*`, chỉ nhận định dạng an toàn, tối đa 25MB × 10 file)                                                                                                                                         |
+| Cron                     | `src/jobs/ticketSweepJob.js` — 5 phút/lần, khoá Redis có tiền tố môi trường                                                                                                                                                                                 |
+| Seed                     | `scripts/seedTicketConfig.ts`, `scripts/seedPermissionTicketRoles.ts`; thêm quyền `ticket.*` vào các seed permission có sẵn                                                                                                                                 |
 
 ### Khác với thiết kế ở trên
 
@@ -579,9 +579,48 @@ rõ ở đây).
 4. Gán role `TICKET_IT` cho IT và `TICKET_IT_LEAD` cho trưởng IT ở màn Phân quyền; trên màn cấu hình ticket gán
    người phụ trách (A, B cho mẫu "Reset thiết bị"; danh sách mặc định cho IT).
 
+### Kiểm thử
+
+`__tests__/modules/ticket/` (+ `__tests__/shared-kernel/working-calendar.test.ts`): domain (entity, lịch cảnh
+báo/tự đóng, quyền xem), service tích hợp với Mongo in-memory có transaction (đua 2 người cùng nhận, version, tờ
+trình, tự đóng/nhắc), chính sách thông báo, bộ lọc danh sách, và **HTTP** (supertest: route, multipart, file nhạy cảm,
+cấu hình). Chạy: `npx jest __tests__/modules/ticket`.
+
+## 15. Đã triển khai (web) — 23/10/2026
+
+Repo `vWork-website`, nhánh `feat/ticket`, thư mục `src/features/ticket/` + 3 trang
+`src/pages/workplace/Ticket{s,Detail,Config}Screen.jsx`. Menu "Ticket hỗ trợ" nằm trong Workplace (chỉ hiện với
+người có `ticket.view`); thông báo ticket mở thẳng `/workplace/tickets/:id`.
+
+| Route | Nội dung |
+|---|---|
+| `/workplace/tickets` | Danh sách nhóm theo ngày, tab (chưa ai nhận, tôi đang xử lý, giao cho tôi / phòng tôi, tôi tạo, cảnh báo vàng, đã đóng, tất cả) có số đếm, bộ lọc; **ticket bị bỏ quên được bôi vàng** |
+| `/workplace/tickets/:id` | Chi tiết: thông tin, trao đổi (@nhắc tên, file), nhóm xử lý, tờ trình, file đính kèm, lịch sử; thanh hành động |
+| `/workplace/tickets/config` | Cấu hình (quyền `ticket.config`): sản phẩm, loại yêu cầu, mẫu yêu cầu, cài đặt chung (người phụ trách, ngưỡng cảnh báo, tự đóng/mở lại, lịch làm việc) |
+
+Thiết kế giao diện:
+
+- **Nút nào hiện do backend quyết định** (`ticket.capabilities` trong `GET /tickets/:id`), frontend không tự suy
+  luận quyền. Hành động có nhập liệu là bảng dữ liệu `components/actions/ticketActions.js` (nhãn, trường, cách dựng
+  body) + 1 hộp thoại dùng chung — thêm hành động mới chỉ cần thêm 1 mục.
+- **Form tạo ticket dựng từ mẫu yêu cầu** (`TicketDynamicFields`): thêm mẫu/trường ở màn cấu hình là form tự có.
+  Tiêu đề gợi ý từ `title_pattern`, người tạo vẫn sửa được.
+- **Tìm khách trong CRM** (`CustomerPicker`) chỉ hiện khi người dùng có `customer.view`; không thì nhập tay SĐT/tên.
+- **File nhạy cảm không còn quyền xem** chỉ hiện dòng thông tin (loại giấy tờ, người tải, thời gian), không có tên
+  file; tải file qua API dạng blob (có token), không dùng link tĩnh.
+- Người tạo ticket hạn chế đã đóng thấy **màn thông tin chung** (mã, tiêu đề, trạng thái, kết quả, ghi chú) và nút
+  "Mở lại" nếu còn hạn.
+- Điểm chờ duyệt điện tử: `TicketApprovalCard.jsx` (nhãn `[CHỜ-DUYỆT-ĐIỆN-TỬ]`).
+
+Đã kiểm tra trên trình duyệt với **API thật + Mongo in-memory** (auth/permission giả): tạo ticket theo mẫu, nhận,
+yêu cầu bổ sung (có tờ trình), người tạo bổ sung kèm file, xác nhận tờ trình, báo xong có "cần theo dõi thêm",
+người tạo xác nhận (→ màn thông tin chung), cấu hình + lưu cài đặt, danh sách nhóm theo ngày với cảnh báo vàng.
+
 ### Chưa làm / còn mở
 
-- Giai đoạn 2/3 ở mục 11 (checklist bước thực hiện theo mẫu, báo cáo tỉ lệ xử lý kịp, duyệt tờ trình điện tử...).
-- Cài đặt `calendar` (giờ làm việc từng thứ) chỉnh được qua API nhưng chưa có màn hình riêng.
-- Test tích hợp HTTP (supertest) cho route `/tickets` — hiện test phủ domain, service (Mongo in-memory có
-  transaction) và các hàm thuần của tầng interface.
+- Giai đoạn 2/3 ở mục 11 (checklist bước thực hiện theo mẫu, báo cáo tỉ lệ xử lý kịp, duyệt tờ trình điện tử,
+  app mobile...).
+- Web chưa có test tự động (dự án web chưa cài framework test); đã kiểm tra tay như trên và `vite build`.
+- Cài đặt lịch làm việc theo từng thứ trên màn cấu hình mới hỗ trợ riêng **thứ 7** (khung giờ riêng); API hỗ trợ
+  khung giờ riêng cho thứ bất kỳ.
+- Chưa kiểm tra trên môi trường UAT thật (cần chạy seed quyền + seed cấu hình + mount `TICKET_DIR_*` trước).

@@ -97,6 +97,35 @@ export class HandbookCatalogRepository {
     return doc ? toVersionRecord(doc) : null;
   }
 
+  // Các phiên bản đã từng được publish (active hoặc archived) — KHÔNG gồm bản nháp. Mới nhất trước.
+  async listPublishedVersions(limit = 50): Promise<HandbookVersionRecord[]> {
+    const docs = await HandbookVersionModel.find({
+      status: { $in: ["active", "archived"] },
+      isDeleted: false
+    })
+      .sort({ versionNo: -1 })
+      .limit(limit)
+      .session(this.session)
+      .lean();
+    return docs.map(toVersionRecord);
+  }
+
+  async findArticlesOfVersions(
+    versionIds: string[],
+    documentCode: string,
+    articleIdx: number
+  ): Promise<HandbookArticleRecord[]> {
+    const docs = await HandbookArticleModel.find({
+      version: { $in: versionIds },
+      documentCode,
+      articleIdx,
+      isDeleted: false
+    })
+      .session(this.session)
+      .lean();
+    return docs.map(toArticleRecord);
+  }
+
   async getMaxVersionNo(): Promise<number> {
     const doc = await HandbookVersionModel.findOne({})
       .sort({ versionNo: -1 })

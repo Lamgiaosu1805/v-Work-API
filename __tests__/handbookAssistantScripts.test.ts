@@ -271,6 +271,43 @@ describe("scripts/handbook CLI", () => {
     expect(missingArg.out).toContain("Thiếu tham số --code");
   });
 
+  it("nạp public API của module (index.ts) KHÔNG mở kết nối nền: tiến trình tự thoát", async () => {
+    // Các script nạp index.ts; nếu nó kéo theo config/redis (ioredis tự kết nối) thì script xong việc
+    // vẫn không bao giờ thoát. Trong jest Redis đã bị mock nên phải kiểm tra bằng tiến trình thật.
+    const result = await new Promise<{ code: number | null; out: string; timedOut: boolean }>(
+      (resolve) => {
+        const child = spawn(
+          process.execPath,
+          [
+            "-r",
+            "ts-node/register/transpile-only",
+            "-e",
+            "require('./src/modules/handbook-assistant'); console.log('loaded')"
+          ],
+          { cwd: ROOT, env: { ...process.env, NODE_ENV: "test" } }
+        );
+        let out = "";
+        child.stdout.on("data", (chunk) => {
+          out += chunk;
+        });
+        child.stderr.on("data", (chunk) => {
+          out += chunk;
+        });
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          resolve({ code: null, out, timedOut: true });
+        }, 40_000);
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          resolve({ code, out, timedOut: false });
+        });
+      }
+    );
+    expect(result.out).toContain("loaded");
+    expect(result.timedOut).toBe(false);
+    expect(result.code).toBe(0);
+  });
+
   it("import --dry-run: manifest mẫu hợp lệ; manifest sai bị từ chối mà không cần DB", async () => {
     const ok = await run("import-handbook.ts", [`--manifest=${SAMPLE_MANIFEST}`, "--dry-run"]);
     expectSuccess(ok);

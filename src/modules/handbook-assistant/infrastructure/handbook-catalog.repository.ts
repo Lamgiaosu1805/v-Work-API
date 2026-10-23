@@ -176,6 +176,14 @@ export class HandbookCatalogRepository {
     );
   }
 
+  async setPromptTokens(versionId: string, promptTokens: number): Promise<void> {
+    await HandbookVersionModel.updateOne(
+      { _id: versionId },
+      { $set: { promptTokens } },
+      { session: this.session ?? undefined }
+    );
+  }
+
   async activate(versionId: string, publishedBy: string | null): Promise<void> {
     await HandbookVersionModel.updateOne(
       { _id: versionId },

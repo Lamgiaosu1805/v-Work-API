@@ -1,5 +1,9 @@
 // Public API module handbook-assistant (Trợ lý Nội quy — hỏi đáp nội quy bằng AI).
-// Tiến độ theo giai đoạn: 1 = dữ liệu + nạp văn bản (file này); 2 = REST; 3 = hỏi/stream qua socket.
+// Tiến độ theo giai đoạn: 1 = dữ liệu + nạp văn bản; 2 = REST; 3 = hỏi/stream qua socket (xong).
+//
+// LƯU Ý: file này được các script (scripts/handbook/*) nạp trực tiếp nên KHÔNG được kéo theo bất cứ thứ gì
+// mở kết nối khi import (vd. config/redis). Vì vậy phần socket (`interface/handbook-assistant.socket`, dùng
+// Redis + phân quyền) KHÔNG export ở đây — index.js nạp thẳng từ thư mục interface, giống router REST.
 export { importHandbookDraft } from "./application/import-handbook.service";
 export type {
   ImportHandbookInput,
@@ -28,3 +32,8 @@ export {
   isHandbookAssistantError
 } from "./domain/handbook-assistant.errors";
 export type { HandbookErrorCode } from "./domain/handbook-assistant.errors";
+export { shutdownHandbookAssistant } from "./application/shutdown-handbook-assistant";
+export { recoverStaleAnswers as recoverStaleHandbookAnswers } from "./application/recover-stale-answers.service";
+export { purgeExpiredConversations as purgeExpiredHandbookConversations } from "./application/purge-expired-conversations.service";
+export { measureHandbookPromptTokens } from "./application/measure-prompt-tokens.service";
+export type { MeasuredPromptTokens } from "./application/measure-prompt-tokens.service";

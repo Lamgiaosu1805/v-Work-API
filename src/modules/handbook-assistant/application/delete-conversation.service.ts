@@ -2,6 +2,7 @@ import { runInTransaction } from "../../../core/db/run-in-transaction";
 import { NotFoundException } from "../../../core/exceptions/exceptions";
 import { logger } from "../../../config/logger";
 import { handbookChatRepository as chatRepo } from "../infrastructure/handbook-chat.repository";
+import { runningAnswers } from "./running-answers.registry";
 
 // Xoá HẲN hội thoại cùng toàn bộ tin nhắn và đánh giá của nó (giao diện hứa "xoá vĩnh viễn, không
 // thể khôi phục"); số liệu dùng theo ngày (`handbook_usage`) được giữ lại. Ghi vào 2 collection nên
@@ -12,5 +13,7 @@ export async function deleteConversation(accountId: string, conversationId: stri
     if (!conversation) throw new NotFoundException("Không tìm thấy hội thoại");
     return chatRepo.deleteConversationWithMessages(conversationId);
   });
-  logger.info("Đã xoá hội thoại Trợ lý Nội quy", { conversationId, deletedMessages });
+  // Câu đang stream trong hội thoại này không còn chỗ để lưu: hủy nó (web nhận CANCELLED).
+  const aborted = runningAnswers.abortByConversation(conversationId, "deleted");
+  logger.info("Đã xoá hội thoại Trợ lý Nội quy", { conversationId, deletedMessages, aborted });
 }

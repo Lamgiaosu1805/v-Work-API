@@ -19,6 +19,7 @@ export interface ConversationRecord {
 export interface MessageRecord {
   _id: string;
   conversation: string;
+  account: string;
   seq: number;
   role: "user" | "assistant";
   content: string;
@@ -33,7 +34,33 @@ export interface MessageRecord {
   }>;
   truncated: boolean;
   feedback: 1 | -1 | null;
+  clientId: string | null;
+  quotaDateKey: string | null;
   createdAt: Date;
+}
+
+export interface FinishUpdate {
+  status: "done" | "error" | "cancelled";
+  content: string;
+  errorCode: string | null;
+  citations?: MessageRecord["citations"];
+  truncated?: boolean;
+  // Câu trả lời hỏng trước khi người dùng nhận được kết quả → lượt hỏi đã được hoàn lại.
+  quotaRefunded?: boolean;
+  ai?: {
+    model: string | null;
+    stopReason: string | null;
+    usage: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite5m: number;
+      cacheWrite1h: number;
+    };
+    costUsd: number | null;
+    ttftMs: number | null;
+    latencyMs: number | null;
+  };
 }
 
 function toConversationRecord(doc: Record<string, any>): ConversationRecord {
@@ -50,6 +77,7 @@ function toMessageRecord(doc: Record<string, any>): MessageRecord {
   return {
     _id: String(doc._id),
     conversation: String(doc.conversation),
+    account: String(doc.account),
     seq: doc.seq,
     role: doc.role,
     content: doc.content ?? "",
@@ -64,6 +92,8 @@ function toMessageRecord(doc: Record<string, any>): MessageRecord {
     })),
     truncated: Boolean(doc.truncated),
     feedback: doc.feedback ?? null,
+    clientId: doc.clientId ?? null,
+    quotaDateKey: doc.quotaDateKey ?? null,
     createdAt: doc.createdAt
   };
 }
@@ -112,16 +142,21 @@ export class HandbookChatRepository {
     return doc ? toMessageRecord(doc) : null;
   }
 
-  // Xoá hẳn hội thoại và toàn bộ tin nhắn (web hứa "xoá vĩnh viễn"). Gọi trong giao dịch vì ghi
-  // vào 2 collection. Trả về số tin đã xoá.
-  async deleteConversationWithMessages(conversationId: string): Promise<number> {
+  // Xoá hẳn các hội thoại và toàn bộ tin nhắn của chúng (web hứa "xoá vĩnh viễn"). Gọi trong giao
+  // dịch vì ghi vào 2 collection. Trả về số tin đã xoá.
+  async deleteConversationsWithMessages(conversationIds: string[]): Promise<number> {
+    if (!conversationIds.length) return 0;
     const session = this.session ?? undefined;
     const messages = await HandbookMessageModel.deleteMany(
-      { conversation: conversationId },
+      { conversation: { $in: conversationIds } },
       { session }
     );
-    await HandbookConversationModel.deleteOne({ _id: conversationId }, { session });
+    await HandbookConversationModel.deleteMany({ _id: { $in: conversationIds } }, { session });
     return messages.deletedCount ?? 0;
+  }
+
+  async deleteConversationWithMessages(conversationId: string): Promise<number> {
+    return this.deleteConversationsWithMessages([conversationId]);
   }
 
   // Ghi đánh giá nguyên tử bằng update dạng pipeline để 2 lần gọi gần như đồng thời (👎 rồi 👎 kèm
@@ -145,6 +180,159 @@ export class HandbookChatRepository {
       { session: this.session ?? undefined }
     );
     return result.matchedCount > 0;
+  }
+
+  // ---- Luồng hỏi / stream ----
+
+  async insertConversation(input: {
+    accountId: string;
+    title: string;
+    versionId: string;
+    now: Date;
+  }): Promise<string> {
+    const [doc] = await HandbookConversationModel.create(
+      [
+        {
+          account: input.accountId,
+          title: input.title,
+          version: input.versionId,
+          turnCount: 1,
+          lastMessageAt: input.now
+        }
+      ],
+      { session: this.session ?? undefined }
+    );
+    return String(doc._id);
+  }
+
+  // Tăng số lượt NGUYÊN TỬ và chỉ khi hội thoại vẫn của tài khoản này, vẫn thuộc phiên bản đang hiệu
+  // lực và chưa đạt số lượt tối đa. Trả về null nếu một điều kiện không còn đúng.
+  async bumpConversationTurn(input: {
+    conversationId: string;
+    accountId: string;
+    versionId: string;
+    maxTurns: number;
+    now: Date;
+  }): Promise<{ turnCount: number } | null> {
+    const doc = await HandbookConversationModel.findOneAndUpdate(
+      {
+        _id: input.conversationId,
+        account: input.accountId,
+        version: input.versionId,
+        turnCount: { $lt: input.maxTurns }
+      },
+      { $inc: { turnCount: 1 }, $set: { lastMessageAt: input.now } },
+      { new: true, session: this.session ?? undefined }
+    ).lean();
+    return doc ? { turnCount: doc.turnCount } : null;
+  }
+
+  // Tin user (seq lẻ n) + tin trả lời đang `streaming` (seq n+1) của một lượt hỏi.
+  async insertTurnMessages(input: {
+    conversationId: string;
+    accountId: string;
+    userSeq: number;
+    question: string;
+    clientId: string;
+    assistantMessageId: string;
+    quotaDateKey: string;
+    model: string;
+  }): Promise<void> {
+    await HandbookMessageModel.create(
+      [
+        {
+          conversation: input.conversationId,
+          account: input.accountId,
+          seq: input.userSeq,
+          role: "user",
+          content: input.question,
+          status: "done",
+          clientId: input.clientId
+        },
+        {
+          _id: input.assistantMessageId,
+          conversation: input.conversationId,
+          account: input.accountId,
+          seq: input.userSeq + 1,
+          role: "assistant",
+          content: "",
+          status: "streaming",
+          quotaDateKey: input.quotaDateKey,
+          ai: { model: input.model }
+        }
+      ],
+      { session: this.session ?? undefined, ordered: true }
+    );
+  }
+
+  async findUserMessageByClientId(
+    accountId: string,
+    clientId: string
+  ): Promise<MessageRecord | null> {
+    const doc = await HandbookMessageModel.findOne({ account: accountId, clientId, role: "user" })
+      .session(this.session)
+      .lean();
+    return doc ? toMessageRecord(doc) : null;
+  }
+
+  async findMessageBySeq(conversationId: string, seq: number): Promise<MessageRecord | null> {
+    const doc = await HandbookMessageModel.findOne({ conversation: conversationId, seq })
+      .session(this.session)
+      .lean();
+    return doc ? toMessageRecord(doc) : null;
+  }
+
+  // ĐIỂM CHỐT duy nhất của một câu trả lời: chỉ ghi được khi tin vẫn đang `streaming`. Cancel, done,
+  // watchdog, quét câu treo... đua nhau thì chỉ bên ghi thắng (trả về true) được phát sự kiện/hoàn lượt.
+  async finishAnswer(messageId: string, update: FinishUpdate): Promise<boolean> {
+    const result = await HandbookMessageModel.updateOne(
+      { _id: messageId, status: "streaming" },
+      {
+        $set: {
+          status: update.status,
+          content: update.content,
+          errorCode: update.errorCode,
+          citations: update.citations ?? [],
+          truncated: update.truncated ?? false,
+          quotaRefunded: update.quotaRefunded ?? false,
+          ...(update.ai ? { ai: update.ai } : {})
+        }
+      },
+      { session: this.session ?? undefined }
+    );
+    return result.matchedCount > 0;
+  }
+
+  async touchConversation(conversationId: string, at: Date): Promise<void> {
+    await HandbookConversationModel.updateOne(
+      { _id: conversationId },
+      { $set: { lastMessageAt: at } },
+      { session: this.session ?? undefined }
+    );
+  }
+
+  // Tin trả lời `streaming` quá lâu (tiến trình chết giữa chừng).
+  async findStaleStreamingMessages(before: Date, limit: number): Promise<MessageRecord[]> {
+    const docs = await HandbookMessageModel.find({
+      role: "assistant",
+      status: "streaming",
+      createdAt: { $lt: before }
+    })
+      .sort({ createdAt: 1 })
+      .limit(limit)
+      .session(this.session)
+      .lean();
+    return docs.map(toMessageRecord);
+  }
+
+  async findExpiredConversationIds(before: Date, limit: number): Promise<string[]> {
+    const docs = await HandbookConversationModel.find({ lastMessageAt: { $lt: before } })
+      .sort({ lastMessageAt: 1 })
+      .limit(limit)
+      .select("_id")
+      .session(this.session)
+      .lean();
+    return docs.map((doc) => String(doc._id));
   }
 }
 

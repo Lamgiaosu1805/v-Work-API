@@ -420,7 +420,7 @@ describe("DELETE /conversations/:id", () => {
     const conversation = await createConversation(alice);
     await createTurn(alice, conversation._id, 1);
     const spy = jest
-      .spyOn(HandbookConversationModel, "deleteOne")
+      .spyOn(HandbookConversationModel, "deleteMany")
       .mockRejectedValueOnce(new Error("boom"));
 
     const res = await request(app)

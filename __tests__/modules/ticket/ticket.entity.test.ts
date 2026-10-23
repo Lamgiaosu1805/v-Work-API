@@ -63,7 +63,12 @@ describe("TicketEntity.create", () => {
 
   it("giao đích danh nhiều người, chọn sẵn chủ trì → in_progress, còn lại là phối hợp", () => {
     const ticket = newTicket({
-      assignment: { mode: "members", memberIds: [IT_A, IT_B, IT_C], ownerId: IT_B, assignedBy: BOSS }
+      assignment: {
+        mode: "members",
+        memberIds: [IT_A, IT_B, IT_C],
+        ownerId: IT_B,
+        assignedBy: BOSS
+      }
     });
     const { assignment, status } = ticket.getProps();
     expect(status).toBe("in_progress");
@@ -269,7 +274,12 @@ describe("TicketEntity — tờ trình", () => {
 
   it("đóng với kết quả không giải quyết thì không cần tờ trình hợp lệ", () => {
     const ticket = withSubmittedApproval();
-    ticket.close({ code: "insufficient_basis", note: "Chưa đủ căn cứ", by: IT_A, reopenUntil: null });
+    ticket.close({
+      code: "insufficient_basis",
+      note: "Chưa đủ căn cứ",
+      by: IT_A,
+      reopenUntil: null
+    });
     expect(ticket.status).toBe("closed");
   });
 });
@@ -433,7 +443,9 @@ describe("TicketEntity.edit", () => {
   it("nhóm xử lý chỉ sửa được phân loại và mức khẩn; đổi mức khẩn bắt buộc ghi chú", () => {
     const ticket = inProgress();
     expect(() => ticket.edit({ title: "x" }, "group", IT_A)).toThrow(TicketForbiddenError);
-    expect(() => ticket.edit({ urgency: "urgent" }, "group", IT_A)).toThrow(TicketNoteRequiredError);
+    expect(() => ticket.edit({ urgency: "urgent" }, "group", IT_A)).toThrow(
+      TicketNoteRequiredError
+    );
     ticket.edit({ urgency: "urgent" }, "group", IT_A, "Khách bị khoá tài khoản");
     expect(ticket.getProps().urgency).toBe("urgent");
   });

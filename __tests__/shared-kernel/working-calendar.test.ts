@@ -33,21 +33,15 @@ describe("WorkingCalendar — khung giờ riêng theo thứ (dayWindows)", () =>
   });
 
   it("nextWorkingStart: chiều T7 → sáng T2", () => {
-    expect(calendar.nextWorkingStart(vn("2026-10-24T13:00:00"))).toEqual(
-      vn("2026-10-26T08:00:00")
-    );
+    expect(calendar.nextWorkingStart(vn("2026-10-24T13:00:00"))).toEqual(vn("2026-10-26T08:00:00"));
   });
 
   it("nextWorkingStart: chiều T6 → sáng T7", () => {
-    expect(calendar.nextWorkingStart(vn("2026-10-23T18:00:00"))).toEqual(
-      vn("2026-10-24T08:00:00")
-    );
+    expect(calendar.nextWorkingStart(vn("2026-10-23T18:00:00"))).toEqual(vn("2026-10-24T08:00:00"));
   });
 
   it("nextWorkingStart bỏ qua T7 nghỉ lễ", () => {
-    expect(calendar.nextWorkingStart(vn("2026-11-06T18:00:00"))).toEqual(
-      vn("2026-11-09T08:00:00")
-    );
+    expect(calendar.nextWorkingStart(vn("2026-11-06T18:00:00"))).toEqual(vn("2026-11-09T08:00:00"));
   });
 
   it("addWorkingMinutes: 3 ngày làm việc (3 × 540 phút — ca hành chính 08:00–17:00) từ 16:00 thứ Sáu → 12:00 thứ Tư", () => {

@@ -21,7 +21,13 @@ import { MongooseTicketDirectory } from "../infrastructure/ticket-directory";
 import { loadTicketSettings } from "../infrastructure/ticket-settings";
 import { TicketConfigReader } from "./ticket-config.types";
 import { TicketDirectory } from "./ports";
-import { buildListFilter, listSort, TICKET_TABS, TicketListQuery } from "./ticket-query-filters";
+import {
+  buildListFilter,
+  listSort,
+  TICKET_TABS,
+  TicketListQuery,
+  visibilityFilter
+} from "./ticket-query-filters";
 
 // Phía ĐỌC (CQRS-lite, theo CLAUDE.md): query thẳng Mongoose, không dựng Entity để trả về.
 
@@ -189,6 +195,22 @@ export class TicketQueryService {
     ]);
     const nameOf = (id: unknown) => (id ? (allNames.get(String(id)) ?? "") : null);
 
+    // Ticket liên quan / ticket gốc (khi đóng "Trùng"): chỉ trả những ticket người xem được phép thấy
+    const linkedIds = [...ticket.relatedTicketIds, ticket.duplicateOf].filter(Boolean);
+    const linkedDocs = linkedIds.length
+      ? ((await TicketModel.find({
+          $and: [{ _id: { $in: linkedIds }, isDeleted: false }, visibilityFilter(actor)]
+        })
+          .select("code title status")
+          .lean()) as any[])
+      : [];
+    const linkedSummary = (linked: any) => ({
+      id: String(linked._id),
+      code: linked.code,
+      title: linked.title,
+      status: linked.status
+    });
+
     const sensitiveVisible = canViewSensitiveFiles(ticket, actor);
     const department = ticket.assignment.departmentId
       ? (await this.deps.directory.getDepartments([ticket.assignment.departmentId]))[0]
@@ -207,6 +229,13 @@ export class TicketQueryService {
       },
       template: template ? { id: template.id, name: template.name, fields: template.fields } : null,
       createdBy: { id: ticket.createdBy, name: nameOf(ticket.createdBy) },
+      related: linkedDocs
+        .filter((linked) => ticket.relatedTicketIds.includes(String(linked._id)))
+        .map(linkedSummary),
+      duplicateOfTicket:
+        linkedDocs
+          .filter((linked) => String(linked._id) === ticket.duplicateOf)
+          .map(linkedSummary)[0] ?? null,
       assignment: {
         mode: ticket.assignment.mode,
         department: department ? { id: department.id, name: department.name } : null,

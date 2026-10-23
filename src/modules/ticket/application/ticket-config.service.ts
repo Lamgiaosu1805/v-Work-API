@@ -19,6 +19,8 @@ import {
   TICKET_SETTING_KEY
 } from "../infrastructure/ticket-settings";
 import { TICKET_URGENCIES } from "../domain/types";
+import { MongooseTicketDirectory } from "../infrastructure/ticket-directory";
+import { EmployeeSummary, TicketDirectory } from "./ports";
 
 // Quản trị cấu hình ticket (quyền ticket.config): sản phẩm, loại yêu cầu, mẫu yêu cầu, cài đặt chung.
 // Toàn bộ là dữ liệu — thêm sản phẩm/mẫu mới không cần sửa code.
@@ -115,11 +117,28 @@ function definitionOf(kind: string): KindDefinition {
 const isDuplicateKey = (error: unknown) => (error as { code?: number })?.code === 11000;
 
 export class TicketConfigService {
-  // eslint-disable-next-line class-methods-use-this
+  constructor(private readonly directory: TicketDirectory = new MongooseTicketDirectory()) {}
+
   async list(kind: string) {
     const { model, toDef } = definitionOf(kind);
     const docs = await model.find({ isDeleted: false }).lean();
-    return docs.map(toDef);
+    const defs = docs.map(toDef) as Array<{ handlerIds?: string[] }>;
+    return this.withHandlers(defs);
+  }
+
+  // Gắn tên người phụ trách (handlers) bên cạnh handlerIds để màn cấu hình hiển thị được ngay.
+  private async withHandlers<T extends { handlerIds?: string[] }>(defs: T[]) {
+    const ids = [...new Set(defs.flatMap((def) => def.handlerIds ?? []))];
+    if (!ids.length) return defs.map((def) => ({ ...def, handlers: [] as EmployeeSummary[] }));
+    const employees = new Map(
+      (await this.directory.getEmployees(ids)).map((employee) => [employee.id, employee])
+    );
+    return defs.map((def) => ({
+      ...def,
+      handlers: (def.handlerIds ?? [])
+        .map((id) => employees.get(id))
+        .filter((employee): employee is EmployeeSummary => Boolean(employee))
+    }));
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -176,9 +195,10 @@ export class TicketConfigService {
     if (!result.matchedCount) throw new NotFoundException(`${definition.label} không tồn tại`);
   }
 
-  // eslint-disable-next-line class-methods-use-this
   async getSettings() {
-    return loadTicketSettings();
+    const settings = await loadTicketSettings();
+    const defaultHandlers = await this.directory.getEmployees(settings.defaultHandlerIds);
+    return { ...settings, defaultHandlers };
   }
 
   // eslint-disable-next-line class-methods-use-this

@@ -8,6 +8,7 @@ const { registerChurnDetectionJob } = require("./churnDetectionJob");
 const { registerSharedFolderCleanupJob } = require("./sharedFolderCleanupJob");
 const { registerReconcileFecLeadCommissionJob } = require("./reconcileFecLeadCommission");
 const { registerCustomerCareJobs } = require("./customerCareJob");
+const { registerTicketSweepJob } = require("./ticketSweepJob");
 
 function startCronJobs() {
   registerGenWorkSheetJob();
@@ -20,6 +21,7 @@ function startCronJobs() {
   registerSharedFolderCleanupJob();
   registerReconcileFecLeadCommissionJob();
   registerCustomerCareJobs();
+  registerTicketSweepJob();
 }
 
 module.exports = { startCronJobs };

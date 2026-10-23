@@ -38,8 +38,25 @@ export function isInvolved(ticket: AccessProps, actor: TicketActor): boolean {
 }
 
 // Được thao tác như nhóm xử lý (đổi trạng thái, kết luận...): thành viên nhóm hoặc người có ticket.manage.
-export function canActAsHandler(ticket: Pick<TicketProps, "assignment">, actor: TicketActor): boolean {
+export function canActAsHandler(
+  ticket: Pick<TicketProps, "assignment">,
+  actor: TicketActor
+): boolean {
   return actor.canManage || isHandler(ticket, actor);
+}
+
+// Có được nhận ticket "open" chưa có chủ trì không: ticket không giao thì ai cũng nhận; giao đích danh thì
+// chỉ người trong danh sách; giao phòng ban thì thành viên phòng đó (kể cả người ở phòng con).
+export function isEligibleToClaim(
+  assignment: TicketProps["assignment"],
+  employeeId: string,
+  departmentIds: string[]
+): boolean {
+  if (assignment.mode === "none") return true;
+  if (assignment.mode === "members") {
+    return assignment.memberIds.some((id) => sameId(id, employeeId));
+  }
+  return departmentIds.some((id) => sameId(id, assignment.departmentId));
 }
 
 export function accessLevel(ticket: AccessProps, actor: TicketActor): TicketAccessLevel {

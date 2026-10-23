@@ -3,6 +3,8 @@
 // Mọi định danh người dùng ở đây là `user_info._id` (EmployeeId) — giống module `request` — không phải
 // `account._id`; tầng thông báo tự đổi sang account khi gửi.
 
+// [CHỜ-DUYỆT-ĐIỆN-TỬ] Khi duyệt trên vWork sẽ thêm trạng thái "pending_approval" (chờ sếp duyệt) vào đây,
+// vào TicketModel.status, máy trạng thái trong ticket.entity.ts và nhãn trạng thái ở frontend.
 export const TICKET_STATUSES = [
   "open",
   "in_progress",

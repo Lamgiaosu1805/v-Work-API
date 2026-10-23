@@ -1,4 +1,8 @@
-import { WorkingCalendar, startOfVnDay } from "../../../shared-kernel/working-calendar";
+import {
+  WorkingCalendar,
+  WorkingCalendarConfig,
+  startOfVnDay
+} from "../../../shared-kernel/working-calendar";
 import { AlertReason, TicketProps, TicketUrgency } from "./types";
 
 // Tính các mốc thời gian của ticket (thuần domain, không đọc DB). Thiết kế: docs/TICKET-MODULE-PLAN.md
@@ -35,6 +39,14 @@ export const DEFAULT_TICKET_SCHEDULE_POLICY: TicketSchedulePolicy = {
   reopenDays: 3
 };
 
+// Cấu hình ticket đã nạp từ DB (xem infrastructure/ticket-settings.ts).
+export interface TicketSettings {
+  policy: TicketSchedulePolicy;
+  calendar: Omit<WorkingCalendarConfig, "holidays">;
+  // Người nhận thông báo ticket Khẩn khi mẫu/loại yêu cầu không chỉ định ai
+  defaultHandlerIds: string[];
+}
+
 // Lịch làm việc mặc định của ticket: T2–T6 08:00–17:00, T7 chỉ buổi sáng 08:00–12:00.
 export const DEFAULT_TICKET_CALENDAR_CONFIG = {
   workStartMinute: 8 * 60,
@@ -62,7 +74,12 @@ export interface TicketSchedule {
   remindAt: Date | null;
 }
 
-const NONE: TicketSchedule = { alertAt: null, alertReason: null, autoCloseAt: null, remindAt: null };
+const NONE: TicketSchedule = {
+  alertAt: null,
+  alertReason: null,
+  autoCloseAt: null,
+  remindAt: null
+};
 
 function endOfVnDay(date: Date): Date {
   return new Date(startOfVnDay(date).getTime() + DAY_MS);

@@ -508,7 +508,16 @@ GET    /tickets/:id/activities
 
 ## 12. Điểm chờ code `[CHỜ-DUYỆT-ĐIỆN-TỬ]`
 
-Cập nhật khi code — liệt kê file + lý do từng điểm chờ. (Chưa có.)
+Tìm bằng `grep -rn "CHỜ-DUYỆT-ĐIỆN-TỬ" src`. Hiện có 6 điểm:
+
+| File | Điểm chờ |
+|---|---|
+| `src/modules/ticket/domain/types.ts` | `ApprovalMode` chỉ có `"document"`; `TICKET_STATUSES` sẽ thêm `pending_approval` |
+| `src/modules/ticket/domain/ticket.entity.ts` — `_assertApprovalPassed` | "Cổng duyệt" duy nhất: tách thành `ApprovalGate` theo `approval.mode` |
+| `src/modules/ticket/domain/ticket.entity.ts` — `verifyApproval` | Lệnh xác nhận tờ trình sẽ thay bằng duyệt/từ chối theo từng cấp |
+| `src/modules/ticket/domain/ticket-capabilities.ts` | Ai được nút "xác nhận tờ trình" sẽ theo lượt duyệt hiện tại |
+| `src/models/TicketModel.ts` — `approval` | Thêm `mode: "electronic"`, danh sách cấp duyệt |
+| `docs/TICKET-MODULE-PLAN.md` mục 5.2 | Mô tả hướng chuyển đổi |
 
 ## 13. Cần chốt khi seed dữ liệu (không chặn việc code)
 
@@ -516,3 +525,63 @@ Cập nhật khi code — liệt kê file + lý do từng điểm chờ. (Chưa 
 - Danh sách role/người thuộc **ban lãnh đạo**, **trưởng IT**, **IT** để gán quyền mục 10.3.
 - `waiting_info` tự đóng: đã hiểu là **đồng bộ 3 ngày làm việc** như `resolved` — chỉnh trong cấu hình nếu
   muốn khác.
+
+## 14. Đã triển khai (API) — 23/10/2026
+
+Nhánh `feat/ticket`. Khớp thiết kế ở trên, trừ các điều chỉnh sau khi code (cái nào khác thiết kế đều ghi
+rõ ở đây).
+
+### Code mới
+
+| Phần | File |
+|---|---|
+| Lịch làm việc dùng chung | `src/shared-kernel/working-calendar.ts` (chuyển từ customer-care, thêm `dayWindows`: T7 chỉ buổi sáng) |
+| Domain | `src/modules/ticket/domain/` — `ticket.entity.ts` (máy trạng thái), `ticket-access.ts` (quyền xem), `ticket-capabilities.ts` (nút nào hiện), `ticket-schedule.ts` (cảnh báo vàng / tự đóng / mở lại), `ticket-catalog.ts` (checklist bổ sung, nhãn kết quả) |
+| Application | `src/modules/ticket/application/` — `ticket-commands.service.ts`, `ticket-queries.service.ts`, `ticket-sweep.service.ts`, `ticket-config.service.ts`, `ticket-notification.policy.ts` (bảng ai nhận thông báo) |
+| Infrastructure | `src/modules/ticket/infrastructure/` — repository có kiểm tra `version`, mapper, directory (nhân viên/phòng ban), notifier, cấu hình |
+| HTTP | `src/modules/ticket/interface/` — route `/tickets` (đăng ký ở `src/routes/index.js`) |
+| Models | `src/models/Ticket*.ts` (9 collection: `ticket`, `ticket_message`, `ticket_attachment`, `ticket_activity`, `ticket_product`, `ticket_category`, `ticket_template`, `ticket_setting`, `ticket_counter`) |
+| Upload | `src/middlewares/uploadTicket.js` (thư mục riêng `TICKET_DIR_*`, chỉ nhận định dạng an toàn, tối đa 25MB × 10 file) |
+| Cron | `src/jobs/ticketSweepJob.js` — 5 phút/lần, khoá Redis có tiền tố môi trường |
+| Seed | `scripts/seedTicketConfig.ts`, `scripts/seedPermissionTicketRoles.ts`; thêm quyền `ticket.*` vào các seed permission có sẵn |
+
+### Khác với thiết kế ở trên
+
+- **Khách hàng:** ticket nhận snapshot khách (`customer`: SĐT, tên, app, id CRM) do **client gửi lên** — server không
+  tra lại CRM. Lý do: tra theo id sẽ lộ tên/SĐT khách ngoài phạm vi của người tạo; frontend chọn khách qua API khách
+  hàng hiện có (đã lọc theo phạm vi) rồi điền vào. Người tạo vẫn nhập tay SĐT được.
+- **"Tạo ticket mới từ ticket này"** làm ở frontend (điền sẵn form + `relatedTicketIds`), không có endpoint `/clone`.
+- **Đường dẫn cấu hình:** `/tickets/config/{products|categories|templates}` và `/tickets/config/settings` (không phải
+  `/ticket-config`).
+- **1 "ngày làm việc" = 540 phút** (ca hành chính 08:00–17:00 liên tục, lịch không trừ nghỉ trưa) — nên "3 ngày làm
+  việc" từ 16:00 thứ Sáu = 60' (T6) + 240' (sáng T7) + 540' (T2) + 540' (T3) + 240' → **12:00 thứ Tư**. Mục 8.4 ghi
+  ví dụ theo 8 giờ/ngày là chưa chính xác; con số 540 sửa được ở cài đặt chung (`workday_minutes`).
+- **Cảnh báo vàng không cần cron:** `alert_at` được tính lại sau mỗi thay đổi; lúc đọc, ticket còn xử lý dở có
+  `alert_at <= now` là vàng. Cron chỉ lo tự đóng + nhắc.
+- **Tải file** qua `GET /tickets/:id/attachments/:attachmentId/download` có kiểm tra quyền (frontend tải dạng blob),
+  không dùng URL ký; Content-Type theo đuôi file chứ không tin mimetype client khai.
+- **Thông báo thêm so với bảng 7.2:** ticket được **mở lại** → báo chủ trì; ticket **tự đóng** → báo người tạo.
+- **Người nhận ticket Khẩn:** tra theo thứ tự mẫu → loại yêu cầu → cài đặt chung (`default_handler_ids`); dùng cấp đầu
+  tiên có cấu hình.
+- **Tin nhắn:** của nhóm xử lý tính là "hoạt động" (đếm lại cảnh báo im lặng); của người tạo thì không, và không đổi
+  `version` ticket.
+
+### Triển khai (theo thứ tự)
+
+1. Thêm biến môi trường `TICKET_DIR_DEV` / `TICKET_DIR_PROD` (mặc định `uploads/ticket`) và **mount volume** cho
+   thư mục production (file CCCD/tờ trình không xoá nên cần bền vững + sao lưu), vd
+   `/var/www/vWork/live/ticket` và `/var/www/vWork/test/ticket`.
+2. Seed quyền: `npx ts-node --transpile-only scripts/seedPermissionAll.ts` (thêm permission `ticket.*`, data scope
+   `TICKET_ALL_COMPANY`, cập nhật role EMPLOYEE_BASELINE / DEPT_LEAD / COMPANY_EXECUTIVE, tạo role `TICKET_IT`,
+   `TICKET_IT_LEAD`). **Xoá cache quyền** (`scripts/invalidateAllPermissionCache.ts`) để người dùng nhận quyền mới.
+3. Seed cấu hình: `npx ts-node --transpile-only scripts/seedTicketConfig.ts` (chỉ tạo mới, không ghi đè cấu hình
+   đã chỉnh).
+4. Gán role `TICKET_IT` cho IT và `TICKET_IT_LEAD` cho trưởng IT ở màn Phân quyền; trên màn cấu hình ticket gán
+   người phụ trách (A, B cho mẫu "Reset thiết bị"; danh sách mặc định cho IT).
+
+### Chưa làm / còn mở
+
+- Giai đoạn 2/3 ở mục 11 (checklist bước thực hiện theo mẫu, báo cáo tỉ lệ xử lý kịp, duyệt tờ trình điện tử...).
+- Cài đặt `calendar` (giờ làm việc từng thứ) chỉnh được qua API nhưng chưa có màn hình riêng.
+- Test tích hợp HTTP (supertest) cho route `/tickets` — hiện test phủ domain, service (Mongo in-memory có
+  transaction) và các hàm thuần của tầng interface.

@@ -21,8 +21,10 @@ import {
   TicketInfoSubmittedDomainEvent,
   TicketStatusChangedDomainEvent
 } from "./events/ticket.domain-events";
+import { isEligibleToClaim } from "./ticket-access";
 import {
   AlertReason,
+  ApprovalStatus,
   AssignmentMode,
   InfoRequestItem,
   RESOLUTIONS_REQUIRING_NOTE,
@@ -118,6 +120,15 @@ const REQUESTER_EDITABLE: Array<keyof EditPatch> = [
 ];
 const GROUP_EDITABLE: Array<keyof EditPatch> = ["productId", "categoryId", "urgency"];
 
+function assertNote(note: string | undefined): void {
+  if (!note || !note.trim()) throw new TicketNoteRequiredError();
+}
+
+function initialApprovalStatus(required: boolean, documentProvided: boolean): ApprovalStatus {
+  if (!required) return "not_required";
+  return documentProvided ? "submitted" : "missing";
+}
+
 function uniq(values: string[]): string[] {
   return [...new Set(values.map(String))];
 }
@@ -156,7 +167,8 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
 
     const hasOwner = Boolean(assignment.ownerId);
     // Ticket thiếu tờ trình bắt buộc thì quay về cho người tạo bổ sung ngay.
-    const status: TicketStatus = needsDocument ? "waiting_info" : hasOwner ? "in_progress" : "open";
+    let status: TicketStatus = hasOwner ? "in_progress" : "open";
+    if (needsDocument) status = "waiting_info";
 
     const ticket = new TicketEntity({
       id,
@@ -195,7 +207,7 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
           required: approvalRequired,
           source: approvalRequired ? "template" : null,
           mode: "document",
-          status: approvalRequired ? (documentProvided ? "submitted" : "missing") : "not_required",
+          status: initialApprovalStatus(approvalRequired, documentProvided),
           reference: documentProvided ? (input.approvalReference ?? null) : null,
           verifiedBy: null,
           verifiedAt: null,
@@ -362,7 +374,7 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
 
   // Chủ trì trả lại ticket: người phối hợp được thêm sớm nhất lên chủ trì, không còn ai thì về "open".
   release(employeeId: string, note: string, now: Date = new Date()): void {
-    this._assertNote(note);
+    assertNote(note);
     this._assertStatus(["in_progress", "waiting_info", "on_hold"]);
     const { assignment } = this.props;
     if (!sameId(assignment.ownerId, employeeId)) {
@@ -371,7 +383,8 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
 
     const [nextOwner, ...rest] = assignment.collaboratorIds;
     const from = this.props.status;
-    const status: TicketStatus = nextOwner ? from : from === "in_progress" ? "open" : from;
+    // Còn người phối hợp thì giữ trạng thái; hết người thì ticket đang xử lý quay về "open".
+    const status: TicketStatus = !nextOwner && from === "in_progress" ? "open" : from;
 
     this._mutate(
       {
@@ -405,7 +418,9 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
     }
     const { assignment } = this.props;
     this._mutate(
-      { assignment: { ...assignment, collaboratorIds: [...assignment.collaboratorIds, employeeId] } },
+      {
+        assignment: { ...assignment, collaboratorIds: [...assignment.collaboratorIds, employeeId] }
+      },
       { action: "collaborator_added", actorId: by, note: employeeId },
       now
     );
@@ -493,7 +508,10 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
   // Người tạo bấm "Đã bổ sung". `approvalReference` có khi lần bổ sung này gồm file tờ trình.
   submitInfo(
     employeeId: string,
-    options: { approvalSubmitted?: boolean; approvalReference?: TicketApprovalReference | null } = {},
+    options: {
+      approvalSubmitted?: boolean;
+      approvalReference?: TicketApprovalReference | null;
+    } = {},
     now: Date = new Date()
   ): void {
     this._assertStatus(["waiting_info"]);
@@ -527,16 +545,15 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
       { action: "info_submitted", actorId: employeeId, from: "waiting_info", to: patch.status },
       now
     );
-    this.addEvent(new TicketInfoSubmittedDomainEvent({ aggregateId: this.id, actorId: employeeId }));
+    this.addEvent(
+      new TicketInfoSubmittedDomainEvent({ aggregateId: this.id, actorId: employeeId })
+    );
   }
 
   // Xác nhận tờ trình hợp lệ / không hợp lệ. Không cho người tạo tự xác nhận ticket của mình.
-  verifyApproval(
-    by: string,
-    valid: boolean,
-    note = "",
-    now: Date = new Date()
-  ): void {
+  // [CHỜ-DUYỆT-ĐIỆN-TỬ] Chỉ áp cho approval.mode = "document"; mode "electronic" sẽ có lệnh duyệt/từ chối
+  // theo từng cấp riêng (và trạng thái ticket "pending_approval") thay cho lệnh này.
+  verifyApproval(by: string, valid: boolean, note = "", now: Date = new Date()): void {
     const { approval } = this.props;
     if (!approval.required || approval.status !== "submitted") {
       throw new TicketInvalidTransitionError("Ticket chưa có tờ trình nào đang chờ xác nhận");
@@ -545,7 +562,7 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
     if (this.isRequester(by)) {
       throw new TicketForbiddenError("Người tạo ticket không được tự xác nhận tờ trình");
     }
-    if (!valid) this._assertNote(note);
+    if (!valid) assertNote(note);
 
     if (valid) {
       this._mutate(
@@ -588,7 +605,7 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
   // ---- trạng thái xử lý ----------------------------------------------------------------------
 
   hold(by: string, reason: string, resumeAt: Date | null = null, now: Date = new Date()): void {
-    this._assertNote(reason);
+    assertNote(reason);
     this._assertStatus(["in_progress"]);
     this._mutate(
       { status: "on_hold", hold: { reason: reason.trim(), resumeAt } },
@@ -735,7 +752,7 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
 
   // Mở lại: từ "resolved" thì không giới hạn; từ "closed" chỉ khi người tạo CHƯA xác nhận và còn hạn.
   reopen(by: string, note: string, now: Date = new Date()): void {
-    this._assertNote(note);
+    assertNote(note);
     if (this.props.status === "cancelled") {
       throw new TicketReopenNotAllowedError("Ticket đã huỷ, vui lòng tạo ticket mới");
     }
@@ -772,7 +789,7 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
 
   // Người tạo rút yêu cầu trước khi xử lý xong.
   cancel(employeeId: string, note: string, now: Date = new Date()): void {
-    this._assertNote(note);
+    assertNote(note);
     this._assertStatus(["open", "waiting_info"]);
     if (!this.isRequester(employeeId)) {
       throw new TicketForbiddenError("Chỉ người tạo ticket mới huỷ được");
@@ -828,7 +845,7 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
 
     if (!changes.length) return [];
     if (scope === "group" && changes.some((change) => change.field === "urgency")) {
-      this._assertNote(note);
+      assertNote(note);
     }
 
     this._mutate(next, { action: "edited", actorId: by, changes, note: note || undefined }, now);
@@ -843,12 +860,11 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
   setDueHint(by: string, dueHintAt: Date | null, reason = "", now: Date = new Date()): void {
     this._assertStatus(["open", "in_progress", "on_hold"]);
     const previous = this.props.dueHintAt;
-    const changed =
-      (previous?.getTime() ?? null) !== (dueHintAt?.getTime() ?? null);
+    const changed = (previous?.getTime() ?? null) !== (dueHintAt?.getTime() ?? null);
     if (!changed) return;
 
     const rescheduled = previous !== null;
-    if (rescheduled) this._assertNote(reason);
+    if (rescheduled) assertNote(reason);
     this._mutate(
       {
         dueHintAt,
@@ -968,16 +984,10 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
 
   private _assertEligibleToClaim(employeeId: string, departmentIds: string[]): void {
     const { assignment } = this.props;
-    if (assignment.mode === "none") return;
-    if (assignment.mode === "members") {
-      if (!assignment.memberIds.some((id) => sameId(id, employeeId))) {
-        throw new TicketNotEligibleError();
-      }
-      return;
-    }
-    if (!departmentIds.some((id) => sameId(id, assignment.departmentId))) {
-      throw new TicketNotEligibleError("Ticket này đã được giao cho phòng ban khác");
-    }
+    if (isEligibleToClaim(assignment, employeeId, departmentIds)) return;
+    throw assignment.mode === "department"
+      ? new TicketNotEligibleError("Ticket này đã được giao cho phòng ban khác")
+      : new TicketNotEligibleError();
   }
 
   private _assertStatus(allowed: TicketStatus[]): void {
@@ -990,15 +1000,14 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
   }
 
   // Ticket cần tờ trình thì phải được xác nhận hợp lệ mới được kết luận "Đã giải quyết".
+  // [CHỜ-DUYỆT-ĐIỆN-TỬ] Đây là "cổng duyệt" duy nhất: hiện chỉ biết mode "document" (tờ trình được xác
+  // nhận hợp lệ). Khi có duyệt điện tử, tách thành ApprovalGate theo approval.mode — mode "electronic"
+  // trả lời "đã đủ cấp duyệt chưa" (dùng lại chuỗi duyệt của module request) — và đổi các chỗ gọi hàm này.
   private _assertApprovalPassed(): void {
     const { approval } = this.props;
     if (approval.required && approval.status !== "verified") {
       throw new TicketApprovalRequiredError();
     }
-  }
-
-  private _assertNote(note: string | undefined): void {
-    if (!note || !note.trim()) throw new TicketNoteRequiredError();
   }
 
   private _statusChanged(

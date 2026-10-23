@@ -12,7 +12,10 @@ export class TicketNotFoundError extends NotFoundException {
 
   code = "TICKET.NOT_FOUND";
 
-  constructor(message: string = TicketNotFoundError.defaultMessage, options: ExceptionOptions = {}) {
+  constructor(
+    message: string = TicketNotFoundError.defaultMessage,
+    options: ExceptionOptions = {}
+  ) {
     super(message, options);
   }
 }

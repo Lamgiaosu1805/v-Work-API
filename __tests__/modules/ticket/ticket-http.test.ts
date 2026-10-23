@@ -217,6 +217,34 @@ describe("tạo và đọc ticket", () => {
     expect(attachment.stored_name).not.toContain("cccd");
   });
 
+  it("tên file tiếng Việt có dấu được lưu đúng và tải về đúng tên; tên có đường dẫn bị cắt", async () => {
+    const created = await as(requester, request(app).post("/tickets"))
+      .field(
+        "payload",
+        JSON.stringify({ title: "Tờ trình", productId, categoryId, fileKinds: ["other", "other"] })
+      )
+      .attach("files", Buffer.from("a"), "Giấy tờ CCCD – Nguyễn Văn Á.png")
+      .attach("files", Buffer.from("b"), "../../etc/passwd.png")
+      .expect(201);
+
+    const names = (
+      await TicketAttachmentModel.find({ ticket_id: created.body.data.id })
+        .sort({ createdAt: 1 })
+        .lean()
+    ).map((item: any) => item.original_name);
+    expect(names).toEqual(["Giấy tờ CCCD – Nguyễn Văn Á.png", "passwd.png"]);
+
+    const detail = await get(requester, `/tickets/${created.body.data.id}`).expect(200);
+    const file = detail.body.data.attachments[0];
+    const download = await get(
+      requester,
+      `/tickets/${created.body.data.id}/attachments/${file.id}/download`
+    ).expect(200);
+    expect(decodeURIComponent(download.headers["content-disposition"])).toContain(
+      "Giấy tờ CCCD – Nguyễn Văn Á.png"
+    );
+  });
+
   it("file không được phép (html) bị từ chối ở middleware upload", async () => {
     const res = await as(requester, request(app).post("/tickets"))
       .field("payload", JSON.stringify({ title: "x", productId, categoryId }))

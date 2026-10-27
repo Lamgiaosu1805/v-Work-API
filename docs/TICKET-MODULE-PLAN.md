@@ -283,8 +283,10 @@ gốc (tên file có thể chứa thông tin cá nhân).
 ### 6.3 Lưu trữ và kiểm soát
 
 - File CCCD/chứng từ **không xoá**, **không ghi log** mở/tải — chỉ kiểm soát bằng quyền xem (6.1).
-- File lưu thư mục riêng tư `TICKET_DIR_{DEV,PROD}` (không qua `/static`), lọc loại file, giới hạn dung
-  lượng, kiểm tra quyền rồi mới cấp URL có ký (`helpers/fileSignature.js`).
+- File lưu thư mục riêng tư — mặc định `UPLOAD_DIR_{DEV,PROD}/ticket` (dùng chung volume upload đã mount), đổi
+  được bằng `TICKET_DIR_{DEV,PROD}` (không qua `/static`), lọc loại file, giới hạn dung lượng, kiểm tra quyền rồi
+  mới cấp URL có ký (`helpers/fileSignature.js`). `GET /document/getFile` (phục vụ `UPLOAD_DIR_PROD`) chặn thư
+  mục ticket và `../`, nên file ticket chỉ tải được qua `/tickets`.
 
 ## 7. Thông báo
 
@@ -599,9 +601,9 @@ rõ ở đây).
 
 ### Triển khai (theo thứ tự)
 
-1. Thêm biến môi trường `TICKET_DIR_DEV` / `TICKET_DIR_PROD` (mặc định `uploads/ticket`) và **mount volume** cho
-   thư mục production (file CCCD/tờ trình không xoá nên cần bền vững + sao lưu), vd
-   `/var/www/vWork/live/ticket` và `/var/www/vWork/test/ticket`.
+1. Thư mục file: **không cần thêm env hay mount** — mặc định lưu ở `UPLOAD_DIR_PROD/ticket` (vd
+   `/var/www/vWork/live/private/ticket`), nằm trong volume `private` đã mount nên bền qua redeploy và đi theo sao lưu
+   của `private`. Chỉ đặt `TICKET_DIR_PROD` (+ mount riêng) nếu muốn tách ra chỗ khác.
 2. Seed quyền: `npx ts-node --transpile-only scripts/seedPermissionAll.ts` (thêm permission `ticket.*`, data scope
    `TICKET_ALL_COMPANY`, cập nhật role EMPLOYEE_BASELINE / DEPT_LEAD / COMPANY_EXECUTIVE, tạo role
    `WORKPLACE_TICKET_STAFF` "Nhân viên hỗ trợ ticket", `WORKPLACE_TICKET_MANAGER` "Quản lý ticket hỗ trợ" — ticket
@@ -656,7 +658,7 @@ người tạo xác nhận (→ màn thông tin chung), cấu hình + lưu cài 
 - Web chưa có test tự động (dự án web chưa cài framework test); đã kiểm tra tay như trên và `vite build`.
 - Cài đặt lịch làm việc theo từng thứ trên màn cấu hình mới hỗ trợ riêng **thứ 7** (khung giờ riêng); API hỗ trợ
   khung giờ riêng cho thứ bất kỳ.
-- Chưa kiểm tra trên môi trường UAT thật (cần chạy seed quyền + seed cấu hình + mount `TICKET_DIR_*` trước).
+- Chưa kiểm tra trên môi trường UAT thật (cần chạy seed quyền + seed cấu hình trước).
 
 ## 16. Thanh tab danh sách (thiết kế lại 26/10/2026)
 

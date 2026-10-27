@@ -168,7 +168,7 @@ describe("AnthropicHandbookAnswerer — tham số gửi lên API", () => {
 
     expect(capturedParams.model).toBe("claude-haiku-5-5");
     expect(capturedParams.max_tokens).toBe(8000);
-    expect(capturedParams.output_config).toEqual({ effort: "medium" });
+    expect(capturedParams.output_config).toEqual({ effort: "low" });
     expect(capturedParams.cache_control).toEqual({ type: "ephemeral" });
     expect(capturedParams.system).toBe(SYSTEM_PROMPT);
     // Haiku 5.5: thinking adaptive luôn bật, tham số sampling bị API từ chối
@@ -214,7 +214,7 @@ describe("AnthropicHandbookAnswerer — tham số gửi lên API", () => {
 
   it("đọc cấu hình mỗi lần gọi (model, effort, max_tokens, TTL cache)", async () => {
     process.env.HANDBOOK_AI_MODEL = "claude-sonnet-5-5";
-    process.env.HANDBOOK_AI_EFFORT = "low";
+    process.env.HANDBOOK_AI_EFFORT = "high";
     process.env.HANDBOOK_AI_MAX_TOKENS = "4000";
     process.env.HANDBOOK_CACHE_TTL = "5m";
     await new AnthropicHandbookAnswerer().answer(request(), callbacks());
@@ -222,7 +222,7 @@ describe("AnthropicHandbookAnswerer — tham số gửi lên API", () => {
     expect(capturedParams).toMatchObject({
       model: "claude-sonnet-5-5",
       max_tokens: 4000,
-      output_config: { effort: "low" }
+      output_config: { effort: "high" }
     });
     expect(capturedParams.messages[0].content[1].cache_control).toEqual({ type: "ephemeral" });
   });

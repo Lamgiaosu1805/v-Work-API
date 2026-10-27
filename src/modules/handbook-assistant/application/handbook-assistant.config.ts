@@ -37,7 +37,7 @@ export interface HandbookAssistantConfig {
 
 const DEFAULTS = {
   model: "claude-haiku-5-5",
-  effort: "medium" as AiEffort,
+  effort: "low" as AiEffort,
   maxTokens: 8000,
   cacheTtl: "1h" as CacheTtl,
   dailyQuota: 30,

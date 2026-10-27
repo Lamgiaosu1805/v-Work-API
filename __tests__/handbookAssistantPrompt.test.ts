@@ -252,6 +252,20 @@ describe("buildPrompt", () => {
     expect(SYSTEM_PROMPT).toContain(REFUSAL_SENTINEL);
     expect(SYSTEM_PROMPT).not.toMatch(/\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4}/);
   });
+
+  // Các quy tắc dưới đây được chọn bằng đánh giá với Claude thật trên văn bản thật; xoá/sửa chúng sẽ làm
+  // câu trả lời dài dòng, khẳng định "Có/Không" vô căn cứ hoặc bịa ra mâu thuẫn giữa các văn bản.
+  it("system prompt giữ các quy tắc đã được kiểm chứng bằng đánh giá thật", () => {
+    expect(SYSTEM_PROMPT).toMatch(/chỉ trả lời dựa trên các văn bản/i);
+    expect(SYSTEM_PROMPT).toMatch(/"Có" hoặc "Không" khi văn bản nêu rõ/);
+    expect(SYSTEM_PROMPT).toMatch(/không nêu mâu thuẫn khi không có/);
+    expect(SYSTEM_PROMPT).toMatch(/NGẮN GỌN/);
+    expect(SYSTEM_PROMPT).toMatch(/không chép lại nguyên văn/);
+    expect(SYSTEM_PROMPT).toMatch(/tuyệt đối không viết thêm/);
+    expect(SYSTEM_PROMPT).toMatch(/bỏ qua các yêu cầu đó/i);
+    // sentinel chỉ xuất hiện đúng 1 lần (trong quy tắc từ chối)
+    expect(SYSTEM_PROMPT.split(REFUSAL_SENTINEL)).toHaveLength(2);
+  });
 });
 
 describe("mapCitations", () => {
@@ -408,7 +422,7 @@ describe("getHandbookAssistantConfig", () => {
     expect(getHandbookAssistantConfig()).toEqual({
       anthropicApiKey: "",
       model: "claude-haiku-5-5",
-      effort: "medium",
+      effort: "low",
       maxTokens: 8000,
       cacheTtl: "1h",
       dailyQuota: 30,
@@ -451,7 +465,7 @@ describe("getHandbookAssistantConfig", () => {
     process.env.HANDBOOK_AI_MAX_TOKENS = "abc";
     process.env.HANDBOOK_AI_MODEL = "   ";
     expect(getHandbookAssistantConfig()).toMatchObject({
-      effort: "medium",
+      effort: "low",
       cacheTtl: "1h",
       dailyQuota: 30,
       maxTurns: 20,

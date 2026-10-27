@@ -47,6 +47,7 @@ src/
     timesheet/                  # Engine đối soát ngày công — sở hữu WorkSheetModel + WorkDayStatusModel
     attendance/                 # Wifi/geofence check-in/out (thuần), CRUD wifi/shift, Excel parser
     customer-care/              # Quy định 183A: kho khách chung, phân tự động, SLA liên hệ, thu hồi (route /customer-care)
+    handbook-assistant/         # Trợ lý Nội quy (AI hỏi đáp nội quy, Claude + citations + stream socket; route /handbook-assistant) — xem docs/HANDBOOK-ASSISTANT.md
   workflows/                    # Tầng orchestration xuyên module — xem mục "workflows/" trong "DDD + Hexagonal"
     request-side-effects/       # Side-effect theo request_type (leave/late_early/forgot_checkin/away-day)
   controllers/                  # Pattern CŨ — xử lý logic request/response trực tiếp (chưa migrate)
@@ -143,7 +144,7 @@ BÊN TRONG `src/modules/`.
 
 ### Trạng thái
 
-Đã hoàn thành theo pattern DDD/Hexagonal: `request`, `leave`, `timesheet`, `attendance` (module) +
+Đã hoàn thành theo pattern DDD/Hexagonal: `request`, `leave`, `timesheet`, `attendance`, `handbook-assistant` (module) +
 `workflows/` (tầng orchestration cho check-in/out, import Excel, tạo/duyệt/huỷ đơn). Các phần còn lại
 (`user`, `department`, `weekly-report`, `chat`, `post`, `labor-contract`) vẫn dùng `controllers/` +
 `routes/` cũ cho tới khi tới lượt migrate (xem thứ tự ở migration plan, mục 10 và mục 12 "Tiến độ").
@@ -163,6 +164,7 @@ BÊN TRONG `src/modules/`.
 | `INTERNAL_DIR_DEV` / `INTERNAL_DIR_PROD` | Thư mục ổ file nội bộ theo phòng ban |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Redis config |
 | `TIKLUY_API_KEY`, `TIKLUY_ALLOWED_IPS` | Xác thực app nội bộ Tikluy |
+| `HANDBOOK_ANTHROPIC_API_KEY` | Key Claude cho Trợ lý Nội quy (rơi về `ANTHROPIC_API_KEY`). Còn `HANDBOOK_AI_MODEL`, `HANDBOOK_AI_EFFORT` (mặc định `low`), `HANDBOOK_DAILY_QUOTA` (30), `HANDBOOK_MAX_TURNS` (20), `HANDBOOK_RETENTION_DAYS` (180)… — bảng đầy đủ ở `docs/HANDBOOK-ASSISTANT.md` |
 
 Mọi path resolve dùng `path.resolve(dir)` — tương thích cả relative (dev) và absolute (prod).
 
@@ -338,6 +340,7 @@ const memberships = await UserDepartmentPositionModel.find({ user: userInfo._id 
 | `cleanupDeviceTokens.js` | — | Dọn FCM token cũ/inactive |
 | `ensureDeptFolders.js` | Startup (1 lần) | Tạo folder disk cho dept chưa có |
 | `weeklyReportJob.js` | Thứ 6 8:00 + 17:00 | Nhắc nộp + đánh dấu missing báo cáo tuần |
+| `handbookAssistantJob.js` | Mỗi phút + 02:00 | Trợ lý Nội quy: chốt câu trả lời treo + hoàn lượt (mỗi phút); xoá hẳn hội thoại quá `HANDBOOK_RETENTION_DAYS` (02:00) |
 | `customerCareJob.js` | Mỗi phút + 00:05 | Quy định 183A: quét SLA chăm sóc khách (cảnh báo/thu hồi) + phân khách từ kho chung; 00:05 thu hồi khách của Sale nghỉ việc/bị khoá. Xem `docs/CRM-CUSTOMER-CARE-SLA-PLAN.md` |
 
 Tất cả cron dùng `node-cron`. Múi giờ server: `Asia/Ho_Chi_Minh` (set ở đầu `index.js`).
@@ -421,6 +424,7 @@ Các trường hợp **bắt buộc** dùng transaction:
 | `/notification` | notification.js | `authenticate` | FCM device token |
 | `/internal-files` | internalFile.js | `authenticate` | Ổ file nội bộ theo phòng ban |
 | `/weekly-reports` | weeklyReport.js | `authenticate` | Báo cáo tuần |
+| `/handbook-assistant` | modules/handbook-assistant | `authenticate` + `handbook_assistant.use` | Trợ lý Nội quy (lịch sử, trích dẫn, hạn mức; hỏi AI qua socket `handbook:*`) |
 
 ---
 

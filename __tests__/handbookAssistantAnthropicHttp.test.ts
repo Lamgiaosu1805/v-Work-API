@@ -268,7 +268,7 @@ describe("AnthropicHandbookAnswerer ↔ API qua HTTP thật", () => {
       model: "claude-haiku-5-5",
       max_tokens: 8000,
       stream: true,
-      output_config: { effort: "medium" },
+      output_config: { effort: "low" },
       cache_control: { type: "ephemeral" }
     });
     for (const forbidden of ["thinking", "temperature", "top_p", "top_k", "fallbacks"]) {

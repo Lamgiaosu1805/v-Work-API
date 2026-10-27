@@ -55,6 +55,12 @@ const DEPT_MANAGER_GRANTS: PermissionGrantDoc[] = [
     permissionCode: "kpi_metric.view",
     dataScopePolicyCode: "KPI_METRIC_ALL_COMPANY",
     fieldScopePolicyCode: null
+  },
+  // Trưởng bộ phận giao ticket cho người cụ thể trong phòng mình (không giao chéo phòng)
+  {
+    permissionCode: "ticket.assign_member",
+    dataScopePolicyCode: "TICKET_ALL_COMPANY",
+    fieldScopePolicyCode: null
   }
 ];
 

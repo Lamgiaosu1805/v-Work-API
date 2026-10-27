@@ -1,4 +1,4 @@
-import { WorkingCalendar, toVnDateKey } from "../src/modules/customer-care/domain/working-calendar";
+import { WorkingCalendar, toVnDateKey } from "../src/shared-kernel/working-calendar";
 import {
   buildCarePolicy,
   classifyCustomer,

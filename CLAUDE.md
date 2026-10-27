@@ -164,7 +164,7 @@ BÊN TRONG `src/modules/`.
 | `INTERNAL_DIR_DEV` / `INTERNAL_DIR_PROD` | Thư mục ổ file nội bộ theo phòng ban |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Redis config |
 | `TIKLUY_API_KEY`, `TIKLUY_ALLOWED_IPS` | Xác thực app nội bộ Tikluy |
-| `TICKET_DIR_DEV` / `TICKET_DIR_PROD` | Thư mục RIÊNG lưu file đính kèm ticket (CCCD, tờ trình...; mặc định `uploads/ticket`). Prod cần mount volume + sao lưu, file không tự xoá |
+| `TICKET_DIR_DEV` / `TICKET_DIR_PROD` | Tuỳ chọn. Thư mục file đính kèm ticket (CCCD, tờ trình...); bỏ trống = `UPLOAD_DIR_*/ticket` (dùng chung volume upload). `/document/getFile` chặn thư mục này — file ticket chỉ tải qua `/tickets` |
 
 Mọi path resolve dùng `path.resolve(dir)` — tương thích cả relative (dev) và absolute (prod).
 

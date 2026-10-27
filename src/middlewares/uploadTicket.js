@@ -27,12 +27,21 @@ const ALLOWED_EXTENSIONS = new Set([
   ".mov"
 ]);
 
+// Mặc định là thư mục con "ticket" trong thư mục upload riêng tư (UPLOAD_DIR_*) — dùng chung volume đã mount
+// sẵn, không cần thêm env/mount. GET /document/getFile phục vụ thư mục upload đó nên phải chặn thư mục này
+// (xem isInsideTicketDir). TICKET_DIR_* chỉ cần khi muốn tách ra chỗ khác.
 function getTicketDir() {
-  const dir =
-    process.env.NODE_ENV === "production"
-      ? process.env.TICKET_DIR_PROD
-      : process.env.TICKET_DIR_DEV;
-  return path.resolve(dir || path.join("uploads", "ticket"));
+  const isProd = process.env.NODE_ENV === "production";
+  const dir = isProd ? process.env.TICKET_DIR_PROD : process.env.TICKET_DIR_DEV;
+  if (dir) return path.resolve(dir);
+  const uploadDir = isProd ? process.env.UPLOAD_DIR_PROD : process.env.UPLOAD_DIR_DEV;
+  return path.resolve(uploadDir || "uploads", "ticket");
+}
+
+function isInsideTicketDir(filePath) {
+  const ticketDir = getTicketDir();
+  const resolved = path.resolve(filePath);
+  return resolved === ticketDir || resolved.startsWith(ticketDir + path.sep);
 }
 
 const storage = multer.diskStorage({
@@ -75,4 +84,4 @@ function uploadTicketFiles(req, res, next) {
   });
 }
 
-module.exports = { uploadTicketFiles, getTicketDir, ALLOWED_EXTENSIONS };
+module.exports = { uploadTicketFiles, getTicketDir, isInsideTicketDir, ALLOWED_EXTENSIONS };

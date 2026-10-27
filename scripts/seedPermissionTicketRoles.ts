@@ -3,10 +3,11 @@ import mongoose from "mongoose";
 import isEqual from "lodash/isEqual";
 import PermissionRoleModel, { PermissionGrantDoc } from "../src/models/PermissionRoleModel";
 
-// Role cho nhóm IT xử lý ticket hỗ trợ (docs/TICKET-MODULE-PLAN.md mục 6 & 10.3). Quyền tạo/xem/nhận ticket
-// thường đã có ở role EMPLOYEE_BASELINE; 2 role này chỉ cấp thêm quyền xem ticket hạn chế / file nhạy cảm
-// (CCCD, tờ trình) cho IT, và quyền quản lý + cấu hình cho trưởng IT. CHỈ tạo định nghĩa role — gán cho
-// từng người ở màn Phân quyền.
+// Role cho người xử lý ticket hỗ trợ (docs/TICKET-MODULE-PLAN.md mục 6 & 10.3). Ticket thuộc phân hệ
+// Workplace nên mã role theo quy ước WORKPLACE_*. Quyền tạo/xem/nhận ticket thường đã có ở role
+// EMPLOYEE_BASELINE; 2 role này chỉ cấp thêm quyền xem ticket hạn chế / file nhạy cảm (CCCD, tờ trình),
+// và quyền quản lý + cấu hình cho người quản lý ticket. CHỈ tạo định nghĩa role — gán cho từng người ở
+// màn Phân quyền.
 
 const grant = (permissionCode: string): PermissionGrantDoc => ({
   permissionCode,
@@ -14,23 +15,23 @@ const grant = (permissionCode: string): PermissionGrantDoc => ({
   fieldScopePolicyCode: null
 });
 
-const IT_GRANTS = [grant("ticket.view_restricted"), grant("ticket.view_sensitive")];
+const STAFF_GRANTS = [grant("ticket.view_restricted"), grant("ticket.view_sensitive")];
 
 const ROLES = [
   {
-    code: "TICKET_IT",
-    name: "IT xử lý ticket",
+    code: "WORKPLACE_TICKET_STAFF",
+    name: "Nhân viên hỗ trợ ticket",
     description:
-      "Xem ticket hạn chế (cần tờ trình) và file nhạy cảm (CCCD, chứng từ) của ticket hỗ trợ.",
-    grants: IT_GRANTS
+      "Cộng thêm trên role Nhân viên: xem ticket hạn chế (cần tờ trình) và file nhạy cảm (CCCD, chứng từ, tờ trình).",
+    grants: STAFF_GRANTS
   },
   {
-    code: "TICKET_IT_LEAD",
-    name: "Trưởng IT (ticket)",
+    code: "WORKPLACE_TICKET_MANAGER",
+    name: "Quản lý ticket hỗ trợ",
     description:
-      "Như IT xử lý ticket, thêm: đổi chủ trì / đóng hộ ticket, giao ticket cho người trong phòng, cấu hình ticket.",
+      "Gồm quyền Nhân viên hỗ trợ ticket, thêm: đổi chủ trì / đóng hộ / sửa phân loại mọi ticket, giao ticket trong phòng, cấu hình ticket.",
     grants: [
-      ...IT_GRANTS,
+      ...STAFF_GRANTS,
       grant("ticket.manage"),
       grant("ticket.assign_member"),
       grant("ticket.config")

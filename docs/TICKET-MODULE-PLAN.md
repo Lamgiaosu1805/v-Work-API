@@ -603,11 +603,13 @@ rõ ở đây).
    thư mục production (file CCCD/tờ trình không xoá nên cần bền vững + sao lưu), vd
    `/var/www/vWork/live/ticket` và `/var/www/vWork/test/ticket`.
 2. Seed quyền: `npx ts-node --transpile-only scripts/seedPermissionAll.ts` (thêm permission `ticket.*`, data scope
-   `TICKET_ALL_COMPANY`, cập nhật role EMPLOYEE_BASELINE / DEPT_LEAD / COMPANY_EXECUTIVE, tạo role `TICKET_IT`,
-   `TICKET_IT_LEAD`). **Xoá cache quyền** (`scripts/invalidateAllPermissionCache.ts`) để người dùng nhận quyền mới.
+   `TICKET_ALL_COMPANY`, cập nhật role EMPLOYEE_BASELINE / DEPT_LEAD / COMPANY_EXECUTIVE, tạo role
+   `WORKPLACE_TICKET_STAFF` "Nhân viên hỗ trợ ticket", `WORKPLACE_TICKET_MANAGER` "Quản lý ticket hỗ trợ" — ticket
+   thuộc phân hệ Workplace nên role theo quy ước `WORKPLACE_*`). **Xoá cache quyền**
+   (`scripts/invalidateAllPermissionCache.ts`) để người dùng nhận quyền mới.
 3. Seed cấu hình: `npx ts-node --transpile-only scripts/seedTicketConfig.ts` (chỉ tạo mới, không ghi đè cấu hình
    đã chỉnh).
-4. Gán role `TICKET_IT` cho IT và `TICKET_IT_LEAD` cho trưởng IT ở màn Phân quyền; trên màn cấu hình ticket gán
+4. Gán role `WORKPLACE_TICKET_STAFF` cho IT và `WORKPLACE_TICKET_MANAGER` cho trưởng IT ở màn Phân quyền; trên màn cấu hình ticket gán
    người phụ trách (A, B cho mẫu "Reset thiết bị"; danh sách mặc định cho IT).
 
 ### Kiểm thử

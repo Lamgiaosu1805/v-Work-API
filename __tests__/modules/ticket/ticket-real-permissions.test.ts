@@ -137,8 +137,8 @@ beforeAll(async () => {
   const BASE = "EMPLOYEE_BASELINE";
   await makePerson("sale", [BASE], deptSale, position);
   await makePerson("nobody", []);
-  await makePerson("it", [BASE, "TICKET_IT"], deptIt, position);
-  await makePerson("itLead", [BASE, "DEPT_LEAD", "TICKET_IT_LEAD"], deptIt, position);
+  await makePerson("it", [BASE, "WORKPLACE_TICKET_STAFF"], deptIt, position);
+  await makePerson("itLead", [BASE, "DEPT_LEAD", "WORKPLACE_TICKET_MANAGER"], deptIt, position);
   await makePerson("itMember", [BASE], deptIt, position);
   await makePerson("exec", [BASE, "COMPANY_EXECUTIVE"], dept, position);
   await makePerson("admin", ["PERMISSION_ADMIN"], dept, position);
@@ -303,7 +303,7 @@ describe("quyền thật từ các role đã seed", () => {
     await post("itMember", `/tickets/${ticket.id}/claim`).expect(200);
   });
 
-  it("cấu hình: TICKET_IT_LEAD và PERMISSION_ADMIN vào được; IT thường và nhân viên thì không", async () => {
+  it("cấu hình: WORKPLACE_TICKET_MANAGER và PERMISSION_ADMIN vào được; nhân viên hỗ trợ và nhân viên thường thì không", async () => {
     await get("itLead", "/tickets/config/products").expect(200);
     await get("admin", "/tickets/config/products").expect(200);
     await get("it", "/tickets/config/products").expect(403);

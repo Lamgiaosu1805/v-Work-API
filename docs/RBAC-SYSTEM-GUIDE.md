@@ -179,5 +179,6 @@ Idempotent — chạy lại bao nhiêu lần cũng an toàn. Thứ tự phụ th
 | 9 | `seedPermissionDeptLeadRole.ts` | `DEPT_LEAD` |
 | 10 | `seedPermissionWorkplaceManagerRole.ts` | Role quản lý Workplace |
 | 11 | `seedPermissionCompanyExecutiveRole.ts` | `COMPANY_EXECUTIVE` |
+| 12 | `seedPermissionTicketRoles.ts` | `WORKPLACE_TICKET_STAFF`, `WORKPLACE_TICKET_MANAGER` |
 
 Chỉ sửa 1 role → chạy riêng script đó là đủ, nhưng **nhớ xoá cache Redis thủ công** sau đó (mục 5).

@@ -158,7 +158,7 @@ function actor(employeeId: string, overrides: Partial<TicketActor> = {}): Ticket
 }
 
 const requester = () => actor(REQUESTER);
-// IT có role "TICKET_IT": xem được ticket hạn chế và file nhạy cảm (xem scripts/seedPermissionTicketRoles.ts)
+// IT có role "WORKPLACE_TICKET_STAFF": xem được ticket hạn chế và file nhạy cảm (xem scripts/seedPermissionTicketRoles.ts)
 const itRole = { canViewRestricted: true, canViewSensitive: true };
 const itA = () => actor(IT_A, { departmentIds: [DEPT_IT, DEPT_KHOI], ...itRole });
 const itB = () => actor(IT_B, { departmentIds: [DEPT_IT, DEPT_KHOI], ...itRole });

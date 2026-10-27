@@ -583,6 +583,11 @@ rõ ở đây).
 - **Khách hàng:** ticket nhận snapshot khách (`customer`: SĐT, tên, app, id CRM) do **client gửi lên** — server không
   tra lại CRM. Lý do: tra theo id sẽ lộ tên/SĐT khách ngoài phạm vi của người tạo; frontend chọn khách qua API khách
   hàng hiện có (đã lọc theo phạm vi) rồi điền vào. Người tạo vẫn nhập tay SĐT được.
+- **Nhân sự liên quan (27/10/2026):** sản phẩm nội bộ (không có `app_code`: CRM/HRM/Workplace) thì bước 2 của form là
+  "Nhân sự liên quan" — chọn nhân viên qua `GET /tickets/directory/employees` (tìm theo tên, mã NV, **SĐT**; SĐT bỏ
+  số 0 / +84 đầu khi so) — thay cho ô khách. Ticket lưu `related_employee_id` (server kiểm tra nhân viên tồn tại),
+  chi tiết/danh sách trả `relatedEmployee` (tên lấy lúc đọc). Sản phẩm app (VNFITE/TIKLUY) giữ ô khách như cũ. Chưa
+  cho sửa sau khi tạo, và nhân sự được gắn chưa tự được xem / nhận thông báo ticket.
 - **"Tạo ticket mới từ ticket này"** làm ở frontend (điền sẵn form + `relatedTicketIds`), không có endpoint `/clone`.
 - **Đường dẫn cấu hình:** `/tickets/config/{products|categories|templates}` và `/tickets/config/settings` (không phải
   `/ticket-config`).

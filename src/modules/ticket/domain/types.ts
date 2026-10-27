@@ -148,6 +148,8 @@ export interface TicketProps {
   customFields: Record<string, unknown>;
   urgency: TicketUrgency;
   customer: TicketCustomerSnapshot | null;
+  // Nhân sự nội bộ được hỗ trợ (sản phẩm nội bộ) — sản phẩm app thì dùng `customer`.
+  relatedEmployeeId: string | null;
   createdBy: string;
   assignment: TicketAssignment;
   status: TicketStatus;

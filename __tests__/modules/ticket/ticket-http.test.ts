@@ -172,6 +172,60 @@ describe("xác thực và phân quyền ở route", () => {
   });
 });
 
+describe("nhân sự liên quan", () => {
+  it("tìm nhân sự theo SĐT (có/không số 0, +84), tên, mã NV; bỏ qua người đã nghỉ", async () => {
+    await UserInfoModel.updateOne(
+      { _id: stranger.employeeId },
+      { phone_number: "+84343316951", ma_nv: "NV9001" }
+    );
+    const resigned = await makePerson("đã nghỉ", EVERYONE);
+    await UserInfoModel.updateOne(
+      { _id: resigned.employeeId },
+      { phone_number: "0343316951", resignation_date: new Date() }
+    );
+
+    const search = async (q: string) =>
+      (
+        await get(requester, `/tickets/directory/employees?q=${encodeURIComponent(q)}`).expect(200)
+      ).body.data.map((employee: any) => employee.id);
+
+    for (const q of ["0343316951", "343316951", "+84 343 316 951", "0343-316"]) {
+      expect(await search(q)).toEqual([stranger.employeeId]);
+    }
+    expect(await search("stranger")).toEqual([stranger.employeeId]);
+    expect(await search("NV9001")).toEqual([stranger.employeeId]);
+    // Còn dưới 3 chữ số sau khi bỏ đầu số thì không tra SĐT (tránh khớp gần như mọi người)
+    expect(await search("+84")).toEqual([]);
+  });
+
+  it("tạo ticket gắn nhân sự; chi tiết và danh sách trả tên; nhân sự không tồn tại → 400", async () => {
+    const created = await createTicket({ customer: null, relatedEmployeeId: stranger.employeeId });
+
+    const detail = await get(requester, `/tickets/${created.id}`).expect(200);
+    expect(detail.body.data.relatedEmployee).toMatchObject({
+      id: stranger.employeeId,
+      name: "stranger"
+    });
+    const list = await get(requester, "/tickets?tab=created").expect(200);
+    expect(list.body.data[0].relatedEmployee).toEqual({
+      id: stranger.employeeId,
+      name: "stranger"
+    });
+
+    await as(requester, request(app).post("/tickets"))
+      .field(
+        "payload",
+        JSON.stringify({
+          title: "Sai nhân sự",
+          productId,
+          categoryId,
+          relatedEmployeeId: new mongoose.Types.ObjectId().toString()
+        })
+      )
+      .expect(400);
+  });
+});
+
 describe("tạo và đọc ticket", () => {
   it("tạo ticket multipart kèm file; danh sách / chi tiết trả đúng dữ liệu", async () => {
     const created = await createTicket();

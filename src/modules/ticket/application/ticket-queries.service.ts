@@ -81,7 +81,11 @@ export class TicketQueryService {
 
     const [names, products, categories] = await Promise.all([
       this.employeeNames(
-        tickets.flatMap((ticket) => [ticket.createdBy, ticket.assignment.ownerId])
+        tickets.flatMap((ticket) => [
+          ticket.createdBy,
+          ticket.assignment.ownerId,
+          ticket.relatedEmployeeId
+        ])
       ),
       this.deps.config.listProducts(false),
       this.deps.config.listCategories(false)
@@ -100,6 +104,9 @@ export class TicketQueryService {
         category: { id: ticket.categoryId, name: categoryName.get(ticket.categoryId) ?? "" },
         // Danh sách không cần mã khách (userId) nên không trả cho ai
         customer: ticket.customer ? { ...ticket.customer, externalId: null } : null,
+        relatedEmployee: ticket.relatedEmployeeId
+          ? { id: ticket.relatedEmployeeId, name: names.get(ticket.relatedEmployeeId) ?? "" }
+          : null,
         createdBy: { id: ticket.createdBy, name: names.get(ticket.createdBy) ?? "" },
         owner: ticket.assignment.ownerId
           ? { id: ticket.assignment.ownerId, name: names.get(ticket.assignment.ownerId) ?? "" }
@@ -240,6 +247,9 @@ export class TicketQueryService {
     const department = ticket.assignment.departmentId
       ? (await this.deps.directory.getDepartments([ticket.assignment.departmentId]))[0]
       : null;
+    const relatedEmployee = ticket.relatedEmployeeId
+      ? (await this.deps.directory.getEmployees([ticket.relatedEmployeeId]))[0]
+      : null;
 
     return {
       accessLevel: "full" as const,
@@ -260,6 +270,14 @@ export class TicketQueryService {
           Boolean(ticket.customer?.externalId) &&
           Boolean(actor.canViewCustomer)
       },
+      // Nhân sự đã nghỉ / bị xoá vẫn hiện id để biết ticket từng gắn người (tên rỗng)
+      relatedEmployee: ticket.relatedEmployeeId
+        ? {
+            id: ticket.relatedEmployeeId,
+            name: relatedEmployee?.fullName ?? "",
+            departmentNames: relatedEmployee?.departmentNames ?? []
+          }
+        : null,
       product: {
         id: ticket.productId,
         name: products.find((item) => item.id === ticket.productId)?.name ?? ""

@@ -30,6 +30,7 @@ export const ticketMapper: Mapper<TicketEntity, any> = {
             externalId: doc.customer.external_id ?? null
           }
         : null,
+      relatedEmployeeId: str(doc.related_employee_id),
       createdBy: String(doc.created_by),
       assignment: {
         mode: doc.assignment?.mode ?? "none",
@@ -137,6 +138,7 @@ export const ticketMapper: Mapper<TicketEntity, any> = {
             external_id: p.customer.externalId
           }
         : null,
+      related_employee_id: p.relatedEmployeeId,
       created_by: p.createdBy,
       assignment: {
         mode: p.assignment.mode,

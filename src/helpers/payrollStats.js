@@ -176,13 +176,15 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
     for (const [dateKey, statusesOfDate] of dsByDate) {
       const corrected = correctDayStatuses(statusesOfDate, wsByDate.get(dateKey));
       correctedByDate.set(dateKey, corrected);
+      const isSaturday = moment.tz(dateKey, TZ).day() === 6;
       for (const s of corrected) {
         const w = s.period === "full" ? 1 : 0.5;
         if (s.status === "present") present_days += w;
         // "Quên chấm" đếm theo SỐ LẦN (nguyên), không theo trọng số buổi — mỗi buổi/ngày quên = 1.
         else if (s.status === "missed_clock") missed_clock_days += 1;
         else if (s.status === "absent") absent_days += w;
-        else if (s.status === "leave_paid") leave_paid_days += w;
+        // Thứ 7 chỉ làm buổi sáng: đơn nghỉ lưu period "full" nhưng chỉ trừ 0,5 phép — đếm khớp quỹ phép
+        else if (s.status === "leave_paid") leave_paid_days += isSaturday ? 0.5 : w;
         else if (s.status === "leave_unpaid") leave_unpaid_days += w;
         else if (s.status === "remote") remote_days += w;
         else if (s.status === "business_trip") business_trip_days += w;

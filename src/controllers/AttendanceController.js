@@ -589,12 +589,14 @@ const AttendanceController = {
           if (isProbation) work_unit_probation += holidayDefaultWorkUnit;
           else work_unit_official += holidayDefaultWorkUnit;
         }
+        const isSaturday = moment.tz(dateStr, TZ).day() === 6;
         for (const s of statuses) {
           const w = s.period === "full" ? 1 : 0.5;
           if (s.status === "present") present_days += w;
           else if (s.status === "missed_clock") missed_clock_days += 1;
           else if (s.status === "absent") absent_days += w;
-          else if (s.status === "leave_paid") leave_paid_days += w;
+          // Thứ 7 chỉ làm buổi sáng: đơn nghỉ lưu period "full" nhưng chỉ trừ 0,5 phép — đếm khớp quỹ phép
+          else if (s.status === "leave_paid") leave_paid_days += isSaturday ? 0.5 : w;
           else if (s.status === "leave_unpaid") leave_unpaid_days += w;
           else if (s.status === "remote") remote_days += w;
           else if (s.status === "business_trip") business_trip_days += w;

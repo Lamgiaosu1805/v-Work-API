@@ -11,25 +11,25 @@ import TicketTemplateModel from "../src/models/TicketTemplateModel";
 // (vd người A, B phụ trách "Reset thiết bị").
 
 const PRODUCTS = [
-  { code: "vnfite_app", name: "VNFITE APP", group: "VNFITE", app_code: "vnfite", sort_order: 10 },
-  { code: "vnfite_cms", name: "VNFITE CMS", group: "VNFITE", app_code: "vnfite", sort_order: 20 },
-  { code: "tikluy_app", name: "TIKLUY APP", group: "TIKLUY", app_code: "tikluy", sort_order: 30 },
-  { code: "tikluy_cms", name: "TIKLUY CMS", group: "TIKLUY", app_code: "tikluy", sort_order: 40 },
-  { code: "vwork_crm", name: "CRM", group: "vWork", app_code: null, sort_order: 50 },
-  { code: "vwork_hrm", name: "HRM", group: "vWork", app_code: null, sort_order: 60 },
-  { code: "vwork_workplace", name: "Workplace", group: "vWork", app_code: null, sort_order: 70 }
+  { code: "vnfite_app", name: "VNFITE APP", group: "VNFITE", app_code: "vnfite" },
+  { code: "vnfite_cms", name: "VNFITE CMS", group: "VNFITE", app_code: "vnfite" },
+  { code: "tikluy_app", name: "TIKLUY APP", group: "TIKLUY", app_code: "tikluy" },
+  { code: "tikluy_cms", name: "TIKLUY CMS", group: "TIKLUY", app_code: "tikluy" },
+  { code: "vwork_crm", name: "CRM", group: "vWork", app_code: null },
+  { code: "vwork_hrm", name: "HRM", group: "vWork", app_code: null },
+  { code: "vwork_workplace", name: "Workplace", group: "vWork", app_code: null }
 ];
 
 const CATEGORIES = [
-  { code: "incident", name: "Lỗi / sự cố", sort_order: 10 },
-  { code: "customer_account", name: "Hỗ trợ tài khoản khách", sort_order: 20 },
-  { code: "transaction_interest", name: "Giao dịch & lãi", sort_order: 30 },
-  { code: "customer_data_change", name: "Thay đổi thông tin khách", sort_order: 40 },
-  { code: "internal_access", name: "Quyền & tài khoản nội bộ", sort_order: 50 },
-  { code: "device_network", name: "Thiết bị & mạng", sort_order: 60 },
-  { code: "feature_request", name: "Đề xuất tính năng", sort_order: 70 },
-  { code: "question", name: "Hỏi đáp", sort_order: 80 },
-  { code: "other", name: "Khác", sort_order: 90 }
+  { code: "incident", name: "Lỗi / sự cố" },
+  { code: "customer_account", name: "Hỗ trợ tài khoản khách" },
+  { code: "transaction_interest", name: "Giao dịch & lãi" },
+  { code: "customer_data_change", name: "Thay đổi thông tin khách" },
+  { code: "internal_access", name: "Quyền & tài khoản nội bộ" },
+  { code: "device_network", name: "Thiết bị & mạng" },
+  { code: "feature_request", name: "Đề xuất tính năng" },
+  { code: "question", name: "Hỏi đáp" },
+  { code: "other", name: "Khác" }
 ];
 
 type FieldType = "text" | "textarea" | "phone" | "number" | "money" | "date" | "select";
@@ -59,7 +59,7 @@ const TEMPLATES = [
     fields: [field("reason", "Lý do khách không tự đặt lại được", "textarea", true)],
     required_documents: [],
     requires_approval: false,
-    default_urgency: "urgent",
+    default_urgency: "high",
     guidance:
       "Khách có thể tự đặt lại mật khẩu trên app: Quên mật khẩu → nhập SĐT + số CCCD → nhập OTP. Chỉ tạo ticket khi khách làm không được."
   },
@@ -71,7 +71,7 @@ const TEMPLATES = [
     fields: [],
     required_documents: [doc("cccd_images", "CCCD 2 mặt", true, true)],
     requires_approval: false,
-    default_urgency: "urgent",
+    default_urgency: "high",
     guidance:
       "VNFITE: khách tự reset trên app (SĐT + CCCD + ngày cấp + OTP). TIKLUY: chưa có tự reset, cần ticket kèm ảnh CCCD 2 mặt."
   },
@@ -110,7 +110,7 @@ const TEMPLATES = [
     ],
     required_documents: [doc("transaction_proof", "Ảnh chuyển khoản / sao kê", false, true)],
     requires_approval: false,
-    default_urgency: "urgent",
+    default_urgency: "high",
     guidance: ""
   },
   {
@@ -218,7 +218,7 @@ async function seedCategories(): Promise<Map<string, unknown>> {
 }
 
 async function seedTemplates(categoryIds: Map<string, unknown>): Promise<void> {
-  for (const [index, template] of TEMPLATES.entries()) {
+  for (const template of TEMPLATES) {
     const { category, ...rest } = template;
     const result = await TicketTemplateModel.updateOne(
       { code: template.code, isDeleted: false },
@@ -226,8 +226,7 @@ async function seedTemplates(categoryIds: Map<string, unknown>): Promise<void> {
         $setOnInsert: {
           ...rest,
           category_id: categoryIds.get(category),
-          is_active: true,
-          sort_order: (index + 1) * 10
+          is_active: true
         }
       },
       { upsert: true }

@@ -115,6 +115,24 @@ export class MongooseTicketDirectory implements TicketDirectory {
   }
 
   // eslint-disable-next-line class-methods-use-this
+  async getDepartmentMemberIds(departmentId: string): Promise<string[]> {
+    const departments = await loadDepartments();
+    const tree = collectTree([departmentId], departments);
+    const members = await UserDepartmentPositionModel.find({
+      department: { $in: [...tree] },
+      isDeleted: false
+    }).distinct("user");
+    const active = await UserInfoModel.find({
+      _id: { $in: members },
+      isDeleted: false,
+      resignation_date: null
+    })
+      .select("_id")
+      .lean();
+    return active.map((user: any) => String(user._id));
+  }
+
+  // eslint-disable-next-line class-methods-use-this
   async getEmployees(ids: string[]): Promise<EmployeeSummary[]> {
     if (!ids.length) return [];
     const userInfos = await UserInfoModel.find({ _id: { $in: ids }, isDeleted: false })

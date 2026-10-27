@@ -19,7 +19,8 @@ import {
   TicketCreatedDomainEvent,
   TicketInfoRequestedDomainEvent,
   TicketInfoSubmittedDomainEvent,
-  TicketStatusChangedDomainEvent
+  TicketStatusChangedDomainEvent,
+  TicketUrgencyRaisedDomainEvent
 } from "./events/ticket.domain-events";
 import { isEligibleToClaim } from "./ticket-access";
 import {
@@ -38,7 +39,8 @@ import {
   TicketResolution,
   TicketResolutionCode,
   TicketStatus,
-  TicketUrgency
+  TicketUrgency,
+  TICKET_URGENCY_RANK
 } from "./types";
 
 // Khoá cố định của mục "Tờ trình" trong checklist yêu cầu bổ sung.
@@ -346,6 +348,8 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
     }
 
     const from = this.props.status;
+    // Nhóm xử lý hiện tại trước khi bị thay — để báo những người bị gỡ ra
+    const previousHandlerIds = this.handlerIds;
     let { status } = this.props;
     if (assignment.ownerId && status === "open") status = "in_progress";
     if (!assignment.ownerId && status === "in_progress") status = "open";
@@ -367,7 +371,8 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
         actorId: input.assignedBy ?? null,
         mode: assignment.mode,
         departmentId: assignment.departmentId,
-        memberIds: assignment.memberIds
+        memberIds: assignment.memberIds,
+        previousHandlerIds
       })
     );
   }
@@ -848,7 +853,24 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
       assertNote(note);
     }
 
+    const previousUrgency = this.props.urgency;
     this._mutate(next, { action: "edited", actorId: by, changes, note: note || undefined }, now);
+    // Ticket chưa ai nhận mà bị nâng mức → báo người phụ trách (ticket đã có chủ trì thì chủ trì tự biết).
+    if (
+      next.urgency !== undefined &&
+      this.props.status === "open" &&
+      !this.props.assignment.ownerId &&
+      TICKET_URGENCY_RANK[next.urgency] < TICKET_URGENCY_RANK[previousUrgency]
+    ) {
+      this.addEvent(
+        new TicketUrgencyRaisedDomainEvent({
+          aggregateId: this.id,
+          actorId: by,
+          from: previousUrgency,
+          to: next.urgency
+        })
+      );
+    }
     // Người tạo sửa sau khi đã có người nhận → báo chủ trì.
     if (scope === "requester" && this.props.assignment.ownerId) {
       this.addEvent(new TicketContentEditedDomainEvent({ aggregateId: this.id, actorId: by }));

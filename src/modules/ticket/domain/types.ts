@@ -25,8 +25,22 @@ export const TICKET_ACTIVE_STATUSES: TicketStatus[] = [
   "resolved"
 ];
 
-export const TICKET_URGENCIES = ["urgent", "normal", "low"] as const;
+// 4 mức, xếp từ gấp nhất tới ít gấp nhất. Mã `urgent` hiển thị là "Khẩn", `high` là "Cao".
+// Mốc xử lý tham khảo (ngày làm việc): Khẩn 1 · Cao 1–2 · Bình thường 2–5 · Thấp 5–10. Các mốc này quy đổi
+// thành ngưỡng cảnh báo vàng (ticket-schedule.ts), không phải hạn cứng.
+export const TICKET_URGENCIES = ["urgent", "high", "normal", "low"] as const;
 export type TicketUrgency = (typeof TICKET_URGENCIES)[number];
+
+// Mức càng gấp thì thứ hạng càng nhỏ (dùng để biết một lần đổi mức là "nâng" hay "hạ").
+export const TICKET_URGENCY_RANK: Record<TicketUrgency, number> = {
+  urgent: 0,
+  high: 1,
+  normal: 2,
+  low: 3
+};
+
+// Mức mà ticket mới ngoài việc báo người phụ trách của mẫu/loại/sản phẩm còn báo cả danh sách mặc định.
+export const TICKET_ESCALATED_URGENCIES: readonly TicketUrgency[] = ["urgent", "high"];
 
 // Kết quả khi đóng — tách khỏi trạng thái để báo cáo biết ticket đóng vì lý do gì.
 export const TICKET_RESOLUTIONS = [
@@ -182,6 +196,8 @@ export interface TicketActor {
   canManage: boolean;
   canViewRestricted: boolean;
   canViewSensitive: boolean;
+  // Có quyền xem khách hàng trong CRM (customer.view) — được nhận mã khách để mở hồ sơ khách
+  canViewCustomer?: boolean;
 }
 
 // Dòng nhật ký do entity sinh ra; service ghi vào ticket_activity cùng transaction.

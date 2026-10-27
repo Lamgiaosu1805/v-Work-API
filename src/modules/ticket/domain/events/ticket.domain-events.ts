@@ -27,6 +27,19 @@ export class TicketCreatedDomainEvent extends TicketDomainEvent {
   }
 }
 
+// Ticket CHƯA AI NHẬN bị nâng lên mức gấp hơn (Bình thường → Cao, Cao → Khẩn...). Mang mức cũ/mới để chính sách thông báo quyết định có báo người phụ trách hay không.
+export class TicketUrgencyRaisedDomainEvent extends TicketDomainEvent {
+  readonly from: TicketUrgency;
+
+  readonly to: TicketUrgency;
+
+  constructor(props: TicketEventProps & { from: TicketUrgency; to: TicketUrgency }) {
+    super(props);
+    this.from = props.from;
+    this.to = props.to;
+  }
+}
+
 export class TicketAssignedDomainEvent extends TicketDomainEvent {
   readonly mode: AssignmentMode;
 
@@ -34,17 +47,22 @@ export class TicketAssignedDomainEvent extends TicketDomainEvent {
 
   readonly memberIds: string[];
 
+  // Chủ trì + người phối hợp trước khi giao lại (rỗng khi giao lúc tạo) — để báo người bị gỡ ra
+  readonly previousHandlerIds: string[];
+
   constructor(
     props: TicketEventProps & {
       mode: AssignmentMode;
       departmentId: string | null;
       memberIds: string[];
+      previousHandlerIds?: string[];
     }
   ) {
     super(props);
     this.mode = props.mode;
     this.departmentId = props.departmentId;
     this.memberIds = props.memberIds;
+    this.previousHandlerIds = props.previousHandlerIds ?? [];
   }
 }
 

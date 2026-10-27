@@ -8,6 +8,8 @@ import BaseSchema from "./BaseSchema";
 const UrgencyMinutes = new Schema(
   {
     urgent: { type: Number, required: true },
+    // `high` (mức Cao) thêm sau: document cũ chưa có thì lấy mặc định ở ticket-schedule.ts
+    high: { type: Number },
     normal: { type: Number, required: true },
     low: { type: Number, required: true }
   },
@@ -17,12 +19,18 @@ const UrgencyMinutes = new Schema(
 const TicketSettingSchema = new Schema(
   {
     key: { type: String, required: true, default: "default" },
-    // Người nhận thông báo ticket Khẩn khi mẫu/loại yêu cầu không chỉ định ai
+    // Người nhận thông báo THÊM cho ticket mức Khẩn và Cao (ngoài người của mẫu/loại/sản phẩm)
     default_handler_ids: [{ type: Schema.Types.ObjectId, ref: "user_info" }],
 
     workday_minutes: { type: Number, default: 540 },
-    unclaimed_minutes: { type: UrgencyMinutes, default: { urgent: 60, normal: 540, low: 1620 } },
-    silent_minutes: { type: UrgencyMinutes, default: { urgent: 240, normal: 1620, low: 3780 } },
+    unclaimed_minutes: {
+      type: UrgencyMinutes,
+      default: { urgent: 360, high: 540, normal: 1080, low: 2700 }
+    },
+    silent_minutes: {
+      type: UrgencyMinutes,
+      default: { urgent: 540, high: 1080, normal: 2700, low: 5400 }
+    },
     hold_unknown_days: { type: Number, default: 5 },
     auto_close_resolved_days: { type: Number, default: 3 },
     auto_close_waiting_info_days: { type: Number, default: 3 },

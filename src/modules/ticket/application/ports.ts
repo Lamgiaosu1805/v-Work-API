@@ -22,6 +22,8 @@ export interface TicketDirectory {
   getDepartmentIdsWithAncestors(employeeId: string): Promise<string[]>;
   // Mọi nhân viên thuộc phòng mình quản lý/làm việc, kể cả phòng con — phạm vi trưởng bộ phận được giao việc.
   getOwnDepartmentTreeEmployeeIds(employeeId: string): Promise<string[]>;
+  // Nhân viên đang làm việc của một phòng ban, kể cả các phòng con — để báo khi ticket giao cho phòng mà phòng chưa có người quản lý.
+  getDepartmentMemberIds(departmentId: string): Promise<string[]>;
   getEmployees(ids: string[]): Promise<EmployeeSummary[]>;
   getDepartments(ids: string[]): Promise<DepartmentSummary[]>;
   searchEmployees(query: string, limit: number): Promise<EmployeeSummary[]>;

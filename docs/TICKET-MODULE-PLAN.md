@@ -62,12 +62,15 @@ nhận, giao việc, trao đổi, cảnh báo và kết quả xử lý — nên 
 Mỗi mẫu là **cấu hình**: trường bắt buộc, giấy tờ (đánh dấu nhạy cảm), có cần tờ trình, mức khẩn mặc
 định, người phụ trách, hướng dẫn tự xử lý. Thêm mẫu mới không sửa code.
 
+(Cột "Mức khẩn" là mức mặc định của mẫu: Cao = mã `high`. Mẫu tạo từ seed trước 27/10/2026 có thể còn mã `urgent`
+= Khẩn trong DB — đổi ở Cấu hình → Mẫu yêu cầu.)
+
 | Mẫu | Thông tin bắt buộc                                                                                                          | Giấy tờ                              | Tờ trình                   | Mức khẩn    |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | -------------------------- | ----------- |
-| Quên mật khẩu / bị khoá đăng nhập      | SĐT khách, lý do khách không tự đặt lại được                                                                                | —                                    | Không                      | Khẩn        |
-| Reset thiết bị                         | SĐT khách                                                                                                                   | **CCCD 2 mặt** (nhạy cảm)            | Không                      | Khẩn        |
+| Quên mật khẩu / bị khoá đăng nhập      | SĐT khách, lý do khách không tự đặt lại được                                                                                | —                                    | Không                      | Cao        |
+| Reset thiết bị                         | SĐT khách                                                                                                                   | **CCCD 2 mặt** (nhạy cảm)            | Không                      | Cao        |
 | Không cộng lãi / sai lãi               | SĐT. TIKLUY: **mã khoản đầu tư (VNF + 13 số)**, sản phẩm, ngày & số tiền dự kiến. VNFITE: mã khoản vay, kỳ, số tiền dự kiến | Ảnh chụp màn hình                    | Không                      | Bình thường |
-| Rút/nạp tiền bị treo                   | SĐT, số tiền, thời gian, ngân hàng, mã giao dịch (nếu có)                                                                   | Ảnh chuyển khoản (nhạy cảm)          | Không                      | Khẩn        |
+| Rút/nạp tiền bị treo                   | SĐT, số tiền, thời gian, ngân hàng, mã giao dịch (nếu có)                                                                   | Ảnh chuyển khoản (nhạy cảm)          | Không                      | Cao        |
 | Mở khoá / làm lại eKYC                 | SĐT                                                                                                                         | —                                    | Không                      | Bình thường |
 | **Đổi số điện thoại**                  | SĐT cũ, SĐT mới, số CCCD                                                                                                    | CCCD 2 mặt, bằng chứng chính chủ SIM | **Bắt buộc**               | Bình thường |
 | **Tất toán trước hạn (ngoại lệ)**      | Mã khoản đầu tư, lý do ngoại lệ                                                                                             | —                                    | **Bắt buộc**               | Bình thường |
@@ -287,12 +290,19 @@ gốc (tên file có thể chứa thông tin cá nhân).
 
 ### 7.1 Người phụ trách
 
-Dùng cho thông báo khi có ticket Khẩn mới. Tìm theo thứ tự:
-**mẫu yêu cầu → loại yêu cầu → mặc định**.
+Báo cho đúng người khi có ticket mới sẵn sàng để nhận (đổi lại 26/10/2026 — trước đây chỉ ticket mức Cao và "cấp cụ thể
+thay mặc định"). **Cộng dồn**:
 
-- Mẫu "Reset thiết bị" → A, B (tên cụ thể chốt khi seed).
-- Mặc định → danh sách người phụ trách IT (vài người cụ thể, không báo cả phòng).
-- Sau này cần phân theo sản phẩm: thêm 1 cấp cấu hình, không sửa code.
+- Người của **mẫu yêu cầu** + **loại yêu cầu** + **sản phẩm** cùng nhận thông báo, **mọi mức khẩn**.
+- Ticket **Khẩn** và **Cao** nhận thêm danh sách **mặc định** (cài đặt chung); ticket Bình thường / Thấp thì không báo danh sách mặc định.
+- Ticket **chưa ai nhận** (`open`, chưa có chủ trì) được **nâng lên Khẩn hoặc Cao** sau khi tạo → báo lại đúng nhóm trên
+  ("Ticket được nâng lên mức …"). Hạ mức, nâng lên mức thường, hoặc ticket đã có chủ trì thì không báo.
+- Trùng người ở nhiều cấp chỉ báo một lần; người tạo ticket không tự nhận thông báo của mình.
+- Ticket đang chờ người tạo bổ sung tờ trình (`waiting_info`) chưa báo; khi người tạo bổ sung xong mà ticket chưa có
+  chủ trì thì mới báo người phụ trách ("Ticket đã đủ thông tin, chờ nhận").
+- Người phụ trách chỉ **nhận thông báo**, không độc quyền nhận ticket (ai có `ticket.handle` vẫn nhận được).
+- Cấu hình: màn Cấu hình → Cài đặt chung → "Người phụ trách nhận thông báo" (cũng sửa được ở tab Sản phẩm, Loại yêu cầu,
+  Mẫu yêu cầu). Code: `application/ticket-responsible.ts`.
 
 ### 7.2 Bảng quy tắc
 
@@ -302,23 +312,34 @@ Toàn bộ là thông báo một-một. Người tự thực hiện hành độn
 
 | Sự kiện                                                         | Người nhận                          |
 | --------------------------------------------------------------- | ----------------------------------- |
-| Tạo ticket **Khẩn**                                             | Người phụ trách (7.1)               |
-| Tạo ticket Bình thường / Thấp                                   | Không ai (chỉ hiện trong danh sách) |
-| Giao đích danh (1 hoặc nhiều người)                             | Những người được giao               |
-| Giao cho phòng ban                                              | Trưởng phòng đó (1 người)           |
+| Tạo ticket (mọi mức khẩn)                                       | Người phụ trách (7.1)               |
+| Ticket chưa ai nhận được nâng lên Khẩn / Cao                    | Người phụ trách (7.1)               |
+| Giao đích danh (1 hoặc nhiều người)                             | Tất cả những người được giao        |
+| Giao cho phòng ban                                              | Trưởng phòng; phòng chưa có người quản lý và ticket chưa ai nhận → cả phòng (kể cả phòng con); ticket đã có người nhận → thêm chủ trì + người phối hợp |
+| Giao lại (đổi nhóm xử lý)                                       | Người cũ bị gỡ ra khỏi nhóm xử lý    |
+| Mọi lần giao việc                                               | Người tạo ("đã được giao cho …")    |
 | Có người nhận xử lý                                             | Người tạo                           |
 | Yêu cầu bổ sung / thiếu tờ trình / tờ trình không hợp lệ        | Người tạo                           |
-| Người tạo bổ sung xong, hoặc sửa nội dung sau khi đã có chủ trì | Chủ trì                             |
+| Người tạo bổ sung xong (chưa có chủ trì → người phụ trách)       | Chủ trì + người phối hợp            |
+| Người tạo sửa nội dung sau khi đã có chủ trì                     | Chủ trì                             |
 | Đã xử lý / đã đóng / bị đóng do trùng, chưa đủ cơ sở…           | Người tạo                           |
 | Nhắc trước khi tự đóng `waiting_info`                           | Người tạo                           |
 | Được thêm vào nhóm phối hợp                                     | Người được thêm                     |
 | Tới ngày kiểm tra "Cần theo dõi thêm"                           | Chủ trì                             |
-| @nhắc tên trong trao đổi                                        | Người được nhắc                     |
+| @nhắc tên trong trao đổi                                        | Người được nhắc ("Bạn được nhắc tên trong ticket …") |
+| Có tin nhắn mới trong trao đổi                                  | Người tạo + chủ trì + người phối hợp; ticket chưa có chủ trì → người được giao đích danh / trưởng phòng được giao + người phụ trách (7.1). Người được nhắc tên chỉ nhận thông báo nhắc tên. |
 
 **Cảnh báo vàng không gửi thông báo** — chỉ bôi vàng trên giao diện (mục 8).
 
+**Tin nhắn trong trao đổi** (thêm 27/10/2026): người gửi không tự nhận; mỗi người chỉ nhận một thông báo cho mỗi tin
+(nhắc tên đứng trước thông báo chung). Ticket chưa có chủ trì mà đang chờ người tạo bổ sung (`waiting_info`) chưa báo
+người phụ trách. Ticket hạn chế: thông báo không kèm nội dung tin nhắn. Người từng nhắn trước đó nhưng không thuộc nhóm
+xử lý (vd người được nhắc tên vào tham gia) không tự nhận thông báo các tin sau, trừ khi được nhắc tên tiếp. Code:
+`planMessageNotifications` trong `application/ticket-notification.policy.ts`. Danh sách tin nhắn trên giao diện cao tối
+đa 500px, cuộn bên trong và tự cuộn tới tin mới nhất; Enter gửi, Shift + Enter xuống dòng.
+
 Reset mật khẩu / reset thiết bị được báo ngay **nhờ mức khẩn mặc định của mẫu**, không có code đặc cách
-theo loại. Ca nào sau này cần báo ngay chỉ cần đặt mẫu đó là Khẩn.
+theo loại. Ca nào sau này cần báo ngay chỉ cần đặt mẫu đó là Khẩn hoặc Cao.
 
 ## 8. Cảnh báo vàng (thay cho SLA)
 
@@ -344,17 +365,27 @@ mà không ai đụng tới mới đáng lo.
 - **Không tính** khi `waiting_info` / `resolved` (đang chờ người tạo — đã có tự đóng riêng).
 - Có hoạt động mới → hết vàng.
 
-### 8.3 Ngưỡng mặc định (cấu hình được, ghi đè được theo mẫu)
+### 8.3 Ngưỡng mặc định (cấu hình được trong Cài đặt chung, theo từng mức khẩn)
 
-| Mức khẩn    | A: chưa ai nhận | B: im lặng      | C: tạm hoãn chưa xác định |
-| ----------- | --------------- | --------------- | ------------------------- |
-| Khẩn        | 1 giờ làm việc  | 4 giờ làm việc  | 5 ngày làm việc           |
-| Bình thường | 1 ngày làm việc | 3 ngày làm việc | 5 ngày làm việc           |
-| Thấp        | 3 ngày làm việc | 7 ngày làm việc | 5 ngày làm việc           |
+> Mức khẩn gồm 4 mức: **Khẩn** (mã `urgent`), **Cao** (mã `high`, thêm 27/10/2026), **Bình thường**, **Thấp**.
+> Mỗi mức có một mốc xử lý tham khảo (ngày làm việc) và được quy đổi thành ngưỡng cảnh báo. Mốc xử lý KHÔNG phải
+> hạn cứng — ticket chỉ vàng khi bị bỏ quên (8.1), không vàng chỉ vì quá số ngày của mức.
 
-- Mức khẩn chỉ có 3 mức. Mẫu đặt mặc định, người tạo đổi được, nhóm xử lý điều chỉnh được (kèm ghi chú).
+| Mức khẩn    | Mốc xử lý tham khảo | A: chưa ai nhận | B: im lặng      | C: tạm hoãn chưa xác định |
+| ----------- | ------------------- | --------------- | --------------- | ------------------------- |
+| Khẩn        | 1 ngày làm việc     | 6 giờ làm việc  | 1 ngày làm việc  | 5 ngày làm việc           |
+| Cao         | 1–2 ngày làm việc   | 1 ngày làm việc | 2 ngày làm việc  | 5 ngày làm việc           |
+| Bình thường | 2–5 ngày làm việc   | 2 ngày làm việc | 5 ngày làm việc  | 5 ngày làm việc           |
+| Thấp        | 5–10 ngày làm việc  | 5 ngày làm việc | 10 ngày làm việc | 5 ngày làm việc           |
+
+- Ngưỡng nhập theo **giờ hoặc ngày làm việc** trên màn Cấu hình (lưu bằng phút làm việc). Mức càng gấp ngưỡng càng
+  ngắn: **Khẩn ≤ Cao ≤ Bình thường ≤ Thấp** — hệ thống từ chối lưu nếu sai thứ tự.
+- Không có ghi đè ngưỡng theo mẫu: muốn mẫu nào theo dõi sát hơn thì đặt mức khẩn mặc định của mẫu cao hơn.
+- Mẫu đặt mức mặc định, người tạo đổi được, nhóm xử lý điều chỉnh được (kèm ghi chú). Người tạo đổi mức không bắt
+  buộc ghi lý do; nhóm xử lý đổi mức bắt buộc ghi lý do.
+- Ticket **chưa ai nhận** bị nâng lên Khẩn / Cao → báo lại người phụ trách (gồm danh sách mặc định), xem 7.1.
 - Khi chuyển vàng: ticket được **bôi vàng trên giao diện cho mọi người thấy** (danh sách + chi tiết, kèm lý
-  do, vd "Chưa ai nhận 1 ngày làm việc") + tab "Cảnh báo vàng". **Không gửi thông báo.**
+  do, vd "Chưa ai nhận 1 ngày làm việc") + tab "Cần chú ý" (tên cũ: "Cảnh báo vàng"). **Không gửi thông báo.**
 
 ### 8.4 Lịch làm việc
 
@@ -364,7 +395,7 @@ mà không ai đụng tới mới đáng lo.
 - Khung giờ từng thứ lưu trong cấu hình ticket (mặc định T2–T6 08:00–17:00, T7 08:00–12:00), không hard-code.
 - "N ngày làm việc" = cộng dồn N × độ dài ca hành chính trên lịch này. Ví dụ báo xong 16:00 T6, tự đóng sau
   3 ngày làm việc: tính 1 giờ T6 + sáng T7 + cả T2 + cả T3 + phần còn lại sang T4.
-- Ticket Khẩn tạo tối T6 vẫn báo người phụ trách ngay, nhưng chỉ thành vàng tính từ đầu giờ làm việc kế tiếp.
+- Ticket mức Khẩn / Cao tạo tối T6 vẫn báo người phụ trách ngay, nhưng chỉ thành vàng tính từ đầu giờ làm việc kế tiếp.
 - **Kỹ thuật**: mở rộng `modules/customer-care/domain/working-calendar.ts` để mỗi thứ có khung giờ riêng, rồi
   **chuyển sang `src/shared-kernel/working-calendar.ts`** để 2 module dùng chung. Customer-care giữ cấu hình
   T2–T6 của mình (Quy định 183A), không bị ảnh hưởng.
@@ -377,9 +408,9 @@ mà không ai đụng tới mới đáng lo.
 
 ## 9. Màn hình (web trước, app sau)
 
-- **Danh sách nhóm theo ngày** (Hôm nay, Hôm qua, 21/10…), mới nhất ở trên. Tab: _Chưa ai nhận_, _Tôi đang
-  xử lý_, _Tôi tạo_, _Giao cho phòng tôi_, _Giao cho tôi_, _Cảnh báo vàng_, _Tất cả_. Lọc: sản phẩm, loại,
-  mẫu, mức khẩn, trạng thái, chủ trì, khoảng ngày, từ khoá.
+- **Danh sách nhóm theo ngày** (Hôm nay, Hôm qua, 21/10…), mới nhất ở trên (riêng tab _Cần chú ý_ sắp theo mức
+  bị bỏ quên lâu nhất, không nhóm ngày). 6 tab, một số tab có chip (tab con) — xem mục 16. Lọc: sản phẩm, loại,
+  mẫu, mức khẩn, trạng thái, khoảng ngày, từ khoá.
 - **Chi tiết ticket**: thông tin + trường theo mẫu, khách (kèm `external_id`), người tạo/chủ trì/phối hợp,
   checklist bổ sung, tờ trình, file, trao đổi (@nhắc tên, đính kèm), lịch sử.
 - **Sửa ticket**: người tạo sửa tiêu đề, mô tả, sản phẩm, loại, khách, mức khẩn tới khi `resolved`; nhóm
@@ -483,7 +514,7 @@ GET    /tickets/:id/activities
 - `auto_close_at <= now` → tự đóng; nhắc trước khi tự đóng `waiting_info`; nhắc ngày kiểm tra "Cần theo dõi
   thêm".
 - **Cảnh báo vàng không cần cron**: `alert_at` được tính trước mỗi lần ticket thay đổi; lúc đọc, ticket còn mở
-  có `alert_at <= now` là vàng (tab "Cảnh báo vàng" = query theo index `alert_at`).
+  có `alert_at <= now` là vàng (tab "Cần chú ý" = query theo index `alert_at`).
 - `auto_close_at` cũng tính trước mỗi lần ticket thay đổi, nên cron chỉ query theo index.
 - Khoá Redis **có tiền tố môi trường** (`${ENV_PREFIX}:lock:ticket:sweep`), release nguyên tử.
 
@@ -561,8 +592,8 @@ rõ ở đây).
 - **Tải file** qua `GET /tickets/:id/attachments/:attachmentId/download` có kiểm tra quyền (frontend tải dạng blob),
   không dùng URL ký; Content-Type theo đuôi file chứ không tin mimetype client khai.
 - **Thông báo thêm so với bảng 7.2:** ticket được **mở lại** → báo chủ trì; ticket **tự đóng** → báo người tạo.
-- **Người nhận ticket Khẩn:** tra theo thứ tự mẫu → loại yêu cầu → cài đặt chung (`default_handler_ids`); dùng cấp đầu
-  tiên có cấu hình.
+- **Người nhận thông báo ticket mới:** cộng dồn mẫu + loại yêu cầu + sản phẩm; ticket Khẩn / Cao thêm cài đặt chung
+  (`default_handler_ids`) — xem 7.1. (Cách "dùng cấp đầu tiên có cấu hình" đã bỏ từ 26/10/2026.)
 - **Tin nhắn:** của nhóm xử lý tính là "hoạt động" (đếm lại cảnh báo im lặng); của người tạo thì không, và không đổi
   `version` ticket.
 
@@ -594,7 +625,7 @@ người có `ticket.view`); thông báo ticket mở thẳng `/workplace/tickets
 
 | Route | Nội dung |
 |---|---|
-| `/workplace/tickets` | Danh sách nhóm theo ngày, tab (chưa ai nhận, tôi đang xử lý, giao cho tôi / phòng tôi, tôi tạo, cảnh báo vàng, đã đóng, tất cả) có số đếm, bộ lọc; **ticket bị bỏ quên được bôi vàng** |
+| `/workplace/tickets` | Danh sách nhóm theo ngày, 6 tab + chip (mục 16) có số đếm, bộ lọc; **ticket bị bỏ quên được bôi vàng** |
 | `/workplace/tickets/:id` | Chi tiết: thông tin, trao đổi (@nhắc tên, file), nhóm xử lý, tờ trình, file đính kèm, lịch sử; thanh hành động |
 | `/workplace/tickets/config` | Cấu hình (quyền `ticket.config`): sản phẩm, loại yêu cầu, mẫu yêu cầu, cài đặt chung (người phụ trách, ngưỡng cảnh báo, tự đóng/mở lại, lịch làm việc) |
 
@@ -624,3 +655,21 @@ người tạo xác nhận (→ màn thông tin chung), cấu hình + lưu cài 
 - Cài đặt lịch làm việc theo từng thứ trên màn cấu hình mới hỗ trợ riêng **thứ 7** (khung giờ riêng); API hỗ trợ
   khung giờ riêng cho thứ bất kỳ.
 - Chưa kiểm tra trên môi trường UAT thật (cần chạy seed quyền + seed cấu hình + mount `TICKET_DIR_*` trước).
+
+## 16. Thanh tab danh sách (thiết kế lại 26/10/2026)
+
+Tab dạng viên thuốc (cùng kiểu màn Đơn từ). Backend nhận `GET /tickets?tab=<tab>&scope=<chip>`; `scope` lạ rơi về `all`.
+
+| Tab | Nội dung | Chip (scope) |
+|---|---|---|
+| **Ticket của tôi** (`my`) | Tôi tạo + tôi xử lý (chủ trì/phối hợp) + giao đích danh cho tôi, **gồm cả ticket đã đóng** | Tất cả · Đang mở (`open`) · Tôi tạo (`created`) · Tôi đang xử lý (`handling`) · Giao cho tôi (`assigned`) |
+| **Cần tôi phản hồi** (`needs_reply`) | Ticket tôi tạo đang `waiting_info` hoặc `resolved` | — |
+| **Chưa ai nhận** (`unclaimed`) | Ticket `open`, chưa giao ai (`mode = none`) — cả công ty nhận được | — |
+| **Ticket phòng ban** (`department`) | Giao cho phòng tôi (gồm phòng cha) + việc của người trong phòng tôi (gồm phòng con) | Tất cả của phòng · Giao cho phòng, chờ nhận (`waiting`) · Phòng đang xử lý (`handling`) · Do phòng tạo (`created`) |
+| **Cần chú ý** (`yellow`, trước đây tên "Cảnh báo vàng") | Như mục 8 (sắp theo `alert_at`) | — |
+| **Tất cả** (`all`) | Mọi ticket được xem | Đang mở · Đã đóng / huỷ · Tất cả (lọc theo `status`, không cần backend riêng) |
+
+- Số đếm (`GET /tickets/counts`) chỉ đếm phần cần hành động: `my` = ticket đang mở, `department` = chờ phòng nhận, kèm
+  `needs_reply`, `unclaimed`, `yellow`.
+- Các tab hàng đợi (Của tôi / Chưa ai nhận / Phòng ban) loại trừ nhau; `needs_reply` và `yellow` là "góc nhìn" nên chồng lấn.
+- Thay cho 8 tab cũ (`mine`, `created`, `assigned_to_me`, `my_department`, `closed`...); các khoá cũ không còn.

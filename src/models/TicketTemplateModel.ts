@@ -42,13 +42,16 @@ const TicketTemplateSchema = new Schema(
     fields: [FieldSchema],
     required_documents: [DocumentSchema],
     requires_approval: { type: Boolean, default: false },
-    default_urgency: { type: String, enum: ["urgent", "normal", "low"], default: "normal" },
-    // Người nhận thông báo khi có ticket Khẩn từ mẫu này (cấp ưu tiên 1, trước loại yêu cầu và mặc định)
+    default_urgency: {
+      type: String,
+      enum: ["urgent", "high", "normal", "low"],
+      default: "normal"
+    },
+    // Người nhận thông báo khi có ticket mới từ mẫu này (mọi mức khẩn; cộng dồn với loại yêu cầu và sản phẩm)
     handler_ids: [{ type: Schema.Types.ObjectId, ref: "user_info" }],
     // Hướng dẫn khách tự xử lý — hiện cho người tạo trước khi tạo ticket
     guidance: { type: String, default: "" },
     is_active: { type: Boolean, default: true },
-    sort_order: { type: Number, default: 0 },
 
     ...BaseSchema.obj
   },

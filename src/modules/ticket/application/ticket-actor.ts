@@ -23,6 +23,7 @@ export async function buildTicketActor(
     canAssignMember: can("ticket.assign_member"),
     canManage: can("ticket.manage"),
     canViewRestricted: can("ticket.view_restricted"),
-    canViewSensitive: can("ticket.view_sensitive")
+    canViewSensitive: can("ticket.view_sensitive"),
+    canViewCustomer: Boolean(ability?.can("customer.view", "Customer"))
   };
 }

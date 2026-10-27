@@ -1,4 +1,4 @@
-import { TicketResolutionCode } from "./types";
+import { TicketResolutionCode, TicketUrgency } from "./types";
 import { APPROVAL_DOCUMENT_ITEM_KEY } from "./ticket.entity";
 
 // Danh mục cố định (không phải cấu hình theo công ty): checklist "yêu cầu bổ sung" và nhãn kết quả đóng.
@@ -40,6 +40,13 @@ export const INFO_REQUEST_CATALOG: InfoRequestCatalogItem[] = [
 
   { key: OTHER_INFO_KEY, group: "Khác", label: "Khác (ghi rõ)" }
 ];
+
+export const URGENCY_LABELS: Record<TicketUrgency, string> = {
+  urgent: "Khẩn",
+  high: "Cao",
+  normal: "Bình thường",
+  low: "Thấp"
+};
 
 export const RESOLUTION_LABELS: Record<TicketResolutionCode, string> = {
   solved: "Đã giải quyết",

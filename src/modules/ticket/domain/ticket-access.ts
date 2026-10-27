@@ -59,10 +59,43 @@ export function isEligibleToClaim(
   return departmentIds.some((id) => sameId(id, assignment.departmentId));
 }
 
+// Thành viên phòng ban được giao (kể cả phòng con) khi ticket còn chờ nhận: họ nhận được ticket nên phải
+// thấy được nó, kể cả ticket hạn chế. Sau khi đã có chủ trì thì quyền xem thuộc về nhóm xử lý.
+export function isDepartmentCandidate(
+  ticket: Pick<TicketProps, "assignment">,
+  actor: TicketActor
+): boolean {
+  const { mode, departmentId, ownerId } = ticket.assignment;
+  return (
+    mode === "department" && !ownerId && actor.departmentIds.some((id) => sameId(id, departmentId))
+  );
+}
+
+// Khách hàng của ticket: mã khách (externalId = userId trên app / CMS, cũng là khoá mở hồ sơ khách trong CRM) chỉ
+// trả cho người cần dùng nó.
+//   - showExternalId: HIỂN THỊ mã trên giao diện — IT (xem ticket hạn chế / file nhạy cảm), người quản lý ticket
+//     và nhóm xử lý (chủ trì, phối hợp).
+//   - includeExternalId: có trả mã trong dữ liệu — nhóm trên cộng người có quyền xem khách hàng (để bấm sang hồ
+//     sơ khách trong CRM; họ vốn đã thấy mã này ở CRM).
+export function customerVisibility(
+  ticket: Pick<TicketProps, "assignment">,
+  actor: TicketActor
+): { showExternalId: boolean; includeExternalId: boolean } {
+  const privileged =
+    actor.canViewRestricted ||
+    actor.canViewSensitive ||
+    actor.canManage ||
+    isHandler(ticket, actor);
+  return {
+    showExternalId: privileged,
+    includeExternalId: privileged || Boolean(actor.canViewCustomer)
+  };
+}
+
 export function accessLevel(ticket: AccessProps, actor: TicketActor): TicketAccessLevel {
   if (ticket.visibility === "normal") return "full";
   if (actor.canViewRestricted) return "full";
-  if (!isInvolved(ticket, actor)) return "none";
+  if (!isInvolved(ticket, actor) && !isDepartmentCandidate(ticket, actor)) return "none";
   // Ticket hạn chế đã kết thúc: người liên quan chỉ còn thấy thông tin chung (mã, tiêu đề, trạng
   // thái, kết quả, ghi chú kết luận) — đủ để biết kết quả và mở lại trong hạn.
   return isFinished(ticket.status) ? "summary" : "full";

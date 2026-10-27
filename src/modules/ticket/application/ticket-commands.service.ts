@@ -41,6 +41,8 @@ import { MongooseSchedulerLoader } from "../infrastructure/ticket-scheduler.load
 import { TicketConfigReader } from "./ticket-config.types";
 import { TicketDirectory, TicketNotifier } from "./ports";
 import { authorizeAssignment } from "./ticket-assignment-authorization";
+import { planMessageNotifications } from "./ticket-notification.policy";
+import { resolveResponsibleIds } from "./ticket-responsible";
 import { refreshSchedule, SchedulerLoader, TicketScheduler } from "./ticket-scheduling";
 // Side-effect import (CLAUDE.md "Domain Event"): listener luôn sẵn sàng kể cả khi test gọi thẳng service.
 import { registerTicketNotificationHandlers } from "./ticket-notification.handlers";
@@ -321,10 +323,14 @@ export class TicketCommandService {
     input: { approvalReference?: { number: string; date?: Date | null; signer?: string } | null },
     files: UploadedTicketFile[] = []
   ) {
+    let isSensitive: (kind: string) => boolean = (kind) => DEFAULT_SENSITIVE_KINDS.includes(kind);
     return this.execute(
       ticketId,
       actor,
       async (ticket, { now }) => {
+        // Tính TRƯỚC khi submitInfo xoá checklist: file gửi để đáp lại yêu cầu giấy tờ nhạy cảm
+        // (CCCD, chứng từ, tờ trình) luôn là nhạy cảm dù người dùng để loại là "Khác".
+        isSensitive = await this.sensitivityRule(ticket.getProps());
         const requested = ticket.getProps().infoRequest;
         const approvalItem = requested?.items.find(
           (item) => item.key === APPROVAL_DOCUMENT_ITEM_KEY && !item.fulfilled
@@ -360,7 +366,7 @@ export class TicketCommandService {
           files.map((file) => ({
             ticketId: saved.id,
             kind: file.kind,
-            sensitive: DEFAULT_SENSITIVE_KINDS.includes(file.kind),
+            sensitive: isSensitive(file.kind),
             originalName: file.originalName,
             storedName: file.storedName,
             mimeType: file.mimeType,
@@ -528,6 +534,7 @@ export class TicketCommandService {
     if (["closed", "cancelled"].includes(props.status)) {
       throw new TicketForbiddenError("Ticket đã kết thúc, không thể trao đổi thêm");
     }
+    const isSensitive = await this.sensitivityRule(props);
 
     let messageId = "";
     const persistMessage = async (savedId: string) => {
@@ -542,7 +549,7 @@ export class TicketCommandService {
           ticketId: savedId,
           messageId,
           kind: file.kind,
-          sensitive: DEFAULT_SENSITIVE_KINDS.includes(file.kind),
+          sensitive: isSensitive(file.kind),
           originalName: file.originalName,
           storedName: file.storedName,
           mimeType: file.mimeType,
@@ -564,21 +571,91 @@ export class TicketCommandService {
       await runInTransaction(() => persistMessage(ticket.id));
     }
 
-    if (mentionIds.length) {
-      await this.deps.notifier
-        .notify({
-          employeeIds: mentionIds.filter((id) => id !== actor.employeeId),
-          title: `Bạn được nhắc tên trong ticket ${props.code}`,
-          body: body.slice(0, 140),
-          type: "mention",
-          ticketId: ticket.id
-        })
-        .catch((error) => logger.error("Không gửi được thông báo nhắc tên ticket", { error }));
-    }
+    await this.notifyMessage(ticket.id, props, actor.employeeId, body, mentionIds);
     return { messageId };
   }
 
+  // Báo tin nhắn mới (người nhận theo ticket-notification.policy.ts). Lỗi chỉ log: thông báo hỏng không được làm hỏng việc gửi tin nhắn đã lưu xong.
+  private async notifyMessage(
+    ticketId: string,
+    props: ReturnType<TicketEntity["getProps"]>,
+    authorId: string,
+    body: string,
+    mentionIds: string[]
+  ): Promise<void> {
+    try {
+      const [author] = await this.deps.directory.getEmployees([authorId]);
+      let responsibleIds: string[] = [];
+      let departmentManagerId: string | null = null;
+      if (!props.assignment.ownerId) {
+        const [template, category, product, scheduler] = await Promise.all([
+          props.templateId ? this.deps.config.findTemplate(props.templateId) : null,
+          this.deps.config.findCategory(props.categoryId),
+          this.deps.config.findProduct(props.productId),
+          this.deps.scheduler.load(this.deps.now())
+        ]);
+        responsibleIds = resolveResponsibleIds(props.urgency, {
+          templateIds: template?.handlerIds,
+          categoryIds: category?.handlerIds,
+          productIds: product?.handlerIds,
+          defaultIds: scheduler.settings.defaultHandlerIds
+        });
+        if (props.assignment.mode === "department" && props.assignment.departmentId) {
+          const [department] = await this.deps.directory.getDepartments([
+            props.assignment.departmentId
+          ]);
+          departmentManagerId = department?.managerId ?? null;
+        }
+      }
+
+      const planned = planMessageNotifications(
+        {
+          ticket: { id: ticketId, props },
+          authorId,
+          authorName: author?.fullName ?? "Một đồng nghiệp",
+          body,
+          mentionIds,
+          responsibleIds,
+          departmentManagerId
+        },
+        props.visibility === "restricted"
+      );
+      await Promise.all(
+        planned.map((item) =>
+          this.deps.notifier.notify({
+            employeeIds: item.employeeIds,
+            title: item.title,
+            body: item.body,
+            type: item.type,
+            ticketId
+          })
+        )
+      );
+    } catch (error) {
+      logger.error("Không gửi được thông báo tin nhắn ticket", { error, ticketId });
+    }
+  }
+
   // ---- nội bộ --------------------------------------------------------------------------------
+
+  // File nhạy cảm do SERVER quyết định, không tin hoàn toàn loại giấy tờ client khai: nhạy cảm khi loại
+  // thuộc danh mục mặc định hoặc được mẫu của ticket đánh dấu; và khi ticket đang chờ người tạo bổ sung
+  // giấy tờ nhạy cảm thì mọi file gửi lên lúc đó đều coi là nhạy cảm (tránh CCCD bị lưu thành "Khác").
+  private async sensitivityRule(props: ReturnType<TicketEntity["getProps"]>) {
+    const template = props.templateId
+      ? await this.deps.config.findTemplate(props.templateId)
+      : null;
+    const kinds = new Set<string>([
+      ...DEFAULT_SENSITIVE_KINDS,
+      ...(template?.requiredDocuments ?? [])
+        .filter((item) => item.sensitive)
+        .map((item) => item.kind)
+    ]);
+    const awaitingSensitive =
+      props.status === "waiting_info" &&
+      (props.infoRequest?.items ?? []).some((item) => !item.fulfilled && kinds.has(item.key));
+    return (kind: string) => awaitingSensitive || kinds.has(kind);
+  }
 
   private async load(
     ticketId: string,

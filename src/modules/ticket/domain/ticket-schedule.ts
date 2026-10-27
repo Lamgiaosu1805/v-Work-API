@@ -31,8 +31,9 @@ export interface TicketSchedulePolicy {
 
 export const DEFAULT_TICKET_SCHEDULE_POLICY: TicketSchedulePolicy = {
   workdayMinutes: 540,
-  unclaimedMinutes: { urgent: 60, normal: 1 * 540, low: 3 * 540 },
-  silentMinutes: { urgent: 4 * 60, normal: 3 * 540, low: 7 * 540 },
+  // Khẩn (xử lý trong 1 ngày) · Cao (1–2 ngày) · Bình thường (2–5 ngày) · Thấp (5–10 ngày)
+  unclaimedMinutes: { urgent: 6 * 60, high: 1 * 540, normal: 2 * 540, low: 5 * 540 },
+  silentMinutes: { urgent: 1 * 540, high: 2 * 540, normal: 5 * 540, low: 10 * 540 },
   holdUnknownDays: 5,
   autoCloseResolvedDays: 3,
   autoCloseWaitingInfoDays: 3,
@@ -43,7 +44,7 @@ export const DEFAULT_TICKET_SCHEDULE_POLICY: TicketSchedulePolicy = {
 export interface TicketSettings {
   policy: TicketSchedulePolicy;
   calendar: Omit<WorkingCalendarConfig, "holidays">;
-  // Người nhận thông báo ticket Khẩn khi mẫu/loại yêu cầu không chỉ định ai
+  // Người nhận thông báo THÊM cho ticket mức Khẩn và Cao (ngoài người của mẫu/loại/sản phẩm)
   defaultHandlerIds: string[];
 }
 

@@ -30,16 +30,40 @@ function input(overrides: Partial<ScheduleInput> = {}): ScheduleInput {
 }
 
 describe("computeSchedule — cảnh báo vàng", () => {
-  it("open: vàng khi chưa ai nhận quá ngưỡng (bình thường = 1 ngày làm việc)", () => {
+  it("open: vàng khi chưa ai nhận quá ngưỡng (bình thường = 2 ngày làm việc)", () => {
     const schedule = computeSchedule(input(), policy, calendar);
     expect(schedule.alertReason).toBe("unclaimed");
-    // T6 09:00 + 540 phút = hết ca T6 (17:00=480') … còn 60' → sáng T7 09:00
+    // 1080' từ T6 09:00: T6 480' → T7 240' (720') → 360' sang T2 → 14:00 T2
+    expect(schedule.alertAt).toEqual(vn("2026-10-26T14:00:00"));
+  });
+
+  it("open + mức Khẩn: ngưỡng 6 giờ làm việc", () => {
+    const schedule = computeSchedule(input({ urgency: "urgent" }), policy, calendar);
+    expect(schedule.alertAt).toEqual(vn("2026-10-23T15:00:00"));
+  });
+
+  it("open + mức Cao: ngưỡng 1 ngày làm việc (dài hơn Khẩn, ngắn hơn Bình thường)", () => {
+    const schedule = computeSchedule(input({ urgency: "high" }), policy, calendar);
+    // 540' từ T6 09:00: T6 480' → còn 60' sang T7 → 09:00 T7
     expect(schedule.alertAt).toEqual(vn("2026-10-24T09:00:00"));
   });
 
-  it("open + Khẩn: ngưỡng 1 giờ làm việc", () => {
-    const schedule = computeSchedule(input({ urgency: "urgent" }), policy, calendar);
-    expect(schedule.alertAt).toEqual(vn("2026-10-23T10:00:00"));
+  it("ngưỡng mặc định tăng dần theo thứ tự Khẩn ≤ Cao ≤ Bình thường ≤ Thấp", () => {
+    (["unclaimedMinutes", "silentMinutes"] as const).forEach((group) => {
+      const { urgent, high, normal, low } = policy[group];
+      const values = [urgent, high, normal, low];
+      expect(values).toEqual([...values].sort((a, b) => a - b));
+    });
+  });
+
+  it("in_progress + mức Cao: im lặng 2 ngày làm việc", () => {
+    const schedule = computeSchedule(
+      input({ status: "in_progress", urgency: "high", assignment: { ownerId: "a" } }),
+      policy,
+      calendar
+    );
+    // 1080' từ T6 09:00: T6 480' + T7 240' + 360' sang T2 → 14:00 T2
+    expect(schedule.alertAt).toEqual(vn("2026-10-26T14:00:00"));
   });
 
   it("open tạo tối thứ Sáu: đồng hồ chỉ chạy từ đầu giờ làm việc kế tiếp", () => {
@@ -48,7 +72,8 @@ describe("computeSchedule — cảnh báo vàng", () => {
       policy,
       calendar
     );
-    expect(schedule.alertAt).toEqual(vn("2026-10-24T09:00:00"));
+    // đồng hồ chạy từ T7 08:00: T7 240' + 120' sang T2 → 10:00 T2
+    expect(schedule.alertAt).toEqual(vn("2026-10-26T10:00:00"));
   });
 
   it("in_progress: vàng khi im lặng quá ngưỡng", () => {
@@ -58,8 +83,8 @@ describe("computeSchedule — cảnh báo vàng", () => {
       calendar
     );
     expect(schedule.alertReason).toBe("silent");
-    // 3 ngày làm việc = 1620 phút từ T6 09:00: T6 480', T7 240' (720'), T2 540' (1260'), 360' sang T3 → 14:00
-    expect(schedule.alertAt).toEqual(vn("2026-10-27T14:00:00"));
+    // 5 ngày làm việc = 2700 phút từ T6 09:00: T6 480', T7 240' (720'), T2 (1260'), T3 (1800'), T4 (2340'), 360' sang T5 → 14:00
+    expect(schedule.alertAt).toEqual(vn("2026-10-29T14:00:00"));
   });
 
   it("in_progress đã tự hẹn ngày: không vàng vì im lặng, chỉ vàng khi qua hết ngày hẹn", () => {

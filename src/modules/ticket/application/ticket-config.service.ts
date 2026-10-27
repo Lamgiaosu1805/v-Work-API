@@ -9,6 +9,9 @@ import {
   NotFoundException
 } from "../../../core/exceptions/exceptions";
 import {
+  sortCategories,
+  sortProducts,
+  sortTemplates,
   toCategoryDef,
   toProductDef,
   toTemplateDef
@@ -18,7 +21,9 @@ import {
   settingsFromDoc,
   TICKET_SETTING_KEY
 } from "../infrastructure/ticket-settings";
-import { TICKET_URGENCIES } from "../domain/types";
+import { WorkingCalendar } from "../../../shared-kernel/working-calendar";
+import { URGENCY_LABELS } from "../domain/ticket-catalog";
+import { TICKET_URGENCIES, TicketUrgency } from "../domain/types";
 import { MongooseTicketDirectory } from "../infrastructure/ticket-directory";
 import { EmployeeSummary, TicketDirectory } from "./ports";
 
@@ -62,8 +67,8 @@ const KINDS: Record<ConfigKind, KindDefinition> = {
         group: input.group,
         app_code: input.appCode,
         description: input.description,
-        is_active: input.isActive,
-        sort_order: input.sortOrder
+        handler_ids: input.handlerIds === undefined ? undefined : objectIds(input.handlerIds),
+        is_active: input.isActive
       })
   },
   categories: {
@@ -77,8 +82,7 @@ const KINDS: Record<ConfigKind, KindDefinition> = {
         name: trimmed(input.name),
         description: input.description,
         handler_ids: input.handlerIds === undefined ? undefined : objectIds(input.handlerIds),
-        is_active: input.isActive,
-        sort_order: input.sortOrder
+        is_active: input.isActive
       })
   },
   templates: {
@@ -101,8 +105,7 @@ const KINDS: Record<ConfigKind, KindDefinition> = {
         default_urgency: input.defaultUrgency,
         handler_ids: input.handlerIds === undefined ? undefined : objectIds(input.handlerIds),
         guidance: input.guidance,
-        is_active: input.isActive,
-        sort_order: input.sortOrder
+        is_active: input.isActive
       });
     }
   }
@@ -114,6 +117,107 @@ function definitionOf(kind: string): KindDefinition {
   return definition;
 }
 
+const MINUTES_PER_DAY = 24 * 60;
+const isMinuteOfDay = (value: unknown): value is number =>
+  Number.isInteger(value) && (value as number) >= 0 && (value as number) <= MINUTES_PER_DAY;
+
+// Ngưỡng cảnh báo theo mức khẩn: phải là số phút dương cho từng mức được gửi lên (0 / rỗng sẽ làm mọi
+// ticket bị bôi vàng ngay).
+function validateUrgencyMinutes(value: unknown, label: string): void {
+  if (value === undefined) return;
+  if (!value || typeof value !== "object") {
+    throw new ArgumentInvalidException(`${label} không hợp lệ`);
+  }
+  Object.entries(value as Record<string, unknown>).forEach(([urgency, minutes]) => {
+    if (!(TICKET_URGENCIES as readonly string[]).includes(urgency)) {
+      throw new ArgumentInvalidException(`${label}: mức khẩn "${urgency}" không hợp lệ`);
+    }
+    if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes <= 0) {
+      throw new ArgumentInvalidException(`${label} phải là số phút dương`);
+    }
+  });
+}
+
+// Mức càng gấp thì ngưỡng càng ngắn: Khẩn ≤ Cao ≤ Bình thường ≤ Thấp. Kiểm tra trên giá trị SAU KHI gộp với cài đặt đang lưu (client có thể chỉ gửi một vài mức).
+function assertUrgencyOrder(
+  incoming: unknown,
+  current: Record<TicketUrgency, number>,
+  label: string
+): void {
+  if (incoming === undefined) return;
+  const merged = { ...current, ...(incoming as Partial<Record<TicketUrgency, number>>) };
+  for (let i = 1; i < TICKET_URGENCIES.length; i += 1) {
+    const more = TICKET_URGENCIES[i - 1];
+    const less = TICKET_URGENCIES[i];
+    if (merged[more] > merged[less]) {
+      throw new ArgumentInvalidException(
+        `${label}: mức ${URGENCY_LABELS[more]} không được dài hơn mức ${URGENCY_LABELS[less]}`
+      );
+    }
+  }
+}
+
+// Lịch làm việc sau khi gộp với cài đặt hiện tại phải dựng được WorkingCalendar: nếu không, mọi lệnh ghi
+// ticket và cron sẽ lỗi 500 cho tới khi sửa lại cài đặt.
+async function validateCalendarInput(input: Record<string, any>): Promise<void> {
+  const touched = ["workStartMinute", "workEndMinute", "workDays", "dayWindows"].some(
+    (key) => input[key] !== undefined
+  );
+  if (!touched) return;
+
+  ["workStartMinute", "workEndMinute"].forEach((key) => {
+    if (input[key] !== undefined && !isMinuteOfDay(input[key])) {
+      throw new ArgumentInvalidException("Giờ làm việc không hợp lệ");
+    }
+  });
+  if (input.workDays !== undefined) {
+    const days = input.workDays;
+    if (
+      !Array.isArray(days) ||
+      !days.length ||
+      days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)
+    ) {
+      throw new ArgumentInvalidException("Phải chọn ít nhất một ngày làm việc hợp lệ");
+    }
+  }
+  if (input.dayWindows !== undefined) {
+    const windows = input.dayWindows;
+    if (!windows || typeof windows !== "object" || Array.isArray(windows)) {
+      throw new ArgumentInvalidException("Khung giờ riêng theo thứ không hợp lệ");
+    }
+    Object.entries(windows as Record<string, any>).forEach(([day, window]) => {
+      if (
+        !["0", "1", "2", "3", "4", "5", "6"].includes(day) ||
+        !isMinuteOfDay(window?.startMinute) ||
+        !isMinuteOfDay(window?.endMinute)
+      ) {
+        throw new ArgumentInvalidException("Khung giờ riêng theo thứ không hợp lệ");
+      }
+    });
+  }
+
+  const { calendar } = await loadTicketSettings();
+  try {
+    // eslint-disable-next-line no-new
+    new WorkingCalendar({
+      workStartMinute: input.workStartMinute ?? calendar.workStartMinute,
+      workEndMinute: input.workEndMinute ?? calendar.workEndMinute,
+      workDays: input.workDays ?? calendar.workDays,
+      dayWindows:
+        input.dayWindows === undefined
+          ? calendar.dayWindows
+          : Object.fromEntries(
+              Object.entries(input.dayWindows as Record<string, any>).map(([day, window]) => [
+                Number(day),
+                window
+              ])
+            )
+    });
+  } catch {
+    throw new ArgumentInvalidException("Giờ kết thúc phải sau giờ bắt đầu");
+  }
+}
+
 const isDuplicateKey = (error: unknown) => (error as { code?: number })?.code === 11000;
 
 export class TicketConfigService {
@@ -122,8 +226,16 @@ export class TicketConfigService {
   async list(kind: string) {
     const { model, toDef } = definitionOf(kind);
     const docs = await model.find({ isDeleted: false }).lean();
-    const defs = docs.map(toDef) as Array<{ handlerIds?: string[] }>;
-    return this.withHandlers(defs);
+    const defs = docs.map(toDef) as any[];
+    // Thứ tự hiển thị: sản phẩm theo nhóm → ngày tạo; loại yêu cầu theo ngày tạo; mẫu theo loại → ngày tạo
+    let sorted = defs;
+    if (kind === "products") sorted = sortProducts(defs);
+    else if (kind === "categories") sorted = sortCategories(defs);
+    else if (kind === "templates") {
+      const categories = await TicketCategoryModel.find({ isDeleted: false }).lean();
+      sorted = sortTemplates(defs, categories.map(toCategoryDef));
+    }
+    return this.withHandlers(sorted as Array<{ handlerIds?: string[] }>);
   }
 
   // Gắn tên người phụ trách (handlers) bên cạnh handlerIds để màn cấu hình hiển thị được ngay.
@@ -213,6 +325,14 @@ export class TicketConfigService {
     positive(input.autoCloseWaitingInfoDays, "Số ngày tự đóng ticket chờ bổ sung");
     positive(input.reopenDays, "Số ngày được mở lại");
     positive(input.holdUnknownDays, "Số ngày cảnh báo tạm hoãn");
+    validateUrgencyMinutes(input.unclaimedMinutes, "Ngưỡng cảnh báo chưa ai nhận");
+    validateUrgencyMinutes(input.silentMinutes, "Ngưỡng cảnh báo im lặng");
+    if (input.unclaimedMinutes !== undefined || input.silentMinutes !== undefined) {
+      const { policy } = await loadTicketSettings();
+      assertUrgencyOrder(input.unclaimedMinutes, policy.unclaimedMinutes, "Ngưỡng chưa ai nhận");
+      assertUrgencyOrder(input.silentMinutes, policy.silentMinutes, "Ngưỡng im lặng");
+    }
+    await validateCalendarInput(input);
 
     const $set = pickDefined({
       default_handler_ids:

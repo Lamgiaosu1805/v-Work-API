@@ -8,7 +8,7 @@ import TicketModel from "../../../models/TicketModel";
 import { getTicketDir } from "../../../middlewares/uploadTicket";
 import { NotFoundException } from "../../../core/exceptions/exceptions";
 import { parsePagination } from "../../../core/http/parse-pagination";
-import { accessLevel, canViewSensitiveFiles } from "../domain/ticket-access";
+import { accessLevel, canViewSensitiveFiles, customerVisibility } from "../domain/ticket-access";
 import { capabilitiesOf } from "../domain/ticket-capabilities";
 import { INFO_REQUEST_CATALOG, RESOLUTION_LABELS } from "../domain/ticket-catalog";
 import { isYellow } from "../domain/ticket-schedule";
@@ -24,7 +24,8 @@ import { TicketDirectory } from "./ports";
 import {
   buildListFilter,
   listSort,
-  TICKET_TABS,
+  normalizeScope,
+  tabFilter,
   TicketListQuery,
   visibilityFilter
 } from "./ticket-query-filters";
@@ -60,7 +61,13 @@ export class TicketQueryService {
   async list(actor: TicketActor, query: TicketListQuery) {
     const now = this.deps.now();
     const { page, limit, skip } = parsePagination(query);
-    const filter = buildListFilter(query, actor, now);
+    // Tab "Ticket phòng ban" cần biết ai thuộc phòng của người xem (kể cả phòng con) — chỉ tra khi cần.
+    const needsDepartmentTree =
+      query.tab === "department" && normalizeScope(query.tab, query.scope) !== "waiting";
+    const departmentEmployeeIds = needsDepartmentTree
+      ? await this.deps.directory.getOwnDepartmentTreeEmployeeIds(actor.employeeId)
+      : undefined;
+    const filter = buildListFilter(query, actor, now, { departmentEmployeeIds });
 
     const [docs, total] = await Promise.all([
       TicketModel.find(filter)
@@ -91,7 +98,8 @@ export class TicketQueryService {
         urgency: ticket.urgency,
         product: { id: ticket.productId, name: productName.get(ticket.productId) ?? "" },
         category: { id: ticket.categoryId, name: categoryName.get(ticket.categoryId) ?? "" },
-        customer: ticket.customer,
+        // Danh sách không cần mã khách (userId) nên không trả cho ai
+        customer: ticket.customer ? { ...ticket.customer, externalId: null } : null,
         createdBy: { id: ticket.createdBy, name: names.get(ticket.createdBy) ?? "" },
         owner: ticket.assignment.ownerId
           ? { id: ticket.assignment.ownerId, name: names.get(ticket.assignment.ownerId) ?? "" }
@@ -117,19 +125,35 @@ export class TicketQueryService {
     };
   }
 
-  // Số ticket của từng tab để hiện badge.
+  // Số ticket của từng tab để hiện badge — chỉ đếm phần CẦN HÀNH ĐỘNG: "my" đếm ticket đang mở,
+  // "department" đếm ticket đã giao cho phòng và đang chờ nhận.
   async counts(actor: TicketActor): Promise<Record<string, number>> {
     const now = this.deps.now();
-    const tabs = TICKET_TABS.filter(
-      (tab) => tab !== "all" && tab !== "closed" && tab !== "created"
-    );
+    const badges: Array<{ key: string; tab: string; scope?: string }> = [
+      { key: "my", tab: "my", scope: "open" },
+      { key: "needs_reply", tab: "needs_reply" },
+      { key: "unclaimed", tab: "unclaimed" },
+      { key: "department", tab: "department", scope: "waiting" },
+      { key: "yellow", tab: "yellow" }
+    ];
     const entries = await Promise.all(
-      tabs.map(
-        async (tab) =>
-          [tab, await TicketModel.countDocuments(buildListFilter({ tab }, actor, now))] as const
+      badges.map(
+        async ({ key, tab, scope }) =>
+          [
+            key,
+            await TicketModel.countDocuments(buildListFilter({ tab, scope }, actor, now))
+          ] as const
       )
     );
-    return Object.fromEntries(entries);
+    // `total`: số ticket KHÁC NHAU cần người dùng để ý — một ticket nằm ở nhiều tab chỉ đếm một lần (badge menu).
+    const total = await TicketModel.countDocuments({
+      $and: [
+        { isDeleted: false },
+        visibilityFilter(actor),
+        { $or: badges.map(({ tab, scope }) => tabFilter({ tab, scope }, actor, now)) }
+      ]
+    });
+    return { ...Object.fromEntries(entries), total };
   }
 
   // ---- chi tiết -----------------------------------------------------------------------------
@@ -212,6 +236,7 @@ export class TicketQueryService {
     });
 
     const sensitiveVisible = canViewSensitiveFiles(ticket, actor);
+    const customerRule = customerVisibility(ticket, actor);
     const department = ticket.assignment.departmentId
       ? (await this.deps.directory.getDepartments([ticket.assignment.departmentId]))[0]
       : null;
@@ -219,6 +244,22 @@ export class TicketQueryService {
     return {
       accessLevel: "full" as const,
       ...this.detailFields(ticket, now),
+      // Mã khách chỉ trả cho IT / nhóm xử lý / người có quyền xem khách hàng (xem customerVisibility)
+      customer: ticket.customer
+        ? {
+            ...ticket.customer,
+            externalId: customerRule.includeExternalId ? ticket.customer.externalId : null
+          }
+        : null,
+      customerAccess: {
+        // Khách đã gắn với hồ sơ CRM (chọn từ CRM) hay do người tạo nhập tay — mọi người xem đều biết
+        linkedToCrm: Boolean(ticket.customer?.externalId || ticket.customer?.customerId),
+        showExternalId: customerRule.showExternalId && Boolean(ticket.customer?.externalId),
+        canOpenProfile:
+          customerRule.includeExternalId &&
+          Boolean(ticket.customer?.externalId) &&
+          Boolean(actor.canViewCustomer)
+      },
       product: {
         id: ticket.productId,
         name: products.find((item) => item.id === ticket.productId)?.name ?? ""
@@ -328,7 +369,7 @@ export class TicketQueryService {
       loadTicketSettings()
     ]);
     return {
-      products,
+      products: products.map(({ handlerIds, ...product }) => product),
       categories: categories.map(({ handlerIds, ...category }) => category),
       templates: templates.map(({ handlerIds, ...template }) => template),
       infoRequestCatalog: INFO_REQUEST_CATALOG,

@@ -25,7 +25,8 @@ const TicketSchema = new Schema(
     category_id: { type: ObjectId, ref: "ticket_category", required: true },
     template_id: { type: ObjectId, ref: "ticket_template", default: null },
     custom_fields: { type: Schema.Types.Mixed, default: {} },
-    urgency: { type: String, enum: ["urgent", "normal", "low"], default: "normal" },
+    // urgent = Khẩn, high = Cao, normal = Bình thường, low = Thấp
+    urgency: { type: String, enum: ["urgent", "high", "normal", "low"], default: "normal" },
 
     // Snapshot khách hàng do người tạo chọn (không join lại CRM khi đọc)
     customer: {

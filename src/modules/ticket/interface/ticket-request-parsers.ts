@@ -2,7 +2,7 @@ import { Request } from "express";
 import path from "path";
 import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
 import { UploadedTicketFile } from "../application/ticket-commands.service";
-import { TICKET_TABS, TicketListQuery } from "../application/ticket-query-filters";
+import { normalizeScope, TICKET_TABS, TicketListQuery } from "../application/ticket-query-filters";
 import { TICKET_URGENCIES } from "../domain/types";
 
 // Phần của đối tượng file mà multer gắn vào req.files (dự án không cài @types/multer).
@@ -80,6 +80,7 @@ export function parseListQuery(query: Request["query"]): TicketListQuery {
 
   return {
     tab,
+    scope: tab ? normalizeScope(tab, text(query.scope)) : undefined,
     status: toStringList(query.status),
     productId: text(query.productId),
     categoryId: text(query.categoryId),
@@ -94,8 +95,7 @@ export function parseListQuery(query: Request["query"]): TicketListQuery {
   };
 }
 
-// Content-Type theo đuôi file (KHÔNG tin mimetype do client khai) — chỉ định dạng an toàn mới xem trực
-// tiếp trong trình duyệt, còn lại buộc tải về.
+// Content-Type theo đuôi file (KHÔNG tin mimetype do client khai) — chỉ định dạng an toàn mới xem trực tiếp trong trình duyệt, còn lại buộc tải về.
 const INLINE_TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -104,7 +104,9 @@ const INLINE_TYPES: Record<string, string> = {
   ".gif": "image/gif",
   ".pdf": "application/pdf",
   ".txt": "text/plain; charset=utf-8",
-  ".mp4": "video/mp4"
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".heic": "image/heic"
 };
 
 export function contentTypeFor(fileName: string): { type: string; inline: boolean } {

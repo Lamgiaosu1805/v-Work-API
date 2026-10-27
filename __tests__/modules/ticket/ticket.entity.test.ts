@@ -159,6 +159,30 @@ describe("TicketEntity — nhóm xử lý", () => {
     expect(() => ticket.addCollaborator(IT_A, IT_A)).toThrow();
   });
 
+  it("giao lại: sự kiện mang theo nhóm xử lý cũ để báo người bị gỡ ra", () => {
+    const ticket = inProgress();
+    ticket.addCollaborator(IT_A, IT_B);
+    ticket.assign({ mode: "members", memberIds: [IT_C], assignedBy: BOSS });
+    const assigned: any = ticket.domainEvents.find(
+      (event) => event.constructor.name === "TicketAssignedDomainEvent"
+    );
+    expect(assigned.previousHandlerIds).toEqual([IT_A, IT_B]);
+    expect(assigned.memberIds).toEqual([IT_C]);
+    // Giao lúc tạo thì chưa có nhóm cũ
+    const created = TicketEntity.create({
+      code: "TK-1",
+      title: "x",
+      productId: "p",
+      categoryId: "c",
+      createdBy: REQUESTER,
+      assignment: { mode: "members", memberIds: [IT_A], assignedBy: BOSS }
+    });
+    const first: any = created.domainEvents.find(
+      (event) => event.constructor.name === "TicketAssignedDomainEvent"
+    );
+    expect(first.previousHandlerIds).toEqual([]);
+  });
+
   it("chủ trì trả lại: người phối hợp sớm nhất lên chủ trì", () => {
     const ticket = inProgress();
     ticket.addCollaborator(IT_A, IT_B);
@@ -448,6 +472,28 @@ describe("TicketEntity.edit", () => {
     );
     ticket.edit({ urgency: "urgent" }, "group", IT_A, "Khách bị khoá tài khoản");
     expect(ticket.getProps().urgency).toBe("urgent");
+  });
+
+  it("ticket chưa ai nhận bị nâng mức → phát sự kiện; hạ mức hoặc đã có chủ trì thì không", () => {
+    const ticket = newTicket();
+    ticket.clearEvents();
+    ticket.edit({ urgency: "high" }, "requester", REQUESTER);
+    expect(eventNames(ticket)).toEqual(["TicketUrgencyRaisedDomainEvent"]);
+    const event = ticket.domainEvents[0] as unknown as { from: string; to: string };
+    expect([event.from, event.to]).toEqual(["normal", "high"]);
+
+    ticket.clearEvents();
+    ticket.edit({ urgency: "urgent" }, "group", IT_A, "Khách mất quyền truy cập");
+    expect(eventNames(ticket)).toEqual(["TicketUrgencyRaisedDomainEvent"]);
+
+    ticket.clearEvents();
+    ticket.edit({ urgency: "low" }, "requester", REQUESTER);
+    expect(eventNames(ticket)).toEqual([]);
+
+    const claimed = inProgress();
+    claimed.clearEvents();
+    claimed.edit({ urgency: "urgent" }, "requester", REQUESTER);
+    expect(eventNames(claimed)).toEqual(["TicketContentEditedDomainEvent"]);
   });
 
   it("ticket đã đóng thì khoá sửa", () => {

@@ -9,8 +9,10 @@ export interface ProductDef {
   group: string;
   appCode: string | null;
   description: string;
+  handlerIds: string[];
   isActive: boolean;
-  sortOrder: number;
+  // Ngày tạo — dùng để sắp xếp danh sách cấu hình (nhóm sản phẩm → ngày tạo)
+  createdAt: Date;
 }
 
 export interface CategoryDef {
@@ -20,7 +22,8 @@ export interface CategoryDef {
   description: string;
   handlerIds: string[];
   isActive: boolean;
-  sortOrder: number;
+  // Ngày tạo — dùng để sắp xếp danh sách cấu hình (nhóm sản phẩm → ngày tạo)
+  createdAt: Date;
 }
 
 export interface TemplateFieldDef {
@@ -53,7 +56,8 @@ export interface TemplateDef {
   handlerIds: string[];
   guidance: string;
   isActive: boolean;
-  sortOrder: number;
+  // Ngày tạo — dùng để sắp xếp danh sách cấu hình (nhóm sản phẩm → ngày tạo)
+  createdAt: Date;
 }
 
 export interface TicketConfigReader {

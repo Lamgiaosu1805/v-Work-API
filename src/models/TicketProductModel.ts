@@ -13,8 +13,9 @@ const TicketProductSchema = new Schema(
     // Liên kết app của CRM (customer.app) để tra khách; null với sản phẩm nội bộ vWork
     app_code: { type: String, default: null },
     description: { type: String, default: "" },
+    // Người nhận thông báo ticket thuộc sản phẩm này (cộng dồn với người của mẫu, loại yêu cầu và mặc định)
+    handler_ids: [{ type: Schema.Types.ObjectId, ref: "user_info" }],
     is_active: { type: Boolean, default: true },
-    sort_order: { type: Number, default: 0 },
 
     ...BaseSchema.obj
   },

@@ -8,10 +8,9 @@ const TicketCategorySchema = new Schema(
     code: { type: String, required: true },
     name: { type: String, required: true },
     description: { type: String, default: "" },
-    // Người nhận thông báo ticket Khẩn của loại này (cấp ưu tiên 2, sau mẫu yêu cầu)
+    // Người nhận thông báo khi có ticket mới của loại này (mọi mức khẩn; cộng dồn với mẫu và sản phẩm)
     handler_ids: [{ type: Schema.Types.ObjectId, ref: "user_info" }],
     is_active: { type: Boolean, default: true },
-    sort_order: { type: Number, default: 0 },
 
     ...BaseSchema.obj
   },

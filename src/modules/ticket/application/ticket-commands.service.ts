@@ -65,6 +65,7 @@ export interface CreateTicketCommand {
   customFields?: Record<string, unknown>;
   urgency?: TicketUrgency;
   customer?: Partial<TicketCustomerSnapshot> | null;
+  relatedEmployeeId?: string | null;
   assignment?: AssignmentInput | null;
   relatedTicketIds?: string[];
   approvalReference?: { number: string; date?: Date | null; signer?: string } | null;
@@ -192,6 +193,15 @@ export class TicketCommandService {
 
     await authorizeAssignment(this.deps.directory, actor, cmd.assignment);
 
+    let relatedEmployeeId: string | null = null;
+    if (cmd.relatedEmployeeId) {
+      const [employee] = mongoose.isValidObjectId(cmd.relatedEmployeeId)
+        ? await this.deps.directory.getEmployees([String(cmd.relatedEmployeeId)])
+        : [];
+      if (!employee) throw new ArgumentInvalidException("Nhân sự liên quan không tồn tại");
+      relatedEmployeeId = employee.id;
+    }
+
     const approvalRequired = Boolean(template?.requiresApproval);
     const code = await this.deps.nextCode(now);
     const ticket = TicketEntity.create(
@@ -205,6 +215,7 @@ export class TicketCommandService {
         customFields,
         urgency: cmd.urgency ?? template?.defaultUrgency ?? "normal",
         customer: cmd.customer,
+        relatedEmployeeId,
         createdBy: actor.employeeId,
         approvalRequired,
         approvalDocumentProvided: files.some((file) => file.kind === APPROVAL_DOCUMENT_ITEM_KEY),

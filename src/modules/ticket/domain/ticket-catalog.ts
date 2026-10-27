@@ -18,7 +18,6 @@ export const INFO_REQUEST_CATALOG: InfoRequestCatalogItem[] = [
   { key: "reproduce_steps", group: "Chung", label: "Các bước tái hiện lỗi" },
 
   { key: "customer_phone", group: "Khách hàng", label: "Số điện thoại khách" },
-  { key: "customer_code", group: "Khách hàng", label: "Mã khách / userId" },
   { key: "customer_id_number", group: "Khách hàng", label: "Số CCCD của khách" },
   { key: "cccd_images", group: "Khách hàng", label: "CCCD 2 mặt" },
   {

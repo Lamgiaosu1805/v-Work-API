@@ -1304,3 +1304,39 @@ describe("mã khách (externalId) chỉ trả cho người cần dùng", () => {
     });
   });
 });
+
+describe("nhân sự liên quan (sản phẩm nội bộ)", () => {
+  it("gắn nhân sự khi tạo: lưu id, chi tiết và danh sách trả tên", async () => {
+    const created = await createPlain({
+      title: "Reset mật khẩu HRM",
+      customer: null,
+      relatedEmployeeId: IT_C
+    });
+
+    expect(String((await TicketModel.findById(created.id).lean())?.related_employee_id)).toBe(IT_C);
+
+    const detail: any = await queries.getById(requester(), created.id);
+    expect(detail.relatedEmployee).toMatchObject({ id: IT_C, name: "IT C" });
+    expect(detail.customer).toBeNull();
+
+    const list = await queries.list(requester(), { tab: "all" });
+    expect(list.data[0].relatedEmployee).toEqual({ id: IT_C, name: "IT C" });
+  });
+
+  it("ticket không gắn nhân sự thì trả null", async () => {
+    const created = await createPlain();
+    const detail: any = await queries.getById(requester(), created.id);
+    expect(detail.relatedEmployee).toBeNull();
+    expect((await queries.list(requester(), { tab: "all" })).data[0].relatedEmployee).toBeNull();
+  });
+
+  it("nhân sự không tồn tại hoặc id sai định dạng thì báo lỗi, không tạo ticket", async () => {
+    await expect(createPlain({ relatedEmployeeId: id() })).rejects.toThrow(
+      ArgumentInvalidException
+    );
+    await expect(createPlain({ relatedEmployeeId: "khong-phai-id" })).rejects.toThrow(
+      ArgumentInvalidException
+    );
+    expect(await TicketModel.countDocuments()).toBe(0);
+  });
+});

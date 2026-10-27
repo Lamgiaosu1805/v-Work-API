@@ -67,6 +67,7 @@ export interface CreateTicketInput {
   customFields?: Record<string, unknown>;
   urgency?: TicketUrgency;
   customer?: Partial<TicketCustomerSnapshot> | null;
+  relatedEmployeeId?: string | null;
   createdBy: string;
   approvalRequired?: boolean;
   // Người tạo đã đính kèm tờ trình ngay lúc tạo.
@@ -184,6 +185,7 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
         customFields: input.customFields ?? {},
         urgency: input.urgency ?? "normal",
         customer: normalizeCustomer(input.customer),
+        relatedEmployeeId: input.relatedEmployeeId ? String(input.relatedEmployeeId) : null,
         createdBy: String(input.createdBy),
         assignment,
         status,

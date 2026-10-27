@@ -128,6 +128,7 @@ export const ticketHttpController = {
           customFields: payload.customFields,
           urgency: payload.urgency as TicketUrgency | undefined,
           customer: payload.customer,
+          relatedEmployeeId: payload.relatedEmployeeId ? String(payload.relatedEmployeeId) : null,
           assignment: payload.assignment,
           relatedTicketIds: toStringList(payload.relatedTicketIds),
           approvalReference: approvalReferenceOf(payload)

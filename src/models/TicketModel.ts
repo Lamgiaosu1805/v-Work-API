@@ -42,6 +42,8 @@ const TicketSchema = new Schema(
       ),
       default: null
     },
+    // Nhân sự nội bộ mà ticket hỗ trợ (sản phẩm nội bộ vWork: CRM/HRM/Workplace) — thay cho khách ở trên
+    related_employee_id: { type: ObjectId, ref: "user_info", default: null },
 
     created_by: { type: ObjectId, ref: "user_info", required: true },
 
@@ -191,5 +193,6 @@ TicketSchema.index({ alert_at: 1 });
 TicketSchema.index({ auto_close_at: 1 });
 TicketSchema.index({ remind_at: 1 });
 TicketSchema.index({ "customer.phone": 1 });
+TicketSchema.index({ related_employee_id: 1 });
 
 export default mongoose.model("ticket", TicketSchema);

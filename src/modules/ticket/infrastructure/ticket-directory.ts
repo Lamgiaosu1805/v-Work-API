@@ -160,7 +160,13 @@ export class MongooseTicketDirectory implements TicketDirectory {
     const keyword = query.trim();
     if (keyword) {
       const pattern = new RegExp(escapeRegex(keyword), "i");
-      filter.$or = [{ full_name: pattern }, { ma_nv: pattern }];
+      const conditions: Record<string, unknown>[] = [{ full_name: pattern }, { ma_nv: pattern }];
+      // Gõ SĐT: so theo phần số, bỏ số 0 / +84 đầu để "0343..." khớp cả "+84343..." (và ngược lại).
+      const digits = keyword.replace(/\D/g, "").replace(/^(84|0)/, "");
+      if (/^[\d\s+().-]+$/.test(keyword) && digits.length >= 3) {
+        conditions.push({ phone_number: new RegExp(escapeRegex(digits)) });
+      }
+      filter.$or = conditions;
     }
     const userInfos = await UserInfoModel.find(filter)
       .select("full_name id_account")

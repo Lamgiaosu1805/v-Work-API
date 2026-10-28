@@ -12,6 +12,7 @@ const LEGEND = [
   "V: Làm nửa ngày (0,5 công)",
   "H: Làm nửa ngày (nửa ngày tính phép) (1 công, 0,5 phép)",
   "P: Ngày nghỉ hưởng nguyên lương (1 công)",
+  "P/2: Nghỉ phép thứ 7 (0,5 công, 0,5 phép)",
   "K: Nghỉ không lương (0 công)",
   "R: Làm remote, tính full lương (1 công)",
   "A: Làm cả ngày (1,5 công)",
@@ -32,10 +33,11 @@ function codeByWorkUnit(workUnit) {
 }
 
 /**
- * Ký hiệu chấm công của 1 ngày (X, V, H, P, K, R, A, L hoặc "" nếu không đi làm / chưa chốt công).
+ * Ký hiệu chấm công của 1 ngày (X, V, H, P, P/2, K, R, A, L hoặc "" nếu không đi làm / chưa chốt công).
  * @param {{ work_unit: number|null, statuses: Array<{ status: string }>, is_holiday: boolean }} day
+ * @param {string} [dateKey] "YYYY-MM-DD" — để nhận ra thứ 7
  */
-function resolveDayCode({ work_unit: workUnit, statuses = [], is_holiday: isHoliday }) {
+function resolveDayCode({ work_unit: workUnit, statuses = [], is_holiday: isHoliday }, dateKey) {
   const kinds = statuses.map((s) => s.status).filter((status) => status !== "pending");
   const hasWork = kinds.some((status) => WORK_STATUSES.has(status));
   const hasRemote = kinds.includes("remote");
@@ -46,7 +48,11 @@ function resolveDayCode({ work_unit: workUnit, statuses = [], is_holiday: isHoli
   // Chưa có trạng thái (ngày chưa chốt, hoặc công được sửa tay) → dựa vào số công
   if (!kinds.length) return codeByWorkUnit(workUnit ?? 0);
   if (hasRemote && !hasWork && !hasPaidLeave && !hasUnpaid) return "R";
-  if (hasPaidLeave) return hasWork || hasRemote ? "H" : "P";
+  if (hasPaidLeave) {
+    if (hasWork || hasRemote) return "H";
+    // Thứ 7 chỉ làm buổi sáng → nghỉ phép thứ 7 là nửa ngày (0,5 công, 0,5 phép)
+    return dateKey && moment.tz(dateKey, TZ).day() === 6 ? "P/2" : "P";
+  }
   if (hasWork || hasRemote) {
     if (workUnit === null || workUnit === undefined) return ""; // chưa chốt công trong ngày
     return codeByWorkUnit(workUnit) || "K";
@@ -66,22 +72,69 @@ function blankIfZero(value) {
   return value || null;
 }
 
+function formatDate(date) {
+  return date ? moment.tz(date, TZ).format("DD/MM/YYYY") : null;
+}
+
+/**
+ * Ngày thử việc = ngày vào làm (đầu kỳ thử việc), trống nếu không có thử việc.
+ * Ngày chính thức: ưu tiên official_date (ngày hiệu lực lần đổi sang Chính thức); dữ liệu cũ chưa có
+ * thì suy ra = ngày sau probation_end_date (ngày thử việc cuối cùng), hoặc = ngày vào làm nếu
+ * probation_end_date trống (vào làm chính thức luôn). Đang Thử việc → ngày chính thức chỉ là dự kiến.
+ */
+function resolveContractDates({ startDate, probationEndDate, officialDate, isOnProbation }) {
+  const startKey = startDate ? moment.tz(startDate, TZ).format("YYYY-MM-DD") : null;
+  let official = null;
+  if (officialDate) official = moment.tz(officialDate, TZ);
+  else if (probationEndDate) official = moment.tz(probationEndDate, TZ).add(1, "day");
+  // Thử việc mà chưa có ngày hết thử việc → chưa biết ngày chính thức (dòng đã tô vàng)
+  else if (startDate && !isOnProbation) official = moment.tz(startDate, TZ);
+
+  // Đang Thử việc thì luôn có ngày thử việc (= ngày vào làm), kể cả khi chưa biết ngày chính thức
+  const hasProbation = Boolean(
+    startKey && (official ? official.format("YYYY-MM-DD") > startKey : isOnProbation)
+  );
+  const officialLabel = official ? official.format("DD/MM/YYYY") : null;
+  return {
+    probationDate: hasProbation ? formatDate(startDate) : null,
+    officialDate: officialLabel && isOnProbation ? `${officialLabel} (dự kiến)` : officialLabel
+  };
+}
+
 /**
  * Số liệu 1 dòng bảng công. "Số công thực tế" giữ đúng công thức file xuất cũ: tổng công trừ nghỉ
  * phép, công tác và gặp khách hàng (remote vẫn tính là đi làm).
  */
-function buildEmployeeLine({ row, departmentNames, positionNames }, periodDays) {
+function buildEmployeeLine(
+  {
+    row,
+    departmentNames,
+    positionNames,
+    leaveCarryOver = 0,
+    startDate,
+    probationEndDate,
+    officialDate,
+    isOnProbation = false,
+    missingEmploymentDates = false
+  },
+  periodDays
+) {
   const base = {
+    maNv: row.ma_nv,
     fullName: row.full_name,
     department: departmentNames.join(", "),
-    position: positionNames.join(", ")
+    position: positionNames.join(", "),
+    ...resolveContractDates({ startDate, probationEndDate, officialDate, isOnProbation }),
+    missingEmploymentDates
   };
 
   if (isFixedCtv(positionNames)) {
     return {
       ...base,
+      // CTV tính cố định 12 công, không cần ngày thử việc/chính thức
+      missingEmploymentDates: false,
       codes: periodDays.map(() => ""),
-      totals: [CTV_FIXED_WORK_UNITS, 0, CTV_FIXED_WORK_UNITS, null, 0],
+      totals: [CTV_FIXED_WORK_UNITS, 0, CTV_FIXED_WORK_UNITS, null, leaveCarryOver, 0],
       penalty: null,
       missedClock: null
     };
@@ -92,13 +145,14 @@ function buildEmployeeLine({ row, departmentNames, positionNames }, periodDays) 
   return {
     ...base,
     codes: periodDays.map(({ key }) =>
-      row.daily.has(key) ? resolveDayCode(row.daily.get(key)) : ""
+      row.daily.has(key) ? resolveDayCode(row.daily.get(key), key) : ""
     ),
     totals: [
       row.work_unit_total,
       actual,
       row.work_unit_official,
       blankIfZero(row.work_unit_probation),
+      leaveCarryOver,
       row.leave_paid_days ?? 0
     ],
     penalty: blankIfZero(row.penalty_amount_total),
@@ -110,16 +164,20 @@ const FONT = { name: "Times New Roman", size: 11 };
 const THIN = { style: "thin" };
 const BORDER = { top: THIN, left: THIN, bottom: THIN, right: THIN };
 const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
+const MISSING_DATES_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2CC" } };
+const MISSING_DATES_NOTE =
+  "Ô tô vàng: hồ sơ thiếu ngày vào làm, hoặc hợp đồng Thử việc mà chưa có ngày hết thử việc — cần bổ sung";
 const SUNDAY_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F2F2" } };
 const CENTER = { horizontal: "center", vertical: "middle", wrapText: true };
 
-const HEADER_ROW = 10; // dòng 1–8 là tiêu đề + chú thích, dòng 10–12 là header bảng
-const FIXED_COLS = 4; // TT, Họ và tên, Đơn vị, Chức vụ
+const HEADER_ROW = 10; // dòng 1–9 là tiêu đề + chú thích, dòng 10–12 là header bảng
+const FIXED_COLS = 5; // TT, Mã NV, Họ và tên, Đơn vị, Chức vụ
 const TOTAL_HEADERS = [
   "Tổng công",
   "Số công thực tế",
   "Công chính thức",
   "Công thử việc",
+  "Phép tồn tháng trước",
   "Nghỉ phép"
 ];
 
@@ -133,8 +191,11 @@ const TOTAL_HEADERS = [
  * @param {moment.Moment} input.periodEnd
  * @param {number} input.standardWorkUnits   Định mức ngày công của kỳ
  * @param {string} [input.departmentName]    "Bộ phận chấm công" khi xuất theo 1 phòng ban
- * @param {Array<{ row: object, departmentNames: string[], positionNames: string[] }>} input.employees
- *        row = kết quả buildPayrollRows(..., includeDaily: true)
+ * @param {Array<{ row: object, departmentNames: string[], positionNames: string[],
+ *        leaveCarryOver?: number, startDate?: Date, probationEndDate?: Date, officialDate?: Date,
+ *        isOnProbation?: boolean, missingEmploymentDates?: boolean }>} input.employees
+ *        row = kết quả buildPayrollRows(..., includeDaily: true); leaveCarryOver = số phép tồn
+ *        trước ngày bắt đầu kỳ
  * @returns {ExcelJS.Workbook}
  */
 function buildTimesheetWorkbook({
@@ -162,7 +223,9 @@ function buildTimesheetWorkbook({
   const firstTotalCol = lastDayCol + 1;
   const penaltyCol = firstTotalCol + TOTAL_HEADERS.length;
   const missedClockCol = penaltyCol + 1;
-  const lastCol = missedClockCol;
+  const probationDateCol = missedClockCol + 1;
+  const officialDateCol = probationDateCol + 1;
+  const lastCol = officialDateCol;
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Tổng công", {
@@ -178,6 +241,7 @@ function buildTimesheetWorkbook({
 
   sheet.columns = [
     { width: 5 },
+    { width: 10 },
     { width: 26 },
     { width: 20 },
     { width: 26 },
@@ -186,9 +250,12 @@ function buildTimesheetWorkbook({
     { width: 9 },
     { width: 9 },
     { width: 9 },
+    { width: 9 },
     { width: 8 },
     { width: 12 },
-    { width: 9 }
+    { width: 9 },
+    { width: 12 },
+    { width: 12 }
   ];
 
   // ── Tiêu đề + chú thích ký hiệu ─────────────────────────────────────────
@@ -210,6 +277,8 @@ function buildTimesheetWorkbook({
   setCell(4, 3, departmentName);
   setCell(5, 2, "Định mức ngày công");
   setCell(5, 3, standardWorkUnits ?? null, { alignment: { horizontal: "left" } });
+  const missingNote = setCell(7, 2, MISSING_DATES_NOTE, { font: { italic: true } });
+  missingNote.fill = MISSING_DATES_FILL;
 
   const legendLastCol = Math.min(firstDayCol + 15, lastCol);
   LEGEND.forEach((text, index) => {
@@ -228,13 +297,15 @@ function buildTimesheetWorkbook({
   const h1 = HEADER_ROW;
   const h2 = HEADER_ROW + 1;
   const h3 = HEADER_ROW + 2;
-  ["TT", "Họ và tên", "Đơn vị", "Chức vụ"].forEach((label, index) => {
+  ["TT", "Mã NV", "Họ và tên", "Đơn vị", "Chức vụ"].forEach((label, index) => {
     headerCell(h1, index + 1, h3, index + 1, label);
   });
   headerCell(h1, firstDayCol, h1, lastDayCol, "Ngày công trong tháng");
   headerCell(h1, firstTotalCol, h1, penaltyCol - 1, "Tính công");
   headerCell(h1, penaltyCol, h3, penaltyCol, "Phạt đi muộn, về sớm");
   headerCell(h1, missedClockCol, h3, missedClockCol, "Quên chấm công");
+  headerCell(h1, probationDateCol, h3, probationDateCol, "Ngày thử việc");
+  headerCell(h1, officialDateCol, h3, officialDateCol, "Ngày chính thức");
   TOTAL_HEADERS.forEach((label, index) => {
     headerCell(h2, firstTotalCol + index, h3, firstTotalCol + index, label);
   });
@@ -253,13 +324,16 @@ function buildTimesheetWorkbook({
     const rowNumber = h3 + 1 + index;
     const values = [
       index + 1,
+      line.maNv,
       line.fullName,
       line.department,
       line.position,
       ...line.codes,
       ...line.totals,
       line.penalty,
-      line.missedClock
+      line.missedClock,
+      line.probationDate,
+      line.officialDate
     ];
     values.forEach((value, valueIndex) => {
       const col = valueIndex + 1;
@@ -274,6 +348,9 @@ function buildTimesheetWorkbook({
         cell.fill = SUNDAY_FILL;
       }
       if (col === penaltyCol) cell.numFmt = "#,##0";
+      const isEmploymentInfoCol =
+        (col >= 2 && col <= FIXED_COLS) || col === probationDateCol || col === officialDateCol;
+      if (line.missingEmploymentDates && isEmploymentInfoCol) cell.fill = MISSING_DATES_FILL;
     });
   });
 

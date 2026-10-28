@@ -36,21 +36,18 @@ export class TicketAttachmentRepository {
     return docs.map((doc) => String(doc._id));
   }
 
+  // Đã có file loại `kind` do `uploadedBy` tải lên SAU mốc `since` (vd tờ trình mới sau lần bị trả về).
+  // Chỉ tính file của chính người bổ sung — file người khác gửi trong khung trao đổi không thay được tờ trình.
   // eslint-disable-next-line class-methods-use-this
-  async attachToMessage(attachmentIds: string[], messageId: string): Promise<void> {
-    if (!attachmentIds.length) return;
-    await TicketAttachmentModel.updateMany(
-      { _id: { $in: attachmentIds } },
-      { $set: { message_id: messageId } },
-      { session: session() ?? undefined }
-    );
-  }
-
-  // Đã có file loại `kind` do người dùng tải lên SAU mốc `since` (vd tờ trình mới sau lần bị trả về).
-  // eslint-disable-next-line class-methods-use-this
-  async hasKindSince(ticketId: string, kind: string, since: Date | null): Promise<boolean> {
+  async hasKindSince(
+    ticketId: string,
+    kind: string,
+    since: Date | null,
+    uploadedBy?: string
+  ): Promise<boolean> {
     const filter: Record<string, unknown> = { ticket_id: ticketId, kind, isDeleted: false };
     if (since) filter.createdAt = { $gt: since };
+    if (uploadedBy) filter.uploaded_by = uploadedBy;
     const found = await TicketAttachmentModel.exists(filter).session(session());
     return Boolean(found);
   }

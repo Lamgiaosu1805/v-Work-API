@@ -1,9 +1,15 @@
 import { Request } from "express";
+import mongoose from "mongoose";
 import path from "path";
 import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
 import { UploadedTicketFile } from "../application/ticket-commands.service";
 import { normalizeScope, TICKET_TABS, TicketListQuery } from "../application/ticket-query-filters";
-import { TICKET_URGENCIES } from "../domain/types";
+import {
+  TICKET_RESOLUTIONS,
+  TICKET_URGENCIES,
+  TicketResolutionCode,
+  TicketUrgency
+} from "../domain/types";
 
 // Phần của đối tượng file mà multer gắn vào req.files (dự án không cài @types/multer).
 interface MulterFileLike {
@@ -37,6 +43,16 @@ export function toDate(value: unknown, name = "Ngày"): Date | null {
   return date;
 }
 
+// Version ticket mà client đang hiển thị (không gửi = bỏ qua kiểm tra, để client cũ vẫn chạy).
+export function toVersion(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const version = Number(value);
+  if (!Number.isInteger(version) || version < 0) {
+    throw new ArgumentInvalidException("Phiên bản ticket không hợp lệ");
+  }
+  return version;
+}
+
 export function toStringList(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String).filter(Boolean);
   if (typeof value === "string" && value.trim()) {
@@ -46,6 +62,86 @@ export function toStringList(value: unknown): string[] {
       .filter(Boolean);
   }
   return [];
+}
+
+// ---- id / enum từ client: kiểm tra ở rìa HTTP để không lọt xuống Mongoose (CastError → 500 lộ message thô) ----
+
+// Chỉ nhận chuỗi ObjectId 24 hex (isValidObjectId một mình còn chấp nhận số và chuỗi 12 ký tự).
+export const isObjectIdString = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value) && mongoose.isValidObjectId(value);
+
+// Bắt buộc có id hợp lệ: thiếu → 400 với message của nơi gọi ("Vui lòng chọn sản phẩm"), sai định dạng → 400 "không hợp lệ".
+export function requireObjectId(
+  value: unknown,
+  missingMessage: string,
+  invalidMessage?: string
+): string {
+  if (value === undefined || value === null || value === "") {
+    throw new ArgumentInvalidException(missingMessage);
+  }
+  if (!isObjectIdString(value)) {
+    throw new ArgumentInvalidException(invalidMessage ?? missingMessage);
+  }
+  return value;
+}
+
+// Id tuỳ chọn: không gửi / null / "" → undefined (web gửi "" cho ô chưa chọn); có giá trị mà sai định dạng → 400.
+export function optionalObjectId(value: unknown, invalidMessage: string): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (!isObjectIdString(value)) throw new ArgumentInvalidException(invalidMessage);
+  return value;
+}
+
+// Danh sách id (mảng hoặc chuỗi "a,b"): mọi phần tử phải là ObjectId hợp lệ.
+export function toObjectIdList(value: unknown, invalidMessage: string): string[] {
+  const list = toStringList(value);
+  if (list.some((id) => !isObjectIdString(id))) throw new ArgumentInvalidException(invalidMessage);
+  return list;
+}
+
+// Mức khẩn tuỳ chọn: không gửi → undefined; gửi mà không thuộc danh sách → 400.
+export function optionalUrgency(value: unknown): TicketUrgency | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || !(TICKET_URGENCIES as readonly string[]).includes(value)) {
+    throw new ArgumentInvalidException("Mức khẩn không hợp lệ");
+  }
+  return value as TicketUrgency;
+}
+
+// Kết quả đóng ticket: bắt buộc và phải thuộc danh sách (requester_no_response do domain chặn riêng vì chỉ hệ thống được đặt).
+export function requireResolutionCode(value: unknown): TicketResolutionCode {
+  if (value === undefined || value === null || value === "") {
+    throw new ArgumentInvalidException("Vui lòng chọn kết quả đóng ticket");
+  }
+  if (typeof value !== "string" || !(TICKET_RESOLUTIONS as readonly string[]).includes(value)) {
+    throw new ArgumentInvalidException("Kết quả đóng ticket không hợp lệ");
+  }
+  return value as TicketResolutionCode;
+}
+
+// Khách hàng gắn ticket: giữ nguyên đối tượng client gửi, chỉ kiểm tra customerId (nếu có) là ObjectId.
+export function checkCustomerRef<T>(customer: T): T {
+  if (customer && typeof customer === "object") {
+    optionalObjectId((customer as Record<string, unknown>).customerId, "Khách hàng không hợp lệ");
+  }
+  return customer;
+}
+
+// Phần giao việc ({ mode, departmentId, memberIds, ownerId }): giữ nguyên hình dạng, chỉ kiểm tra các id.
+export function checkAssignment<T>(assignment: T): T {
+  if (assignment === undefined || assignment === null) return assignment;
+  if (typeof assignment !== "object" || Array.isArray(assignment)) {
+    throw new ArgumentInvalidException("Thông tin giao việc không hợp lệ");
+  }
+  const raw = assignment as Record<string, unknown>;
+  optionalObjectId(raw.departmentId, "Phòng ban được giao không hợp lệ");
+  optionalObjectId(raw.ownerId, "Người chủ trì không hợp lệ");
+  return {
+    ...raw,
+    ...(raw.memberIds === undefined
+      ? {}
+      : { memberIds: toObjectIdList(raw.memberIds, "Danh sách người được giao không hợp lệ") })
+  } as T;
 }
 
 // File multer → UploadedTicketFile. Loại giấy tờ của từng file nằm trong payload.fileKinds (cùng thứ tự).
@@ -65,6 +161,11 @@ export function readUploadedFiles(
   }));
 }
 
+function requireNoValue(value: unknown, message: string): undefined {
+  if (value !== undefined) throw new ArgumentInvalidException(message);
+  return undefined;
+}
+
 export function parseListQuery(query: Request["query"]): TicketListQuery {
   const tab =
     typeof query.tab === "string" && (TICKET_TABS as readonly string[]).includes(query.tab)
@@ -78,15 +179,21 @@ export function parseListQuery(query: Request["query"]): TicketListQuery {
   const text = (value: unknown) =>
     typeof value === "string" && value.trim() ? value.trim() : undefined;
 
+  // Bộ lọc id trên query string: "" = không lọc; mảng/đối tượng (?productId[$ne]=) hay sai định dạng → 400
+  const queryId = (value: unknown, message: string) =>
+    typeof value === "string"
+      ? optionalObjectId(value.trim(), message)
+      : requireNoValue(value, message);
+
   return {
     tab,
     scope: tab ? normalizeScope(tab, text(query.scope)) : undefined,
     status: toStringList(query.status),
-    productId: text(query.productId),
-    categoryId: text(query.categoryId),
-    templateId: text(query.templateId),
+    productId: queryId(query.productId, "Sản phẩm lọc không hợp lệ"),
+    categoryId: queryId(query.categoryId, "Loại yêu cầu lọc không hợp lệ"),
+    templateId: queryId(query.templateId, "Mẫu yêu cầu lọc không hợp lệ"),
     urgency,
-    ownerId: text(query.ownerId),
+    ownerId: queryId(query.ownerId, "Người xử lý lọc không hợp lệ"),
     q: text(query.q),
     from: toDate(query.from, "Từ ngày") ?? undefined,
     to: toDate(query.to, "Đến ngày") ?? undefined,

@@ -1,4 +1,4 @@
-import { canActAsHandler, isEligibleToClaim, isRequester } from "./ticket-access";
+import { canActAsHandler, isEligibleToClaim, isHandler, isRequester } from "./ticket-access";
 import { TicketActor, TicketProps } from "./types";
 
 // Người thao tác ĐANG LÀM ĐƯỢC gì trên ticket này — server quyết định, frontend chỉ việc hiện/ẩn nút.
@@ -21,6 +21,7 @@ export interface TicketCapabilities {
   cancel: boolean;
   reopen: boolean;
   setDueHint: boolean;
+  linkRelated: boolean;
   message: boolean;
 }
 
@@ -70,13 +71,18 @@ export function capabilitiesOf(
       ["open", "in_progress", "on_hold"].includes(status),
     hold: handler && status === "in_progress",
     resume: handler && status === "on_hold",
-    resolve: handler && status === "in_progress",
+    // Ticket cần tờ trình thì phải được xác nhận hợp lệ mới báo xong được (khớp TicketEntity.resolve)
+    resolve:
+      handler &&
+      status === "in_progress" &&
+      (!ticket.approval.required || ticket.approval.status === "verified"),
     close:
       handler && ["open", "in_progress", "waiting_info", "on_hold", "resolved"].includes(status),
     confirm: requester && status === "resolved",
     cancel: requester && ["open", "waiting_info"].includes(status),
-    reopen: (requester || handler) && reopenable,
+    reopen: (requester || isHandler(ticket, actor)) && reopenable,
     setDueHint: handler && ["open", "in_progress", "on_hold"].includes(status),
+    linkRelated: handler && !finished,
     message: !finished
   };
 }

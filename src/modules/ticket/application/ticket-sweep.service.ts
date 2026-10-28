@@ -68,7 +68,13 @@ export class TicketSweepService {
       const outcome = await this.process(
         String(_id),
         (ticket) => {
+          // Đọc lại ticket nên kiểm tra lại: nếu giữa lúc lấy danh sách và lúc xử lý ticket đã rời rồi vào lại
+          // trạng thái chờ, mốc tự đóng mới chưa tới thì không đóng sớm.
+          const { status, autoCloseAt } = ticket.getProps();
+          if (!["resolved", "waiting_info"].includes(status)) return false;
+          if (!autoCloseAt || autoCloseAt.getTime() > now.getTime()) return false;
           ticket.autoClose(computeReopenUntil(now, scheduler.policy, scheduler.calendar), now);
+          return true;
         },
         scheduler
       );
@@ -97,13 +103,14 @@ export class TicketSweepService {
 
   private async process(
     ticketId: string,
-    mutate: (ticket: TicketEntity) => void,
+    // Trả về false = không còn cần xử lý (bỏ qua, không ghi)
+    mutate: (ticket: TicketEntity) => boolean,
     scheduler: Awaited<ReturnType<SchedulerLoader["load"]>>
   ): Promise<"done" | "skipped"> {
     try {
       const ticket = await this.deps.tickets.findOneById(ticketId);
       if (!ticket) return "skipped";
-      mutate(ticket);
+      if (!mutate(ticket)) return "skipped";
       refreshSchedule(ticket, scheduler);
       const activities = ticket.pullActivities();
       await runInTransaction(async () => {
@@ -128,35 +135,54 @@ export class TicketSweepService {
       const ticket = await this.deps.tickets.findOneById(ticketId);
       if (!ticket) return "skipped";
       const props = ticket.getProps();
+      // Đọc lại ticket nên kiểm tra lại: đã đổi trạng thái / chưa tới mốc nhắc thì không nhắc.
+      if (!["resolved", "waiting_info"].includes(props.status)) return "skipped";
+      if (!props.remindAt || props.remindAt.getTime() > now.getTime()) return "skipped";
 
-      if (props.status === "waiting_info") {
-        await this.deps.notifier.notify({
-          employeeIds: [props.createdBy],
-          title: "Ticket sắp tự đóng nếu không bổ sung",
-          body: `${props.code} · ${props.title}\nVui lòng bổ sung thông tin còn thiếu.`,
-          type: "auto_close_reminder",
-          ticketId: ticket.id
-        });
-      } else {
-        await this.deps.notifier.notify({
-          employeeIds: ticket.handlerIds,
-          title: "Đến ngày kiểm tra ticket cần theo dõi",
-          body: `${props.code} · ${props.title}\n${props.followUp?.note ?? ""}`,
-          type: "follow_up_reminder",
-          ticketId: ticket.id
-        });
-      }
-
-      ticket.markReminded(now);
-      // Ghi trực tiếp, không qua version: chỉ đổi 2 trường nhắc, tránh tranh chấp với người dùng.
-      await TicketModel.updateOne(
-        { _id: ticket.id, status: props.status },
-        { $set: { reminder_sent_at: now, remind_at: null } }
+      // Đánh dấu "đã nhắc" TRƯỚC khi gửi, bằng một lệnh có điều kiện (còn đúng trạng thái + mốc nhắc) và tăng
+      // version: hai lần quét chồng nhau chỉ một bên giành được; người dùng vừa ghi dựa trên bản cũ sẽ gặp
+      // xung đột version (và tự thử lại) thay vì ghi đè mất dấu "đã nhắc".
+      const claimed = await TicketModel.updateOne(
+        { _id: ticket.id, status: props.status, remind_at: props.remindAt, isDeleted: false },
+        { $set: { reminder_sent_at: now, remind_at: null }, $inc: { version: 1 } }
       );
+      if (!claimed.modifiedCount) return "skipped";
+
+      try {
+        await this.sendReminder(ticket, props);
+      } catch (error) {
+        // Gửi lỗi: trả mốc nhắc về như cũ để lần quét sau thử lại
+        await TicketModel.updateOne(
+          { _id: ticket.id },
+          { $set: { reminder_sent_at: null, remind_at: props.remindAt }, $inc: { version: 1 } }
+        );
+        throw error;
+      }
       return "done";
     } catch (error) {
       logger.warn("Không nhắc được ticket", { error, ticketId });
       return "skipped";
     }
+  }
+
+  private async sendReminder(ticket: TicketEntity, props: ReturnType<TicketEntity["getProps"]>) {
+    if (props.status === "waiting_info") {
+      await this.deps.notifier.notify({
+        employeeIds: [props.createdBy],
+        title: "Ticket sắp tự đóng nếu không bổ sung",
+        body: `${props.code} · ${props.title}\nVui lòng bổ sung thông tin còn thiếu.`,
+        type: "auto_close_reminder",
+        ticketId: ticket.id
+      });
+      return;
+    }
+    await this.deps.notifier.notify({
+      // Chủ trì nhận thay cả nhóm; ticket không còn chủ trì thì báo người phối hợp còn lại.
+      employeeIds: props.assignment.ownerId ? [props.assignment.ownerId] : ticket.handlerIds,
+      title: "Đến ngày kiểm tra ticket cần theo dõi",
+      body: `${props.code} · ${props.title}\n${props.followUp?.note ?? ""}`,
+      type: "follow_up_reminder",
+      ticketId: ticket.id
+    });
   }
 }

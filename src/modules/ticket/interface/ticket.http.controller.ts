@@ -5,15 +5,22 @@ import { AbilityLike, buildTicketActor } from "../application/ticket-actor";
 import { getTicketCommandService } from "../application/ticket-commands.service";
 import { getTicketConfigService } from "../application/ticket-config.service";
 import { getTicketQueryService } from "../application/ticket-queries.service";
-import { TicketResolutionCode, TicketUrgency } from "../domain/types";
 import {
+  checkAssignment,
+  checkCustomerRef,
   contentTypeFor,
+  optionalObjectId,
+  optionalUrgency,
   parseListQuery,
   readPayload,
   readUploadedFiles,
+  requireObjectId,
+  requireResolutionCode,
   toDate,
-  toStringList
+  toObjectIdList,
+  toVersion
 } from "./ticket-request-parsers";
+import { withProfileAccess } from "./ticket-profile-access";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const cleanupUploadedFiles = require("../../../utils/cleanupUploadedFiles");
 
@@ -69,15 +76,14 @@ export const ticketHttpController = {
   },
 
   async list(req: Request, res: Response) {
-    const result = await getTicketQueryService().list(
-      await actorOf(req),
-      parseListQuery(req.query)
-    );
+    const query = parseListQuery(req.query);
+    const result = await getTicketQueryService().list(await actorOf(req), query);
     return res.status(200).json(result);
   },
 
   async getById(req: Request, res: Response) {
-    return ok(res, await getTicketQueryService().getById(await actorOf(req), param(req, "id")));
+    const detail = await getTicketQueryService().getById(await actorOf(req), param(req, "id"));
+    return ok(res, await withProfileAccess(req, detail));
   },
 
   async searchTickets(req: Request, res: Response) {
@@ -87,7 +93,11 @@ export const ticketHttpController = {
 
   async searchEmployees(req: Request, res: Response) {
     const q = typeof req.query.q === "string" ? req.query.q : "";
-    return ok(res, await getTicketQueryService().searchEmployees(q, Number(req.query.limit) || 20));
+    const assignableFor = req.query.assignable === "1" ? await actorOf(req) : undefined;
+    return ok(
+      res,
+      await getTicketQueryService().searchEmployees(q, Number(req.query.limit) || 20, assignableFor)
+    );
   },
 
   async listDepartments(_req: Request, res: Response) {
@@ -117,35 +127,47 @@ export const ticketHttpController = {
     return withUploadCleanup(req, async () => {
       const payload = readPayload(req);
       const files = readUploadedFiles(req, payload);
-      const result = await getTicketCommandService().create(
-        await actorOf(req),
-        {
-          title: requireText(payload.title, "Vui lòng nhập tiêu đề ticket"),
-          description: payload.description,
-          productId: payload.productId,
-          categoryId: payload.categoryId,
-          templateId: payload.templateId || null,
-          customFields: payload.customFields,
-          urgency: payload.urgency as TicketUrgency | undefined,
-          customer: payload.customer,
-          relatedEmployeeId: payload.relatedEmployeeId ? String(payload.relatedEmployeeId) : null,
-          assignment: payload.assignment,
-          relatedTicketIds: toStringList(payload.relatedTicketIds),
-          approvalReference: approvalReferenceOf(payload)
-        },
-        files
-      );
+      const command = {
+        title: requireText(payload.title, "Vui lòng nhập tiêu đề ticket"),
+        description: payload.description,
+        productId: requireObjectId(
+          payload.productId,
+          "Vui lòng chọn sản phẩm",
+          "Sản phẩm không hợp lệ"
+        ),
+        categoryId: optionalObjectId(payload.categoryId, "Loại yêu cầu không hợp lệ"),
+        templateId: optionalObjectId(payload.templateId, "Mẫu yêu cầu không hợp lệ") ?? null,
+        customFields: payload.customFields,
+        urgency: optionalUrgency(payload.urgency),
+        customer: checkCustomerRef(payload.customer),
+        relatedEmployeeId:
+          optionalObjectId(payload.relatedEmployeeId, "Nhân sự liên quan không hợp lệ") ?? null,
+        assignment: checkAssignment(payload.assignment),
+        relatedTicketIds: toObjectIdList(payload.relatedTicketIds, "Ticket liên quan không hợp lệ"),
+        approvalReference: approvalReferenceOf(payload)
+      };
+      const result = await getTicketCommandService().create(await actorOf(req), command, files);
       return res.status(201).json({ message: "Tạo ticket thành công", data: result });
     });
   },
 
   async edit(req: Request, res: Response) {
-    const { note, ...patch } = readPayload(req);
+    const { note, version, ...patch } = readPayload(req);
+    // Chỉ kiểm tra khi có gửi: "" / null coi như không đổi (ticket luôn có sản phẩm + loại, không lưu giá trị rỗng)
+    const productId = optionalObjectId(patch.productId, "Sản phẩm không hợp lệ");
+    const categoryId = optionalObjectId(patch.categoryId, "Loại yêu cầu không hợp lệ");
+    const urgency = optionalUrgency(patch.urgency);
+    ["productId", "categoryId", "urgency"].forEach((key) => delete patch[key]);
+    if (productId) patch.productId = productId;
+    if (categoryId) patch.categoryId = categoryId;
+    if (urgency) patch.urgency = urgency;
+    checkCustomerRef(patch.customer);
     const result = await getTicketCommandService().edit(
       await actorOf(req),
       param(req, "id"),
       patch,
-      note
+      note,
+      toVersion(version)
     );
     return ok(res, result, "Đã cập nhật ticket");
   },
@@ -159,48 +181,67 @@ export const ticketHttpController = {
   },
 
   async release(req: Request, res: Response) {
-    const { note } = readPayload(req);
+    const { note, version } = readPayload(req);
     return ok(
       res,
-      await getTicketCommandService().release(await actorOf(req), param(req, "id"), note),
+      await getTicketCommandService().release(
+        await actorOf(req),
+        param(req, "id"),
+        note,
+        toVersion(version)
+      ),
       "Đã trả lại ticket"
     );
   },
 
   async assign(req: Request, res: Response) {
     const payload = readPayload(req);
+    const input = {
+      mode: payload.mode,
+      departmentId: optionalObjectId(payload.departmentId, "Phòng ban được giao không hợp lệ"),
+      memberIds: toObjectIdList(payload.memberIds, "Danh sách người được giao không hợp lệ"),
+      ownerId: optionalObjectId(payload.ownerId, "Người chủ trì không hợp lệ")
+    };
     return ok(
       res,
-      await getTicketCommandService().assign(await actorOf(req), param(req, "id"), {
-        mode: payload.mode,
-        departmentId: payload.departmentId,
-        memberIds: toStringList(payload.memberIds),
-        ownerId: payload.ownerId
-      }),
+      await getTicketCommandService().assign(
+        await actorOf(req),
+        param(req, "id"),
+        input,
+        toVersion(payload.version)
+      ),
       "Đã giao ticket"
     );
   },
 
   async addCollaborator(req: Request, res: Response) {
-    const { employeeId } = readPayload(req);
+    const { employeeId, version } = readPayload(req);
+    const collaboratorId = requireObjectId(
+      employeeId,
+      "Vui lòng chọn người phối hợp",
+      "Người phối hợp không hợp lệ"
+    );
     return ok(
       res,
       await getTicketCommandService().addCollaborator(
         await actorOf(req),
         param(req, "id"),
-        requireText(employeeId, "Vui lòng chọn người phối hợp")
+        collaboratorId,
+        toVersion(version)
       ),
       "Đã thêm người phối hợp"
     );
   },
 
   async removeCollaborator(req: Request, res: Response) {
+    // DELETE không có body: version đi theo query string
     return ok(
       res,
       await getTicketCommandService().removeCollaborator(
         await actorOf(req),
         param(req, "id"),
-        param(req, "employeeId")
+        param(req, "employeeId"),
+        toVersion(req.query.version)
       ),
       "Đã bỏ người phối hợp"
     );
@@ -210,10 +251,15 @@ export const ticketHttpController = {
     const payload = readPayload(req);
     return ok(
       res,
-      await getTicketCommandService().requestInfo(await actorOf(req), param(req, "id"), {
-        items: Array.isArray(payload.items) ? payload.items : [],
-        note: payload.note
-      }),
+      await getTicketCommandService().requestInfo(
+        await actorOf(req),
+        param(req, "id"),
+        {
+          items: Array.isArray(payload.items) ? payload.items : [],
+          note: payload.note
+        },
+        toVersion(payload.version)
+      ),
       "Đã yêu cầu người tạo bổ sung"
     );
   },
@@ -227,7 +273,8 @@ export const ticketHttpController = {
           await actorOf(req),
           param(req, "id"),
           { approvalReference: approvalReferenceOf(payload) },
-          readUploadedFiles(req, payload)
+          readUploadedFiles(req, payload),
+          toVersion(payload.version)
         ),
         "Đã gửi bổ sung"
       );
@@ -235,33 +282,48 @@ export const ticketHttpController = {
   },
 
   async verifyApproval(req: Request, res: Response) {
-    const { valid, note } = readPayload(req);
+    const { valid, note, version } = readPayload(req);
     return ok(
       res,
-      await getTicketCommandService().verifyApproval(await actorOf(req), param(req, "id"), {
-        valid: valid === true,
-        note
-      }),
+      await getTicketCommandService().verifyApproval(
+        await actorOf(req),
+        param(req, "id"),
+        {
+          valid: valid === true,
+          note
+        },
+        toVersion(version)
+      ),
       valid === true ? "Đã xác nhận tờ trình hợp lệ" : "Đã trả tờ trình về người tạo"
     );
   },
 
   async hold(req: Request, res: Response) {
-    const { reason, resumeAt } = readPayload(req);
+    const { reason, resumeAt, version } = readPayload(req);
     return ok(
       res,
-      await getTicketCommandService().hold(await actorOf(req), param(req, "id"), {
-        reason,
-        resumeAt: toDate(resumeAt, "Ngày dự kiến tiếp tục")
-      }),
+      await getTicketCommandService().hold(
+        await actorOf(req),
+        param(req, "id"),
+        {
+          reason,
+          resumeAt: toDate(resumeAt, "Ngày dự kiến tiếp tục")
+        },
+        toVersion(version)
+      ),
       "Đã tạm hoãn ticket"
     );
   },
 
   async resume(req: Request, res: Response) {
+    const { version } = readPayload(req);
     return ok(
       res,
-      await getTicketCommandService().resume(await actorOf(req), param(req, "id")),
+      await getTicketCommandService().resume(
+        await actorOf(req),
+        param(req, "id"),
+        toVersion(version)
+      ),
       "Đã tiếp tục xử lý"
     );
   },
@@ -270,80 +332,117 @@ export const ticketHttpController = {
     const payload = readPayload(req);
     return ok(
       res,
-      await getTicketCommandService().resolve(await actorOf(req), param(req, "id"), {
-        note: payload.note,
-        actionTaken: payload.actionTaken,
-        followUp: payload.followUp
-          ? {
-              note: String(payload.followUp.note ?? ""),
-              checkAt: toDate(payload.followUp.checkAt, "Ngày kiểm tra")
-            }
-          : null
-      }),
+      await getTicketCommandService().resolve(
+        await actorOf(req),
+        param(req, "id"),
+        {
+          note: payload.note,
+          actionTaken: payload.actionTaken,
+          followUp: payload.followUp
+            ? {
+                note: String(payload.followUp.note ?? ""),
+                checkAt: toDate(payload.followUp.checkAt, "Ngày kiểm tra")
+              }
+            : null
+        },
+        toVersion(payload.version)
+      ),
       "Đã báo xử lý xong, chờ người tạo xác nhận"
     );
   },
 
   async close(req: Request, res: Response) {
     const payload = readPayload(req);
+    const input = {
+      code: requireResolutionCode(payload.code),
+      note: payload.note,
+      actionTaken: payload.actionTaken,
+      duplicateOf: payload.duplicateOf
+    };
     return ok(
       res,
-      await getTicketCommandService().close(await actorOf(req), param(req, "id"), {
-        code: payload.code as TicketResolutionCode,
-        note: payload.note,
-        actionTaken: payload.actionTaken,
-        duplicateOf: payload.duplicateOf
-      }),
+      await getTicketCommandService().close(
+        await actorOf(req),
+        param(req, "id"),
+        input,
+        toVersion(payload.version)
+      ),
       "Đã đóng ticket"
     );
   },
 
   async confirm(req: Request, res: Response) {
+    const { version } = readPayload(req);
     return ok(
       res,
-      await getTicketCommandService().confirm(await actorOf(req), param(req, "id")),
+      await getTicketCommandService().confirm(
+        await actorOf(req),
+        param(req, "id"),
+        toVersion(version)
+      ),
       "Đã xác nhận hoàn tất"
     );
   },
 
   async cancel(req: Request, res: Response) {
-    const { note } = readPayload(req);
+    const { note, version } = readPayload(req);
     return ok(
       res,
-      await getTicketCommandService().cancel(await actorOf(req), param(req, "id"), note),
+      await getTicketCommandService().cancel(
+        await actorOf(req),
+        param(req, "id"),
+        note,
+        toVersion(version)
+      ),
       "Đã huỷ ticket"
     );
   },
 
   async reopen(req: Request, res: Response) {
-    const { note } = readPayload(req);
+    const { note, version } = readPayload(req);
     return ok(
       res,
-      await getTicketCommandService().reopen(await actorOf(req), param(req, "id"), note),
+      await getTicketCommandService().reopen(
+        await actorOf(req),
+        param(req, "id"),
+        note,
+        toVersion(version)
+      ),
       "Đã mở lại ticket"
     );
   },
 
   async setDueHint(req: Request, res: Response) {
-    const { dueHintAt, reason } = readPayload(req);
+    const { dueHintAt, reason, version } = readPayload(req);
     return ok(
       res,
-      await getTicketCommandService().setDueHint(await actorOf(req), param(req, "id"), {
-        dueHintAt: toDate(dueHintAt, "Ngày dự kiến"),
-        reason
-      }),
+      await getTicketCommandService().setDueHint(
+        await actorOf(req),
+        param(req, "id"),
+        {
+          dueHintAt: toDate(dueHintAt, "Ngày dự kiến"),
+          reason
+        },
+        toVersion(version)
+      ),
       "Đã cập nhật ngày dự kiến"
     );
   },
 
   async linkRelated(req: Request, res: Response) {
-    const { relatedTicketId } = readPayload(req);
+    const { relatedTicketId, version } = readPayload(req);
+    const relatedId = requireObjectId(
+      relatedTicketId,
+      "Vui lòng chọn ticket liên quan",
+      "Ticket liên quan không hợp lệ"
+    );
     return ok(
       res,
       await getTicketCommandService().linkRelated(
         await actorOf(req),
         param(req, "id"),
-        requireText(relatedTicketId, "Vui lòng chọn ticket liên quan")
+        relatedId,
+        toVersion(version)
       ),
       "Đã liên kết ticket"
     );
@@ -352,10 +451,14 @@ export const ticketHttpController = {
   async addMessage(req: Request, res: Response) {
     return withUploadCleanup(req, async () => {
       const payload = readPayload(req);
+      const message = {
+        body: payload.body,
+        mentionIds: toObjectIdList(payload.mentionIds, "Người được nhắc tên không hợp lệ")
+      };
       const result = await getTicketCommandService().addMessage(
         await actorOf(req),
         param(req, "id"),
-        { body: payload.body, mentionIds: toStringList(payload.mentionIds) },
+        message,
         readUploadedFiles(req, payload)
       );
       return res.status(201).json({ message: "Đã gửi tin nhắn", data: result });

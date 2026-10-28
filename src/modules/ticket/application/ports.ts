@@ -26,7 +26,8 @@ export interface TicketDirectory {
   getDepartmentMemberIds(departmentId: string): Promise<string[]>;
   getEmployees(ids: string[]): Promise<EmployeeSummary[]>;
   getDepartments(ids: string[]): Promise<DepartmentSummary[]>;
-  searchEmployees(query: string, limit: number): Promise<EmployeeSummary[]>;
+  // `onlyIds`: chỉ tìm trong tập người này (lọc ở câu truy vấn, trước khi cắt `limit`)
+  searchEmployees(query: string, limit: number, onlyIds?: string[]): Promise<EmployeeSummary[]>;
   listDepartments(): Promise<DepartmentSummary[]>;
 }
 

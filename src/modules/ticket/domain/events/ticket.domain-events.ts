@@ -21,9 +21,13 @@ abstract class TicketDomainEvent extends DomainEvent {
 export class TicketCreatedDomainEvent extends TicketDomainEvent {
   readonly urgency: TicketUrgency;
 
-  constructor(props: TicketEventProps & { urgency: TicketUrgency }) {
+  // Ticket tạo ra đã có chủ trì (giao đích danh kèm chủ trì): không còn "chờ nhận" nên không báo "ticket mới"
+  readonly ownerAtCreation: boolean;
+
+  constructor(props: TicketEventProps & { urgency: TicketUrgency; ownerAtCreation?: boolean }) {
     super(props);
     this.urgency = props.urgency;
+    this.ownerAtCreation = props.ownerAtCreation ?? false;
   }
 }
 

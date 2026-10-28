@@ -116,6 +116,9 @@ interface ExecuteOptions {
   allowSummary?: boolean;
   // Thử lại khi trùng version (chỉ cho thao tác idempotent như ghi nhận hoạt động).
   retryOnConflict?: boolean;
+  // Version ticket mà người dùng đang nhìn thấy trên màn hình. Lệch với bản đang lưu → ticket đã bị người khác
+  // đổi sau khi họ mở trang, báo tải lại thay vì ghi đè. Không gửi thì bỏ qua kiểm tra (client cũ).
+  expectedVersion?: number;
 }
 
 const MAX_CONFLICT_ATTEMPTS = 3;
@@ -277,34 +280,65 @@ export class TicketCommandService {
     }
   }
 
-  release(actor: TicketActor, ticketId: string, note: string) {
-    return this.execute(ticketId, actor, (ticket, { now }) =>
-      ticket.release(actor.employeeId, note, now)
+  release(actor: TicketActor, ticketId: string, note: string, expectedVersion?: number) {
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => ticket.release(actor.employeeId, note, now),
+      { expectedVersion }
     );
   }
 
-  async assign(actor: TicketActor, ticketId: string, input: AssignmentInput) {
+  async assign(
+    actor: TicketActor,
+    ticketId: string,
+    input: AssignmentInput,
+    expectedVersion?: number
+  ) {
     await authorizeAssignment(this.deps.directory, actor, input);
-    return this.execute(ticketId, actor, (ticket, { now }) =>
-      ticket.assign({ ...input, assignedBy: actor.employeeId }, now)
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => ticket.assign({ ...input, assignedBy: actor.employeeId }, now),
+      { expectedVersion }
     );
   }
 
-  async addCollaborator(actor: TicketActor, ticketId: string, employeeId: string) {
+  async addCollaborator(
+    actor: TicketActor,
+    ticketId: string,
+    employeeId: string,
+    expectedVersion?: number
+  ) {
     const [employee] = await this.deps.directory.getEmployees([employeeId]);
     if (!employee) throw new ArgumentInvalidException("Nhân viên không tồn tại");
-    return this.execute(ticketId, actor, (ticket, { now }) => {
-      assertCanActAsHandler(ticket, actor);
-      ticket.addCollaborator(actor.employeeId, employee.id, now);
-    });
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => {
+        assertCanActAsHandler(ticket, actor);
+        ticket.addCollaborator(actor.employeeId, employee.id, now);
+      },
+      { expectedVersion }
+    );
   }
 
-  removeCollaborator(actor: TicketActor, ticketId: string, employeeId: string) {
-    return this.execute(ticketId, actor, (ticket, { now }) => {
-      const leavingSelf = employeeId === actor.employeeId;
-      if (!leavingSelf) assertCanActAsHandler(ticket, actor);
-      ticket.removeCollaborator(actor.employeeId, employeeId, now);
-    });
+  removeCollaborator(
+    actor: TicketActor,
+    ticketId: string,
+    employeeId: string,
+    expectedVersion?: number
+  ) {
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => {
+        const leavingSelf = employeeId === actor.employeeId;
+        if (!leavingSelf) assertCanActAsHandler(ticket, actor);
+        ticket.removeCollaborator(actor.employeeId, employeeId, now);
+      },
+      { expectedVersion }
+    );
   }
 
   // ---- bổ sung thông tin / tờ trình ----------------------------------------------------------
@@ -312,7 +346,8 @@ export class TicketCommandService {
   requestInfo(
     actor: TicketActor,
     ticketId: string,
-    input: { items: Array<{ key: string; note?: string }>; note?: string }
+    input: { items: Array<{ key: string; note?: string }>; note?: string },
+    expectedVersion?: number
   ) {
     const items = input.items.map((item) => {
       const entry = INFO_REQUEST_CATALOG.find((catalogItem) => catalogItem.key === item.key);
@@ -322,17 +357,23 @@ export class TicketCommandService {
       }
       return { key: entry.key, label: entry.label, note: item.note };
     });
-    return this.execute(ticketId, actor, (ticket, { now }) => {
-      assertCanActAsHandler(ticket, actor);
-      ticket.requestInfo({ items, note: input.note, requestedBy: actor.employeeId }, now);
-    });
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => {
+        assertCanActAsHandler(ticket, actor);
+        ticket.requestInfo({ items, note: input.note, requestedBy: actor.employeeId }, now);
+      },
+      { expectedVersion }
+    );
   }
 
   async submitInfo(
     actor: TicketActor,
     ticketId: string,
     input: { approvalReference?: { number: string; date?: Date | null; signer?: string } | null },
-    files: UploadedTicketFile[] = []
+    files: UploadedTicketFile[] = [],
+    expectedVersion?: number
   ) {
     let isSensitive: (kind: string) => boolean = (kind) => DEFAULT_SENSITIVE_KINDS.includes(kind);
     return this.execute(
@@ -353,7 +394,8 @@ export class TicketCommandService {
             (await this.deps.attachments.hasKindSince(
               ticket.id,
               APPROVAL_DOCUMENT_ITEM_KEY,
-              requested?.requestedAt ?? null
+              requested?.requestedAt ?? null,
+              actor.employeeId
             )))
         );
         ticket.submitInfo(
@@ -371,7 +413,7 @@ export class TicketCommandService {
           now
         );
       },
-      {},
+      { expectedVersion },
       async (saved) => {
         await this.deps.attachments.createMany(
           files.map((file) => ({
@@ -389,29 +431,54 @@ export class TicketCommandService {
     );
   }
 
-  verifyApproval(actor: TicketActor, ticketId: string, input: { valid: boolean; note?: string }) {
-    return this.execute(ticketId, actor, (ticket, { now }) => {
-      if (!canActAsHandler(ticket.getProps(), actor) && !actor.canViewRestricted) {
-        throw new TicketForbiddenError("Bạn không có quyền xác nhận tờ trình của ticket này");
-      }
-      ticket.verifyApproval(actor.employeeId, input.valid, input.note, now);
-    });
+  verifyApproval(
+    actor: TicketActor,
+    ticketId: string,
+    input: { valid: boolean; note?: string },
+    expectedVersion?: number
+  ) {
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => {
+        if (!canActAsHandler(ticket.getProps(), actor) && !actor.canViewRestricted) {
+          throw new TicketForbiddenError("Bạn không có quyền xác nhận tờ trình của ticket này");
+        }
+        ticket.verifyApproval(actor.employeeId, input.valid, input.note, now);
+      },
+      { expectedVersion }
+    );
   }
 
   // ---- trạng thái xử lý ----------------------------------------------------------------------
 
-  hold(actor: TicketActor, ticketId: string, input: { reason: string; resumeAt?: Date | null }) {
-    return this.execute(ticketId, actor, (ticket, { now }) => {
-      assertCanActAsHandler(ticket, actor);
-      ticket.hold(actor.employeeId, input.reason, input.resumeAt ?? null, now);
-    });
+  hold(
+    actor: TicketActor,
+    ticketId: string,
+    input: { reason: string; resumeAt?: Date | null },
+    expectedVersion?: number
+  ) {
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => {
+        assertCanActAsHandler(ticket, actor);
+        ticket.hold(actor.employeeId, input.reason, input.resumeAt ?? null, now);
+      },
+      { expectedVersion }
+    );
   }
 
-  resume(actor: TicketActor, ticketId: string) {
-    return this.execute(ticketId, actor, (ticket, { now }) => {
-      assertCanActAsHandler(ticket, actor);
-      ticket.resume(actor.employeeId, now);
-    });
+  resume(actor: TicketActor, ticketId: string, expectedVersion?: number) {
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => {
+        assertCanActAsHandler(ticket, actor);
+        ticket.resume(actor.employeeId, now);
+      },
+      { expectedVersion }
+    );
   }
 
   resolve(
@@ -421,12 +488,18 @@ export class TicketCommandService {
       note?: string;
       actionTaken?: string;
       followUp?: { note: string; checkAt?: Date | null } | null;
-    }
+    },
+    expectedVersion?: number
   ) {
-    return this.execute(ticketId, actor, (ticket, { now }) => {
-      assertCanActAsHandler(ticket, actor);
-      ticket.resolve({ ...input, by: actor.employeeId }, now);
-    });
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => {
+        assertCanActAsHandler(ticket, actor);
+        ticket.resolve({ ...input, by: actor.employeeId }, now);
+      },
+      { expectedVersion }
+    );
   }
 
   async close(
@@ -437,85 +510,126 @@ export class TicketCommandService {
       note?: string;
       actionTaken?: string;
       duplicateOf?: string | null;
-    }
+    },
+    expectedVersion?: number
   ) {
-    if (input.code === "duplicate") await this.assertDuplicateTarget(ticketId, input.duplicateOf);
-    return this.execute(ticketId, actor, (ticket, { now, scheduler }) => {
-      assertCanActAsHandler(ticket, actor);
-      const closeInput: CloseInput = {
-        ...input,
-        by: actor.employeeId,
-        reopenUntil: computeReopenUntil(now, scheduler.policy, scheduler.calendar)
-      };
-      ticket.close(closeInput, now);
-    });
+    if (input.code === "duplicate") {
+      await this.assertDuplicateTarget(actor, ticketId, input.duplicateOf);
+    }
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now, scheduler }) => {
+        assertCanActAsHandler(ticket, actor);
+        const closeInput: CloseInput = {
+          ...input,
+          by: actor.employeeId,
+          reopenUntil: computeReopenUntil(now, scheduler.policy, scheduler.calendar)
+        };
+        ticket.close(closeInput, now);
+      },
+      { expectedVersion }
+    );
   }
 
   // Người tạo xác nhận đã xong (đóng, không mở lại được nữa).
-  confirm(actor: TicketActor, ticketId: string) {
-    return this.execute(ticketId, actor, (ticket, { now }) =>
-      ticket.confirm(actor.employeeId, now)
+  confirm(actor: TicketActor, ticketId: string, expectedVersion?: number) {
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => ticket.confirm(actor.employeeId, now),
+      { expectedVersion }
     );
   }
 
-  cancel(actor: TicketActor, ticketId: string, note: string) {
-    return this.execute(ticketId, actor, (ticket, { now }) =>
-      ticket.cancel(actor.employeeId, note, now)
+  cancel(actor: TicketActor, ticketId: string, note: string, expectedVersion?: number) {
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => ticket.cancel(actor.employeeId, note, now),
+      { expectedVersion }
     );
   }
 
-  reopen(actor: TicketActor, ticketId: string, note: string) {
+  reopen(actor: TicketActor, ticketId: string, note: string, expectedVersion?: number) {
     return this.execute(
       ticketId,
       actor,
       (ticket, { now }) => ticket.reopen(actor.employeeId, note, now),
-      { allowSummary: true }
+      { allowSummary: true, expectedVersion }
     );
   }
 
   // ---- sửa nội dung / liên kết / ngày hẹn ----------------------------------------------------
 
-  async edit(actor: TicketActor, ticketId: string, patch: EditPatch, note = "") {
+  async edit(
+    actor: TicketActor,
+    ticketId: string,
+    patch: EditPatch,
+    note = "",
+    expectedVersion?: number
+  ) {
     if (patch.productId && !(await this.deps.config.findProduct(String(patch.productId)))) {
       throw new ArgumentInvalidException("Sản phẩm không hợp lệ");
     }
     if (patch.categoryId && !(await this.deps.config.findCategory(String(patch.categoryId)))) {
       throw new ArgumentInvalidException("Loại yêu cầu không hợp lệ");
     }
-    return this.execute(ticketId, actor, (ticket, { now }) => {
-      const props = ticket.getProps();
-      if (isRequester(props, actor)) {
-        ticket.edit(patch, "requester", actor.employeeId, note, now);
-      } else if (canActAsHandler(props, actor)) {
-        ticket.edit(patch, "group", actor.employeeId, note, now);
-      } else {
-        throw new TicketForbiddenError("Bạn không có quyền sửa ticket này");
-      }
-    });
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => {
+        const props = ticket.getProps();
+        if (isRequester(props, actor)) {
+          ticket.edit(patch, "requester", actor.employeeId, note, now);
+        } else if (canActAsHandler(props, actor)) {
+          ticket.edit(patch, "group", actor.employeeId, note, now);
+        } else {
+          throw new TicketForbiddenError("Bạn không có quyền sửa ticket này");
+        }
+      },
+      { expectedVersion }
+    );
   }
 
   setDueHint(
     actor: TicketActor,
     ticketId: string,
-    input: { dueHintAt: Date | null; reason?: string }
+    input: { dueHintAt: Date | null; reason?: string },
+    expectedVersion?: number
   ) {
-    return this.execute(ticketId, actor, (ticket, { now }) => {
-      assertCanActAsHandler(ticket, actor);
-      ticket.setDueHint(actor.employeeId, input.dueHintAt, input.reason, now);
-    });
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => {
+        assertCanActAsHandler(ticket, actor);
+        ticket.setDueHint(actor.employeeId, input.dueHintAt, input.reason, now);
+      },
+      { expectedVersion }
+    );
   }
 
-  async linkRelated(actor: TicketActor, ticketId: string, relatedTicketId: string) {
+  async linkRelated(
+    actor: TicketActor,
+    ticketId: string,
+    relatedTicketId: string,
+    expectedVersion?: number
+  ) {
     if (!mongoose.isValidObjectId(relatedTicketId)) throw new TicketNotFoundError();
     const related = await this.deps.tickets.findOneById(relatedTicketId);
     // Không cho lộ ticket hạn chế mà người dùng không xem được.
     if (!related || accessLevel(related.getProps(), actor) === "none") {
       throw new TicketNotFoundError("Ticket liên quan không tồn tại");
     }
-    return this.execute(ticketId, actor, (ticket, { now }) => {
-      assertCanActAsHandler(ticket, actor);
-      ticket.linkRelated(actor.employeeId, relatedTicketId, now);
-    });
+    return this.execute(
+      ticketId,
+      actor,
+      (ticket, { now }) => {
+        assertCanActAsHandler(ticket, actor);
+        ticket.linkRelated(actor.employeeId, relatedTicketId, now);
+      },
+      { expectedVersion }
+    );
   }
 
   // ---- trao đổi ------------------------------------------------------------------------------
@@ -698,6 +812,9 @@ export class TicketCommandService {
       const now = this.deps.now();
       const scheduler = await this.deps.scheduler.load(now);
       const ticket = await this.load(ticketId, actor, options.allowSummary);
+      if (options.expectedVersion !== undefined && ticket.version !== options.expectedVersion) {
+        throw new TicketVersionConflictError();
+      }
       await mutate(ticket, { now, scheduler });
       refreshSchedule(ticket, scheduler);
 
@@ -738,7 +855,11 @@ export class TicketCommandService {
     );
   }
 
-  private async assertDuplicateTarget(ticketId: string, duplicateOf?: string | null) {
+  private async assertDuplicateTarget(
+    actor: TicketActor,
+    ticketId: string,
+    duplicateOf?: string | null
+  ) {
     if (!duplicateOf || !mongoose.isValidObjectId(duplicateOf)) {
       throw new ArgumentInvalidException("Ticket trùng phải chỉ rõ ticket gốc");
     }
@@ -749,7 +870,10 @@ export class TicketCommandService {
       this.deps.tickets.findOneById(ticketId),
       this.deps.tickets.findOneById(String(duplicateOf))
     ]);
-    if (!current || !original) throw new TicketNotFoundError("Ticket gốc không tồn tại");
+    // Ticket gốc hạn chế mà người đóng không xem được thì coi như không tồn tại (không lộ sự có mặt).
+    if (!current || !original || accessLevel(original.getProps(), actor) === "none") {
+      throw new TicketNotFoundError("Ticket gốc không tồn tại");
+    }
 
     // Cùng một lỗi nhưng khác khách thì phải xử lý riêng từng khách → không được đánh dấu "Trùng".
     const phoneA = current.getProps().customer?.phone;

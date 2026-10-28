@@ -58,7 +58,8 @@ export function visibilityFilter(actor: TicketActor): Filter {
       { created_by: actor.employeeId },
       { "assignment.owner_id": actor.employeeId },
       { "assignment.collaborator_ids": actor.employeeId },
-      { "assignment.member_ids": actor.employeeId },
+      // Người được giao đích danh khi chưa có chủ trì (khớp isInvolved ở domain)
+      { "assignment.owner_id": null, "assignment.member_ids": actor.employeeId },
       // Thành viên phòng được giao, ticket còn chờ nhận (khớp isDepartmentCandidate ở domain)
       {
         "assignment.mode": "department",

@@ -28,6 +28,7 @@ import { MongooseTicketConfigReader } from "../../../src/modules/ticket/infrastr
 import {
   TicketAlreadyClaimedError,
   TicketForbiddenError,
+  TicketInvalidTransitionError,
   TicketNotFoundError,
   TicketVersionConflictError
 } from "../../../src/modules/ticket/domain/ticket.errors";
@@ -104,8 +105,22 @@ class FakeDirectory implements TicketDirectory {
       .map((deptId) => ({ id: deptId, name: `Phòng ${deptId.slice(-4)}`, managerId: HEAD_IT }));
   }
 
-  async searchEmployees(): Promise<EmployeeSummary[]> {
-    return [];
+  async searchEmployees(
+    query: string,
+    limit: number,
+    onlyIds?: string[]
+  ): Promise<EmployeeSummary[]> {
+    const keyword = query.trim().toLowerCase();
+    return Object.entries(EMPLOYEES)
+      .filter(([employeeId]) => !onlyIds || onlyIds.includes(employeeId))
+      .filter(([, employee]) => employee.name.toLowerCase().includes(keyword))
+      .slice(0, limit)
+      .map(([employeeId, employee]) => ({
+        id: employeeId,
+        fullName: employee.name,
+        accountId: employeeId,
+        departmentNames: []
+      }));
   }
 
   async listDepartments(): Promise<DepartmentSummary[]> {
@@ -1338,5 +1353,476 @@ describe("nhân sự liên quan (sản phẩm nội bộ)", () => {
       ArgumentInvalidException
     );
     expect(await TicketModel.countDocuments()).toBe(0);
+  });
+});
+
+// ---- rà soát phân tích luồng (28/10/2026) -------------------------------------------------------
+
+describe("version do client gửi lên", () => {
+  const versionOf = async (ticketId: string) =>
+    ((await TicketModel.findById(ticketId).lean()) as any).version as number;
+
+  it("lệch version (ticket đã bị người khác đổi) → báo tải lại, không ghi đè; đúng version → thành công", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    const seen = await versionOf(created.id);
+
+    // Người tạo sửa tiêu đề sau khi nhóm xử lý đã mở trang → version tăng
+    await commands.edit(requester(), created.id, { title: "Tiêu đề mới" });
+
+    await expect(
+      commands.hold(itA(), created.id, { reason: "Chờ ngân hàng" }, seen)
+    ).rejects.toThrow(TicketVersionConflictError);
+    expect(((await TicketModel.findById(created.id).lean()) as any).status).toBe("in_progress");
+
+    await commands.hold(
+      itA(),
+      created.id,
+      { reason: "Chờ ngân hàng" },
+      await versionOf(created.id)
+    );
+    expect(((await TicketModel.findById(created.id).lean()) as any).status).toBe("on_hold");
+  });
+
+  it("không gửi version thì giữ hành vi cũ (client cũ vẫn chạy)", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await commands.edit(requester(), created.id, { title: "Tiêu đề mới" });
+    await expect(commands.hold(itA(), created.id, { reason: "Chờ" })).resolves.toBeDefined();
+  });
+});
+
+describe("mở lại: capability khớp entity", () => {
+  it("người có ticket.manage nhưng không thuộc nhóm xử lý không thấy nút mở lại và không mở lại được", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await commands.resolve(itA(), created.id, { note: "Xong" });
+
+    const asBoss: any = await queries.getById(boss(), created.id);
+    const asHandler: any = await queries.getById(itA(), created.id);
+    expect(asBoss.capabilities.reopen).toBe(false);
+    expect(asHandler.capabilities.reopen).toBe(true);
+    await expect(commands.reopen(boss(), created.id, "Chưa ổn")).rejects.toThrow(
+      TicketForbiddenError
+    );
+  });
+});
+
+describe("lịch sử sửa khách không lộ mã khách", () => {
+  it("người ngoài nhóm xử lý thấy changes.customer đã bỏ externalId; nhóm xử lý / ticket.manage vẫn thấy", async () => {
+    const customer = { phone: "0912345678", name: "Khách A", appCode: "tikluy" };
+    const created = await createPlain({ customer: { ...customer, externalId: "u-1001" } });
+    await commands.edit(requester(), created.id, {
+      customer: { ...customer, externalId: "u-2002" }
+    });
+
+    const editedChange = (detail: any) =>
+      detail.activities.find((activity: any) => activity.action === "edited").changes[0];
+
+    const asStranger = editedChange(await queries.getById(stranger(), created.id));
+    expect(asStranger.field).toBe("customer");
+    expect(asStranger.from.externalId).toBeNull();
+    expect(asStranger.to.externalId).toBeNull();
+    expect(asStranger.to.phone).toBe("0912345678");
+
+    const asBoss = editedChange(await queries.getById(boss(), created.id));
+    expect(asBoss.to.externalId).toBe("u-2002");
+  });
+});
+
+describe("ticket đã kết thúc không đổi nhóm / liên kết được nữa", () => {
+  it("bỏ phối hợp và liên kết ticket bị chặn khi ticket đã đóng", async () => {
+    const created = await createPlain();
+    const other = await createPlain({ title: "Ticket khác" });
+    await commands.claim(itA(), created.id);
+    await commands.addCollaborator(itA(), created.id, IT_B);
+    await commands.close(itA(), created.id, { code: "solved" });
+
+    await expect(commands.removeCollaborator(itA(), created.id, IT_B)).rejects.toThrow(
+      TicketInvalidTransitionError
+    );
+    await expect(commands.linkRelated(itA(), created.id, other.id)).rejects.toThrow(
+      TicketInvalidTransitionError
+    );
+    const doc: any = await TicketModel.findById(created.id).lean();
+    expect(doc.assignment.collaborator_ids.map(String)).toEqual([IT_B]);
+    expect(doc.related_ticket_ids).toHaveLength(0);
+  });
+});
+
+describe("đóng 'Trùng' không lộ ticket hạn chế", () => {
+  it("ticket gốc hạn chế mà người đóng không xem được thì coi như không tồn tại", async () => {
+    const plain = actor(IT_A); // không có quyền xem ticket hạn chế
+    const created = await createPlain();
+    await commands.claim(plain, created.id);
+    const secret = await commands.create(
+      requester(),
+      {
+        title: "Đổi SĐT",
+        productId: ids.product,
+        templateId: ids.templatePhone,
+        customFields: { new_phone: "0987654321" }
+      },
+      [file("approval_document")]
+    );
+
+    await expect(
+      commands.close(plain, created.id, { code: "duplicate", duplicateOf: secret.id })
+    ).rejects.toThrow(TicketNotFoundError);
+    expect(((await TicketModel.findById(created.id).lean()) as any).status).toBe("in_progress");
+  });
+});
+
+describe("chọn người để giao việc", () => {
+  it("trưởng bộ phận chỉ thấy người trong phòng mình; ban lãnh đạo thấy mọi người", async () => {
+    const asHead = await queries.searchEmployees("", 20, headIt());
+    const headIds = asHead.map((employee: any) => employee.id);
+    expect(headIds).toEqual(expect.arrayContaining([IT_A, IT_B]));
+    expect(headIds).not.toContain(REQUESTER);
+
+    const asBoss = await queries.searchEmployees("", 20, boss());
+    expect(asBoss.map((employee: any) => employee.id)).toContain(REQUESTER);
+
+    // Không yêu cầu lọc theo quyền giao (tìm người nhắc tên, phối hợp...) thì không giới hạn
+    const unrestricted = await queries.searchEmployees("", 20);
+    expect(unrestricted.map((employee: any) => employee.id)).toContain(REQUESTER);
+  });
+});
+
+describe("capability liên kết ticket liên quan", () => {
+  it("chỉ nhóm xử lý và chỉ khi ticket chưa kết thúc", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+
+    const handlerView: any = await queries.getById(itA(), created.id);
+    const strangerView: any = await queries.getById(stranger(), created.id);
+    expect(handlerView.capabilities.linkRelated).toBe(true);
+    expect(strangerView.capabilities.linkRelated).toBe(false);
+
+    await commands.close(itA(), created.id, { code: "solved" });
+    const afterClose: any = await queries.getById(itA(), created.id);
+    expect(afterClose.capabilities.linkRelated).toBe(false);
+  });
+});
+
+describe("thao tác nhanh trên danh sách", () => {
+  it("mỗi dòng trả quyền thao tác của người xem và version; nhận xong thì quyền đổi theo", async () => {
+    const created = await createPlain();
+
+    const rowFor = async (who: TicketActor) =>
+      ((await queries.list(who, { tab: "all" })) as any).data.find(
+        (row: any) => row.id === created.id
+      );
+
+    const beforeIt = await rowFor(itA());
+    expect(beforeIt.capabilities.claim).toBe(true);
+    expect(beforeIt.capabilities.hold).toBe(false);
+    expect(beforeIt.version).toBe(0);
+
+    await commands.claim(itA(), created.id);
+    const afterIt = await rowFor(itA());
+    expect(afterIt.capabilities).toMatchObject({ claim: false, resolve: true, hold: true });
+    expect(afterIt.version).toBe(1);
+
+    // Người ngoài nhóm xử lý không có quyền xử lý; người tạo không thấy nút xác nhận khi chưa báo xong
+    const asStranger = await rowFor(stranger());
+    expect(asStranger.capabilities).toMatchObject({ claim: false, resolve: false, confirm: false });
+    const asRequester = await rowFor(requester());
+    expect(asRequester.capabilities.confirm).toBe(false);
+
+    await commands.resolve(itA(), created.id, { note: "Xong" }, afterIt.version);
+    expect((await rowFor(requester())).capabilities.confirm).toBe(true);
+  });
+});
+
+// ---- rà soát 28/10: quyền xem sau khi rời nhóm, kẹt tạm hoãn, nhận khi đã có phối hợp ---------------
+
+describe("quyền xem ticket hạn chế theo nhóm xử lý hiện tại", () => {
+  async function restrictedAssigned() {
+    const created = await commands.create(
+      requester(),
+      {
+        title: "Đổi SĐT",
+        productId: ids.product,
+        templateId: ids.templatePhone,
+        customFields: { new_phone: "0987654321" }
+      },
+      [file("approval_document", "totrinh.pdf")]
+    );
+    await commands.assign(boss(), created.id, {
+      mode: "members",
+      memberIds: [IT_A, IT_B],
+      ownerId: IT_A,
+      assignedBy: BOSS
+    } as any);
+    return created;
+  }
+
+  it("người phối hợp bị gỡ không còn xem được ticket hạn chế", async () => {
+    const created = await restrictedAssigned();
+    // IT_B không có quyền xem ticket hạn chế theo vai trò, chỉ có tư cách người phối hợp
+    const asB = actor(IT_B);
+    expect(((await queries.getById(asB, created.id)) as any).accessLevel).toBe("full");
+
+    await commands.removeCollaborator(itA(), created.id, IT_B);
+    await expect(queries.getById(asB, created.id)).rejects.toThrow(TicketNotFoundError);
+    const list = await queries.list(asB, { tab: "all" });
+    expect(list.data.find((row: any) => row.id === created.id)).toBeUndefined();
+  });
+
+  it("người được giao đích danh chỉ thấy ticket hạn chế khi ticket chưa có chủ trì", async () => {
+    const created = await restrictedAssigned();
+    const asC = actor(IT_C);
+    await expect(queries.getById(asC, created.id)).rejects.toThrow(TicketNotFoundError);
+
+    // Chưa có chủ trì: người được giao đích danh thấy
+    await commands.assign(boss(), created.id, {
+      mode: "members",
+      memberIds: [IT_C],
+      assignedBy: BOSS
+    } as any);
+    expect(((await queries.getById(asC, created.id)) as any).accessLevel).toBe("full");
+
+    // Giao lại cho người khác kèm chủ trì: IT_C không còn xem được
+    await commands.assign(boss(), created.id, {
+      mode: "members",
+      memberIds: [IT_A],
+      ownerId: IT_A,
+      assignedBy: BOSS
+    } as any);
+    await expect(queries.getById(asC, created.id)).rejects.toThrow(TicketNotFoundError);
+  });
+});
+
+describe("ticket tạm hoãn không bị kẹt khi mất chủ trì", () => {
+  it("chủ trì duy nhất trả lại ticket đang tạm hoãn → về open, xoá thông tin tạm hoãn, người khác nhận được", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await commands.hold(itA(), created.id, { reason: "Chờ ngân hàng" });
+
+    await commands.release(itA(), created.id, "Không làm được");
+    const doc: any = await TicketModel.findById(created.id).lean();
+    expect(doc.status).toBe("open");
+    expect(doc.hold ?? null).toBeNull();
+    expect(doc.assignment.owner_id ?? null).toBeNull();
+
+    const asB: any = await queries.getById(itB(), created.id);
+    expect(asB.capabilities.claim).toBe(true);
+    await commands.claim(itB(), created.id);
+    expect(((await TicketModel.findById(created.id).lean()) as any).status).toBe("in_progress");
+  });
+
+  it("giao ticket đang tạm hoãn cho phòng ban (không chủ trì) → về open để phòng đó nhận", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await commands.hold(itA(), created.id, { reason: "Chờ dev" });
+
+    await commands.assign(boss(), created.id, {
+      mode: "department",
+      departmentId: DEPT_IT,
+      assignedBy: BOSS
+    } as any);
+    const doc: any = await TicketModel.findById(created.id).lean();
+    expect(doc.status).toBe("open");
+    expect(doc.hold ?? null).toBeNull();
+    expect(doc.assignment.owner_id ?? null).toBeNull();
+  });
+});
+
+describe("nhận ticket khi đã có người phối hợp thêm sớm", () => {
+  it("người được thêm phối hợp từ trước vẫn nhận được, thành chủ trì và không còn trong danh sách phối hợp", async () => {
+    const created = await createPlain();
+    await commands.addCollaborator(boss(), created.id, IT_B);
+
+    await commands.claim(itB(), created.id);
+    const detail: any = await queries.getById(boss(), created.id);
+    expect(detail.assignment.owner.id).toBe(IT_B);
+    expect(detail.assignment.collaborators.map((person: any) => person.id)).not.toContain(IT_B);
+  });
+
+  it("giao đích danh: giữ người phối hợp thêm sớm; người đã rời nhóm không bị thêm lại", async () => {
+    const created = await createPlain();
+    await commands.assign(boss(), created.id, {
+      mode: "members",
+      memberIds: [IT_A, IT_C],
+      assignedBy: BOSS
+    } as any);
+    await commands.addCollaborator(boss(), created.id, IT_B);
+
+    await commands.claim(itA(), created.id);
+    const afterClaim: any = await queries.getById(boss(), created.id);
+    expect(afterClaim.assignment.collaborators.map((person: any) => person.id).sort()).toEqual(
+      [IT_B, IT_C].sort()
+    );
+
+    // IT_C rời nhóm rồi chủ trì trả lại: IT_C không bị tự thêm trở lại
+    await commands.removeCollaborator(itA(), created.id, IT_C);
+    await commands.release(itA(), created.id, "Nhường lại");
+    const released: any = await queries.getById(boss(), created.id);
+    expect(released.assignment.owner.id).toBe(IT_B);
+    expect(released.assignment.members.map((person: any) => person.id)).not.toContain(IT_C);
+  });
+});
+
+describe("báo xong khi ticket cần tờ trình", () => {
+  it("capability resolve chỉ bật sau khi tờ trình được xác nhận hợp lệ", async () => {
+    const created = await commands.create(
+      requester(),
+      {
+        title: "Đổi SĐT",
+        productId: ids.product,
+        templateId: ids.templatePhone,
+        customFields: { new_phone: "0987654321" }
+      },
+      [file("approval_document", "totrinh.pdf")]
+    );
+    await commands.claim(itA(), created.id);
+    expect(((await queries.getById(itA(), created.id)) as any).capabilities.resolve).toBe(false);
+
+    await commands.verifyApproval(itA(), created.id, { valid: true });
+    expect(((await queries.getById(itA(), created.id)) as any).capabilities.resolve).toBe(true);
+  });
+});
+
+describe("ticket hạn chế đã đóng chỉ lộ thông tin chung ở danh sách và tìm kiếm", () => {
+  it("người tạo không thấy khách / sản phẩm ở dòng danh sách, tìm kiếm không trả SĐT; người có quyền vẫn thấy", async () => {
+    const created = await commands.create(
+      requester(),
+      {
+        title: "Đổi SĐT khách riêng tư",
+        productId: ids.product,
+        templateId: ids.templatePhone,
+        customFields: { new_phone: "0987654321" },
+        customer: { phone: "0911222333", name: "Khách kín", appCode: "tikluy" }
+      },
+      [file("approval_document", "totrinh.pdf")]
+    );
+    await commands.claim(boss(), created.id);
+    await commands.close(boss(), created.id, {
+      code: "insufficient_basis",
+      note: "Chưa đủ căn cứ"
+    });
+
+    const rowFor = async (who: TicketActor) =>
+      ((await queries.list(who, { tab: "all" })) as any).data.find(
+        (row: any) => row.id === created.id
+      );
+
+    const asRequester = await rowFor(requester());
+    expect(asRequester.customer).toBeNull();
+    expect(asRequester.product.name).toBe("");
+    expect(asRequester.owner).toBeNull();
+    expect(asRequester.resolution.label).toBe("Chưa đủ cơ sở");
+    expect(asRequester.capabilities.reopen).toBe(true);
+
+    const asBoss = await rowFor(boss());
+    expect(asBoss.customer.phone).toBe("0911222333");
+    expect(asBoss.product.name).toBe("TIKLUY APP");
+
+    const found = await queries.searchTickets(requester(), "khách riêng tư");
+    expect(found[0].customerPhone).toBeNull();
+    const foundByBoss = await queries.searchTickets(boss(), "khách riêng tư");
+    expect(foundByBoss[0].customerPhone).toBe("0911222333");
+  });
+});
+
+describe("lịch sử trả chữ người đọc được", () => {
+  it("thêm/gỡ phối hợp ghi tên người, liên kết ghi mã ticket, giao việc ghi kiểu giao", async () => {
+    const created = await createPlain();
+    const other = await createPlain({ title: "Ticket khác" });
+    await commands.claim(itA(), created.id);
+    await commands.addCollaborator(itA(), created.id, IT_B);
+    await commands.removeCollaborator(itA(), created.id, IT_B);
+    await commands.linkRelated(itA(), created.id, other.id);
+
+    const detail: any = await queries.getById(itA(), created.id);
+    const noteOf = (action: string) =>
+      detail.activities.find((activity: any) => activity.action === action)?.note;
+    expect(noteOf("collaborator_added")).toBe("IT B");
+    expect(noteOf("collaborator_removed")).toBe("IT B");
+    expect(noteOf("linked")).toBe(other.code);
+
+    await commands.assign(boss(), created.id, {
+      mode: "department",
+      departmentId: DEPT_IT,
+      assignedBy: BOSS
+    } as any);
+    const afterAssign: any = await queries.getById(boss(), created.id);
+    const assigned = afterAssign.activities.filter(
+      (activity: any) => activity.action === "assigned"
+    );
+    expect(assigned[assigned.length - 1].note).toBe("Giao cho phòng ban");
+  });
+});
+
+describe("tờ trình bổ sung chỉ tính file của chính người tạo", () => {
+  it("file tờ trình do người xử lý đăng trong trao đổi không thay được tờ trình của người tạo", async () => {
+    const created = await commands.create(
+      requester(),
+      {
+        title: "Đổi SĐT",
+        productId: ids.product,
+        templateId: ids.templatePhone,
+        customFields: { new_phone: "0987654321" }
+      },
+      [file("approval_document", "totrinh.pdf")]
+    );
+    await commands.claim(itA(), created.id);
+    // createdAt của file do Mongoose đặt bằng đồng hồ thật nên mốc "yêu cầu bổ sung" phải nằm trong quá khứ thật
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 30);
+    }); // sau file tờ trình lúc tạo ticket
+    now = new Date();
+    await commands.verifyApproval(itA(), created.id, { valid: false, note: "Thiếu chữ ký" });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 30);
+    }); // trước các file đăng trong trao đổi
+
+    // IT đăng file loại tờ trình trong trao đổi: không tính là người tạo đã bổ sung
+    await commands.addMessage(itA(), created.id, { body: "Đây là mẫu" }, [
+      file("approval_document", "mau.pdf")
+    ]);
+    await expect(commands.submitInfo(requester(), created.id, {})).rejects.toThrow();
+
+    // Người tạo tự gửi file tờ trình trong trao đổi: tính
+    await commands.addMessage(requester(), created.id, { body: "Em gửi lại" }, [
+      file("approval_document", "moi.pdf")
+    ]);
+    await commands.submitInfo(requester(), created.id, {});
+    expect(((await TicketModel.findById(created.id).lean()) as any).status).toBe("in_progress");
+  });
+});
+
+describe("cron nhắc không gửi lặp và không nhắc ticket đã đổi trạng thái", () => {
+  function sweepAt(clock: Date) {
+    return new TicketSweepService({
+      ...(createDefaultTicketDeps() as any),
+      tickets: (commands as any).deps.tickets,
+      activities: (commands as any).deps.activities,
+      scheduler: (commands as any).deps.scheduler,
+      notifier,
+      directory,
+      now: () => clock
+    }).run();
+  }
+
+  it("hai lần quét chồng nhau chỉ nhắc một lần; version tăng khi đánh dấu đã nhắc", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await commands.requestInfo(itA(), created.id, { items: [{ key: "screenshot" }] });
+    const before: any = await TicketModel.findById(created.id).lean();
+
+    const remindClock = new Date(T0.getTime() + 2 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000);
+    const [first, second] = await Promise.all([sweepAt(remindClock), sweepAt(remindClock)]);
+    expect(first.reminded + second.reminded).toBe(1);
+    expect(
+      notifier.sent.filter(
+        (item) => item.type === "auto_close_reminder" && item.ticketId === created.id
+      )
+    ).toHaveLength(1);
+
+    const after: any = await TicketModel.findById(created.id).lean();
+    expect(after.version).toBe(before.version + 1);
+    expect(after.remind_at ?? null).toBeNull();
   });
 });

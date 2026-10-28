@@ -164,6 +164,7 @@ BÊN TRONG `src/modules/`.
 | `INTERNAL_DIR_DEV` / `INTERNAL_DIR_PROD` | Thư mục ổ file nội bộ theo phòng ban |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Redis config |
 | `TIKLUY_API_KEY`, `TIKLUY_ALLOWED_IPS` | Xác thực app nội bộ Tikluy |
+| `DISABLE_CRON` | `1`/`true` → `startCronJobs()` không đăng ký cron nào. Dùng khi chạy local trỏ vào DB dùng chung (test) để job không ghi vào dữ liệu đó |
 | `HANDBOOK_ANTHROPIC_API_KEY` | Key Claude cho Trợ lý Nội quy (rơi về `ANTHROPIC_API_KEY`). Còn `HANDBOOK_AI_MODEL`, `HANDBOOK_AI_EFFORT` (mặc định `low`), `HANDBOOK_DAILY_QUOTA` (30), `HANDBOOK_MAX_TURNS` (20), `HANDBOOK_RETENTION_DAYS` (180)… — bảng đầy đủ ở `docs/HANDBOOK-ASSISTANT.md` |
 
 Mọi path resolve dùng `path.resolve(dir)` — tương thích cả relative (dev) và absolute (prod).

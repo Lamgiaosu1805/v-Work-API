@@ -62,5 +62,7 @@ export const DEFAULT_SENSITIVE_KINDS = [
   "cccd",
   "cccd_images",
   "transaction_proof",
+  // Giấy tờ cá nhân khác do người gửi tự đánh dấu nhạy cảm trong khung trao đổi
+  "sensitive_other",
   APPROVAL_DOCUMENT_ITEM_KEY
 ];

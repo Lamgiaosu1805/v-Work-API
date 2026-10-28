@@ -169,8 +169,9 @@ export function planNotifications(
   if (event instanceof TicketCreatedDomainEvent) {
     // Ticket mới → người phụ trách (Khẩn / Cao: thêm cả danh sách mặc định; thường/thấp: chỉ người phụ trách
     // cụ thể của mẫu/loại/sản phẩm). Ticket đang chờ người tạo bổ sung tờ trình thì chưa báo — sẽ báo khi
-    // người tạo bổ sung xong (TicketInfoSubmittedDomainEvent).
-    if (props.status !== "waiting_info") {
+    // người tạo bổ sung xong (TicketInfoSubmittedDomainEvent). Ticket tạo ra đã có chủ trì (giao đích danh kèm
+    // chủ trì) thì không còn "chờ nhận" — nhóm xử lý được báo qua sự kiện giao việc.
+    if (props.status !== "waiting_info" && !event.ownerAtCreation) {
       planned = TICKET_ESCALATED_URGENCIES.includes(event.urgency)
         ? [
             plan(

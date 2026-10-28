@@ -184,6 +184,8 @@ const TicketSchema = new Schema(
 
 TicketSchema.index({ code: 1 }, { unique: true });
 TicketSchema.index({ status: 1, createdAt: -1 });
+// Tab "Tất cả" (không lọc trạng thái) sắp theo ngày tạo mới nhất
+TicketSchema.index({ isDeleted: 1, createdAt: -1 });
 TicketSchema.index({ "assignment.owner_id": 1, status: 1 });
 TicketSchema.index({ "assignment.collaborator_ids": 1, status: 1 });
 TicketSchema.index({ "assignment.department_id": 1, status: 1 });

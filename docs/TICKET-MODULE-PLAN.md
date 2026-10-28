@@ -4,9 +4,7 @@
 > Nguồn: 3 vòng phản biện với chủ hệ thống (23/10/2026) + khảo sát code vWork, VNFITE
 > (`D:\VNFITE\vnfite_v2_microservice`) và TIKLUY (`D:\TIKLUY`).
 
-Module mới, viết theo pattern DDD/Hexagonal của `src/modules/request` — xem `CLAUDE.md` mục "DDD +
-Hexagonal Architecture". Ticket **khác** đơn từ (`request`): đơn chỉ duyệt/từ chối, còn ticket có tiếp
-nhận, giao việc, trao đổi, cảnh báo và kết quả xử lý — nên tách module riêng, không mở rộng `request`.
+Module mới, viết theo pattern DDD/Hexagonal của `src/modules/request` — xem `CLAUDE.md` mục "DDD + Hexagonal Architecture". Ticket **khác** đơn từ (`request`): đơn chỉ duyệt/từ chối, còn ticket có tiếp nhận, giao việc, trao đổi, cảnh báo và kết quả xử lý — nên tách module riêng, không mở rộng `request`.
 
 ## 0. Phạm vi đã chốt với chủ hệ thống
 
@@ -91,8 +89,8 @@ Mỗi mẫu là **cấu hình**: trường bắt buộc, giấy tờ (đánh d�
 - **Không có API đổi SĐT** ở cả 2 sản phẩm → IT sửa tay trong DB sản phẩm **và** sửa khách trong CRM vWork
   (`CustomerModel` unique theo app + SĐT).
 - **CMS cả 2 sản phẩm không ghi ai đã reset mật khẩu/thiết bị/mở khoá** → ticket vWork là nơi duy nhất còn
-  dấu vết. Khi kết luận có ô **"Kết quả thực hiện" không bắt buộc** (đã làm gì, trên hệ thống nào, userId
-  nào) — có thì ghi, không có thì để trống.
+  dấu vết. Khi kết luận có ô **"Kết quả thực hiện" không bắt buộc** (đã làm gì, trên hệ thống nào, cho khách hàng
+  hoặc nhân viên nào) — có thì ghi, không có thì để trống.
 - **Reset mật khẩu trên CMS trả mật khẩu mới dạng chữ thường cho IT** → **tuyệt đối không ghi mật khẩu vào
   ticket**. Hệ thống cảnh báo khi nội dung trao đổi trông giống mật khẩu; quy định kênh gửi mật khẩu cho
   khách nằm ngoài ticket.
@@ -676,9 +674,103 @@ Tab dạng viên thuốc (cùng kiểu màn Đơn từ). Backend nhận `GET /ti
 | **Chưa ai nhận** (`unclaimed`) | Ticket `open`, chưa giao ai (`mode = none`) — cả công ty nhận được | — |
 | **Ticket phòng ban** (`department`) | Giao cho phòng tôi (gồm phòng cha) + việc của người trong phòng tôi (gồm phòng con) | Tất cả của phòng · Giao cho phòng, chờ nhận (`waiting`) · Phòng đang xử lý (`handling`) · Do phòng tạo (`created`) |
 | **Cần chú ý** (`yellow`, trước đây tên "Cảnh báo vàng") | Như mục 8 (sắp theo `alert_at`) | — |
-| **Tất cả** (`all`) | Mọi ticket được xem | Đang mở · Đã đóng / huỷ · Tất cả (lọc theo `status`, không cần backend riêng) |
+| **Tất cả** (`all`) | Mọi ticket được xem (kể cả đã đóng / huỷ) | — (lọc trạng thái bằng ô "Trạng thái" ở thanh bộ lọc, gửi `status`) |
 
 - Số đếm (`GET /tickets/counts`) chỉ đếm phần cần hành động: `my` = ticket đang mở, `department` = chờ phòng nhận, kèm
   `needs_reply`, `unclaimed`, `yellow`.
 - Các tab hàng đợi (Của tôi / Chưa ai nhận / Phòng ban) loại trừ nhau; `needs_reply` và `yellow` là "góc nhìn" nên chồng lấn.
 - Thay cho 8 tab cũ (`mine`, `created`, `assigned_to_me`, `my_department`, `closed`...); các khoá cũ không còn.
+
+## 17. Thao tác nhanh trên danh sách (28/10/2026)
+
+Mỗi dòng ở danh sách có thể thao tác ngay, không phải vào trang chi tiết. `GET /tickets` trả thêm `capabilities` (cùng
+hàm `capabilitiesOf` với chi tiết) và `version` cho từng dòng; server vẫn kiểm tra lại ở mọi thao tác. Nút nào hiện =
+server báo được phép (`capabilities`) VÀ người dùng có quyền thô của route.
+
+**Mọi tab như nhau:** cùng một ticket thì có cùng thao tác ở mọi tab, kể cả "Tất cả" (`components/actions/ticketQuickActions.js`) —
+không tab nào ẩn thao tác; nút nào hiện chỉ do `capabilities` của dòng và quyền thô của người dùng quyết định.
+
+**Các thao tác làm ở danh sách:** Nhận xử lý, Tiếp tục xử lý, Báo đã xử lý xong, Tạm hoãn, Trả lại, Yêu cầu bổ sung, Giao việc,
+Đặt ngày dự kiến, Đóng ticket, Tờ trình hợp lệ / không hợp lệ, Xác nhận đã xong, Mở lại, Huỷ yêu cầu. Vẫn làm ở chi tiết:
+bổ sung của người tạo (cần tải file), thêm người phối hợp, liên kết ticket, sửa thông tin.
+
+- Quyền thô: `ticket.handle` cho nhận / tiếp tục / báo xong / tạm hoãn / trả lại / yêu cầu bổ sung / đặt ngày / đóng;
+  `ticket.create` cho xác nhận / huỷ; giao việc, tờ trình, mở lại chỉ cần `ticket.view` (domain kiểm tra theo từng ticket).
+- "Báo đã xử lý xong" bị ẩn khi ticket cần tờ trình mà chưa được xác nhận hợp lệ (server sẽ từ chối); khi đó hộp thoại
+  "Đóng ticket" cũng không cho chọn kết quả "Đã giải quyết" (`actions/resolutionOptions.js`).
+- Giao diện: bố cục từng dòng chọn theo **độ rộng thật của vùng danh sách** (hook `useElementWidth`, đo bằng
+  `ResizeObserver`), KHÔNG theo độ rộng cửa sổ — cùng một cửa sổ nhưng có thanh bên thì vùng nội dung hẹp hơn nhiều.
+  Ba bố cục, ngưỡng ở `TicketList.jsx` (`WIDE_MIN = 900`, `MEDIUM_MIN = 560`):
+  - **Rộng (≥ 900px, 3 cột):** thao tác gắn vào hàng chip ở cột 3 — chip trạng thái bấm được (có mũi tên) mở menu các
+    thao tác; riêng ticket chưa ai nhận có thêm nút cam "Nhận xử lý" ngay đầu hàng chip.
+  - **Vừa (560–899px, 2 cột):** dòng đầu (mã, tiêu đề) chiếm cả hàng; bên dưới là cột thông tin và cột chip + nút chính
+    kèm menu "⋮" cho các thao tác còn lại.
+  - **Hẹp (< 560px, 1 cột):** xếp dọc, nút chính nằm dưới chip kèm menu "⋮".
+  Mọi khối con bị chặn `maxWidth: 100%`, chữ dài tự xuống dòng / cắt `…` nên không tràn sang cột bên cạnh.
+  Mục nguy hiểm (huỷ, tờ trình không hợp lệ) trong menu có màu đỏ. Hộp thoại và hộp hỏi xác nhận dùng lại đúng các thành phần của màn chi tiết
+  (`TicketActionDialog`, `TicketConfirmDialog`, `useTicketActionRunner`, `useTicketRowActionFlow`, bảng `ticketActions.js`).
+- Mọi thao tác ghi gửi kèm `version` đang hiển thị: ticket bị người khác đổi giữa chừng thì báo "tải lại để xem"
+  (409) thay vì ghi đè. `claim` không cần `version` vì đã tự chống nhận trùng.
+
+## 18. Thẻ "Thông tin" ở màn chi tiết (28/10/2026)
+
+Thẻ được làm gọn (khoảng 480px thay vì 730px) mà không bỏ thông tin nào (`components/detail/TicketInfoCard.jsx`):
+
+- **Phân loại** là một hàng chip `sản phẩm › loại yêu cầu › mẫu` đặt dưới hộp cảnh báo, không có mục riêng; hẹp thì xuống dòng.
+- **Nội dung yêu cầu** gộp mô tả và các trường theo mẫu vào một khối (vạch cam mảnh bên trái, không nền): mô tả ở trên,
+  các trường theo mẫu sau một đường nét đứt, cuối cùng là dòng nhỏ ghi người tạo và giờ tạo. Mô tả dài vẫn thu gọn + "Xem thêm".
+- **Khách hàng** trên một hàng (tự xuống dòng khi hẹp): avatar + tên (bấm mở hồ sơ CRM nếu `customerAccess.canOpenProfile`),
+  số điện thoại kèm nút sao chép, chip ứng dụng, nút "User ID" (sao chép mã khách; chỉ khi `customerAccess.showExternalId`; mã đầy đủ ở
+  tooltip, không còn ô "Mã khách (User ID)" và ô "Ứng dụng" riêng). Cảnh báo "Khách chưa có trong CRM" giữ nguyên bên dưới.
+- Hộp "Chờ người tạo bổ sung" còn 2 dòng: các mục cần bổ sung nối bằng `;`, rồi dòng giờ tự đóng.
+
+## 19. Rà soát 28/10/2026: các quy tắc đã chỉnh
+
+- **Quyền xem ticket hạn chế (mục 6.1):** người được giao đích danh (`memberIds`) chỉ tính là "liên quan" khi ticket CHƯA có chủ trì.
+  Có chủ trì rồi thì quyền xem thuộc về nhóm xử lý hiện tại (chủ trì + phối hợp): người bị gỡ / đã trả lại không còn xem được ticket
+  hạn chế và file nhạy cảm (`isInvolved`, `visibilityFilter`).
+- **Không kẹt ở "Tạm hoãn":** khi `release` (chủ trì duy nhất trả lại) hoặc `assign` (giao cho phòng / người không kèm chủ trì) làm ticket
+  mất chủ trì, ticket đang `in_progress` HOẶC `on_hold` đều quay về `open` và xoá thông tin tạm hoãn.
+- **Nhận ticket đã có phối hợp thêm sớm:** người nhận được loại khỏi danh sách phối hợp (không còn lỗi 400); giao đích danh thì giữ cả
+  người phối hợp thêm sớm. Gỡ phối hợp ở ticket giao đích danh cũng gỡ người đó khỏi `memberIds` để lần nhận sau không thêm lại.
+- **`capabilities.resolve`** chỉ bật khi ticket không cần tờ trình hoặc tờ trình đã `verified` (khớp `TicketEntity.resolve`).
+- **Danh sách / tìm kiếm với ticket hạn chế đã kết thúc:** người liên quan (không có quyền xem ticket hạn chế) chỉ thấy thông tin chung như
+  màn chi tiết (mã, tiêu đề, trạng thái, kết quả, người tạo); không trả khách, sản phẩm, loại, chủ trì, SĐT ở ô tìm kiếm.
+- **Lịch sử đọc được:** `note` của dòng thêm/gỡ phối hợp là TÊN người, "liên kết" là MÃ ticket, "giao việc" là kiểu giao; `changes` của
+  `productId` / `categoryId` là tên.
+- **Tờ trình bổ sung:** `hasKindSince` chỉ tính file do chính người tạo tải lên (file người xử lý đăng trong trao đổi không thay được).
+- **File nhạy cảm trong trao đổi:** thêm loại `sensitive_other` ("Giấy tờ nhạy cảm khác") vào `DEFAULT_SENSITIVE_KINDS`; khung trao đổi
+  có ô "Tệp nhạy cảm" gửi file với loại này.
+- **Thông báo "ticket mới":** sự kiện tạo mang cờ `ownerAtCreation`; ticket tạo ra đã có chủ trì không báo "có ticket mới cần nhận"
+  (nhóm xử lý được báo qua sự kiện giao việc).
+- **Cron nhắc / tự đóng:** đọc lại ticket rồi kiểm tra lại trạng thái + mốc (`autoCloseAt`, `remindAt`); đánh dấu "đã nhắc" bằng lệnh có điều
+  kiện, tăng `version`, TRƯỚC khi gửi (gửi lỗi thì trả mốc về như cũ) nên quét chồng nhau hoặc người dùng ghi cùng lúc không gửi lặp.
+- **Kiểm tra ở cửa API:** `code` đóng ticket, `urgency`, mọi ObjectId (sản phẩm, loại, mẫu, người, phòng, ticket liên kết, `mentionIds`, bộ lọc
+  danh sách) sai định dạng → 400 thay vì 500 / lưu giá trị lạ. `PATCH` bỏ qua trường rỗng thay vì lưu "null".
+- **`PATCH /tickets/:id` / `searchEmployees(assignable)`:** tìm người giao việc lọc theo phòng ngay trong câu truy vấn (không cắt 50 người rồi mới lọc).
+- **Ngưỡng cảnh báo vàng:** cập nhật một phần lưu LẠI ĐỦ các mức đã gộp (không đặt lại các mức còn lại về mặc định).
+- **Khách (CRM) `getDetailInfo` / `getFluctuation` / `getCustomerInvestmentHolding`:** không in số CCCD ra log; `external_id` phải là chuỗi;
+  hệ thống khách quá chậm → 504, lỗi kết nối → 502; không có hồ sơ chi tiết → 404 (không để request treo).
+- **Web:** trang chi tiết đặt `key={ticket.id}` (đổi ticket thì reset hộp thoại / nháp trao đổi); nút ở chi tiết lọc cùng quy tắc với danh sách
+  (`availableActionKeys`: capabilities + quyền route + chặn "Báo xong" khi tờ trình chưa hợp lệ); danh sách / chi tiết / số đếm `staleTime` 15 giây;
+  409 đóng hộp thoại và tải lại thay vì gửi lại ngầm; liên kết sang hồ sơ khách mang `?app=` để trang CRM tự chọn đúng công ty.
+- **Chưa đổi (cần quyết định sản phẩm):** `ensureCustomerAccessByExternalId` chưa lọc theo app (các API khách luôn gọi hệ thống TIKLUY);
+  giao ticket cho phòng ban luôn xoá nhóm xử lý hiện tại và trưởng phòng giao lại được ticket phòng khác đang làm; link HRM mở trang 403 với
+  nhân viên ngoài phạm vi được xem.
+
+## 20. Link từ ticket sang hồ sơ khách / nhân viên: đúng đích, đúng quyền
+
+`GET /tickets/:id` (`interface/ticket-profile-access.ts`) bổ sung, tính theo TỪNG hồ sơ (không chỉ "có quyền xem" mà cả phạm vi dữ liệu):
+
+| Đối tượng | Trường trả về | Đích |
+| --- | --- | --- |
+| Khách app **TIKLUY** | `customerAccess.profileTarget = "detail"` | `/khach-hang/<external_id>?app=tikluy` (chi tiết khách) |
+| Khách app **VNFITE** (và app khác) | `profileTarget = "list"` | `/khach-hang?app=vnfite&search=<SĐT>` (danh sách khách của app, tìm sẵn theo SĐT) |
+| Khách nhập tay / ngoài phạm vi dữ liệu của người xem | `profileTarget = null`, `canOpenProfile = false` | không có link |
+| Nhân sự nội bộ (sản phẩm vWork: CRM, HRM, Workplace) | `relatedEmployee.canOpenProfile` (employee.view + phạm vi) | `/hrm/employee/<id>` |
+
+- Lý do khách VNFITE chỉ dẫn tới danh sách: trang chi tiết khách lấy hồ sơ, biến động số dư, khoản đầu tư từ CMS **TIKLUY** (các API
+  `/crm/...`); CMS VNFITE không có các API đó. Khách được tìm theo `customerId` (ưu tiên) hoặc `external_id` + app, không lẫn giữa các app.
+- `getDetailInfo` / `getFluctuation` / `getCustomerInvestmentHolding` chỉ nhận khách của app TIKLUY; khách app khác trả 404 với câu
+  "Chi tiết khách hàng chỉ hỗ trợ app <tên app>".
+- Trang danh sách khách (`CustomerScreen`) đọc `?app=` (chọn đúng công ty CRM một lần khi mở) và `?search=`.

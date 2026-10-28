@@ -138,14 +138,21 @@ function validateUrgencyMinutes(value: unknown, label: string): void {
   });
 }
 
-// Mức càng gấp thì ngưỡng càng ngắn: Khẩn ≤ Cao ≤ Bình thường ≤ Thấp. Kiểm tra trên giá trị SAU KHI gộp với cài đặt đang lưu (client có thể chỉ gửi một vài mức).
-function assertUrgencyOrder(
+// Gộp mức client gửi lên với cài đặt đang lưu (client có thể chỉ gửi một vài mức); không gửi → undefined (không đổi).
+function mergeUrgencyMinutes(
   incoming: unknown,
-  current: Record<TicketUrgency, number>,
+  current: Record<TicketUrgency, number>
+): Record<TicketUrgency, number> | undefined {
+  if (incoming === undefined) return undefined;
+  return { ...current, ...(incoming as Partial<Record<TicketUrgency, number>>) };
+}
+
+// Mức càng gấp thì ngưỡng càng ngắn: Khẩn ≤ Cao ≤ Bình thường ≤ Thấp. Kiểm tra trên giá trị đã gộp.
+function assertUrgencyOrder(
+  merged: Record<TicketUrgency, number> | undefined,
   label: string
 ): void {
-  if (incoming === undefined) return;
-  const merged = { ...current, ...(incoming as Partial<Record<TicketUrgency, number>>) };
+  if (!merged) return;
   for (let i = 1; i < TICKET_URGENCIES.length; i += 1) {
     const more = TICKET_URGENCIES[i - 1];
     const less = TICKET_URGENCIES[i];
@@ -327,10 +334,15 @@ export class TicketConfigService {
     positive(input.holdUnknownDays, "Số ngày cảnh báo tạm hoãn");
     validateUrgencyMinutes(input.unclaimedMinutes, "Ngưỡng cảnh báo chưa ai nhận");
     validateUrgencyMinutes(input.silentMinutes, "Ngưỡng cảnh báo im lặng");
+    // Lưu NGUYÊN object đã gộp (không chỉ phần client gửi): $set cả sub-document sẽ thay hết, các mức không gửi sẽ rơi về mặc định.
+    let unclaimedMinutes: Record<TicketUrgency, number> | undefined;
+    let silentMinutes: Record<TicketUrgency, number> | undefined;
     if (input.unclaimedMinutes !== undefined || input.silentMinutes !== undefined) {
       const { policy } = await loadTicketSettings();
-      assertUrgencyOrder(input.unclaimedMinutes, policy.unclaimedMinutes, "Ngưỡng chưa ai nhận");
-      assertUrgencyOrder(input.silentMinutes, policy.silentMinutes, "Ngưỡng im lặng");
+      unclaimedMinutes = mergeUrgencyMinutes(input.unclaimedMinutes, policy.unclaimedMinutes);
+      silentMinutes = mergeUrgencyMinutes(input.silentMinutes, policy.silentMinutes);
+      assertUrgencyOrder(unclaimedMinutes, "Ngưỡng chưa ai nhận");
+      assertUrgencyOrder(silentMinutes, "Ngưỡng im lặng");
     }
     await validateCalendarInput(input);
 
@@ -338,8 +350,8 @@ export class TicketConfigService {
       default_handler_ids:
         input.defaultHandlerIds === undefined ? undefined : objectIds(input.defaultHandlerIds),
       workday_minutes: input.workdayMinutes,
-      unclaimed_minutes: input.unclaimedMinutes,
-      silent_minutes: input.silentMinutes,
+      unclaimed_minutes: unclaimedMinutes,
+      silent_minutes: silentMinutes,
       hold_unknown_days: input.holdUnknownDays,
       auto_close_resolved_days: input.autoCloseResolvedDays,
       auto_close_waiting_info_days: input.autoCloseWaitingInfoDays,

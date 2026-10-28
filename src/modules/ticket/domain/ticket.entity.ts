@@ -242,7 +242,8 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
       new TicketCreatedDomainEvent({
         aggregateId: id,
         actorId: input.createdBy,
-        urgency: ticket.props.urgency
+        urgency: ticket.props.urgency,
+        ownerAtCreation: Boolean(assignment.ownerId)
       })
     );
     if (assignment.mode !== "none") {
@@ -325,10 +326,12 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
     this._assertEligibleToClaim(employeeId, departmentIds);
 
     const { assignment } = this.props;
-    const collaboratorIds =
-      assignment.mode === "members"
-        ? assignment.memberIds.filter((id) => !sameId(id, employeeId))
-        : assignment.collaboratorIds;
+    // Người nhận không thể vừa là chủ trì vừa là người phối hợp (kể cả khi đã được thêm phối hợp từ trước);
+    // giao đích danh thì những người còn lại trong danh sách thành người phối hợp, giữ cả người đã thêm sớm.
+    const collaboratorIds = uniq([
+      ...(assignment.mode === "members" ? assignment.memberIds : []),
+      ...assignment.collaboratorIds
+    ]).filter((id) => !sameId(id, employeeId));
 
     this._mutate(
       {
@@ -354,10 +357,12 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
     const previousHandlerIds = this.handlerIds;
     let { status } = this.props;
     if (assignment.ownerId && status === "open") status = "in_progress";
-    if (!assignment.ownerId && status === "in_progress") status = "open";
+    // Không còn chủ trì thì ticket quay về "open" để người được giao nhận (cả khi đang tạm hoãn —
+    // nếu không, ticket kẹt ở "on_hold" không ai tiếp tục được ngoài người có ticket.manage)
+    if (!assignment.ownerId && (status === "in_progress" || status === "on_hold")) status = "open";
 
     this._mutate(
-      { assignment, status },
+      { assignment, status, ...(from === "on_hold" && status === "open" ? { hold: null } : {}) },
       {
         action: "assigned",
         actorId: input.assignedBy ?? null,
@@ -390,12 +395,15 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
 
     const [nextOwner, ...rest] = assignment.collaboratorIds;
     const from = this.props.status;
-    // Còn người phối hợp thì giữ trạng thái; hết người thì ticket đang xử lý quay về "open".
-    const status: TicketStatus = !nextOwner && from === "in_progress" ? "open" : from;
+    // Còn người phối hợp thì giữ trạng thái; hết người thì ticket đang xử lý / tạm hoãn quay về "open"
+    // (tạm hoãn mà không còn chủ trì thì không ai bấm "Tiếp tục" được).
+    const status: TicketStatus =
+      !nextOwner && (from === "in_progress" || from === "on_hold") ? "open" : from;
 
     this._mutate(
       {
         status,
+        ...(from === "on_hold" && status === "open" ? { hold: null } : {}),
         assignment: {
           ...assignment,
           ownerId: nextOwner ?? null,
@@ -441,6 +449,7 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
   }
 
   removeCollaborator(by: string, employeeId: string, now: Date = new Date()): void {
+    this._assertStatus(["open", "in_progress", "waiting_info", "on_hold", "resolved"]);
     const { assignment } = this.props;
     if (!assignment.collaboratorIds.some((id) => sameId(id, employeeId))) {
       throw new ArgumentInvalidException("Người này không phải người phối hợp của ticket");
@@ -449,7 +458,13 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
       {
         assignment: {
           ...assignment,
-          collaboratorIds: assignment.collaboratorIds.filter((id) => !sameId(id, employeeId))
+          collaboratorIds: assignment.collaboratorIds.filter((id) => !sameId(id, employeeId)),
+          // Giao đích danh: người rời nhóm cũng ra khỏi danh sách được giao, nếu không lần nhận sau
+          // (sau khi chủ trì trả lại) sẽ tự thêm họ trở lại
+          memberIds:
+            assignment.mode === "members"
+              ? assignment.memberIds.filter((id) => !sameId(id, employeeId))
+              : assignment.memberIds
         }
       },
       { action: "collaborator_removed", actorId: by, note: employeeId },
@@ -906,6 +921,7 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
 
   // Liên kết "Liên quan đến": mỗi ticket vẫn xử lý và đóng riêng.
   linkRelated(by: string, relatedTicketId: string, now: Date = new Date()): void {
+    this._assertStatus(["open", "in_progress", "waiting_info", "on_hold", "resolved"]);
     if (sameId(relatedTicketId, this.id)) {
       throw new ArgumentInvalidException("Không thể liên kết ticket với chính nó");
     }
@@ -919,6 +935,8 @@ export class TicketEntity extends AggregateRoot<TicketProps> {
 
   // Ghi nhận hoạt động (tin nhắn, file...) để cảnh báo "im lặng" tính lại từ đây.
   recordActivity(by: string, action: string, note?: string, now: Date = new Date()): void {
+    // Ticket vừa bị đóng / huỷ giữa lúc đang gửi thì không ghi thêm hoạt động
+    this._assertStatus(["open", "in_progress", "waiting_info", "on_hold", "resolved"]);
     this._mutate({}, { action, actorId: by, note }, now);
   }
 

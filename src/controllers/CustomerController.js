@@ -28,10 +28,50 @@ const GENDER_LABELS = {
   female: "Nữ"
 };
 
+// Lỗi gọi hệ thống khách (Tikluy): quá chậm → 504, lỗi HTTP/mạng khác → 502. Chỉ log phía server (không log body
+// upstream vì có thể chứa dữ liệu cá nhân) và không bao giờ trả body/message upstream cho client.
+// Lỗi không phải từ upstream → trả null để handler tự xử lý như cũ.
+const respondUpstreamError = (res, error, context) => {
+  const code = error?.code;
+  const isTimeout = code === "ECONNABORTED" || code === "ETIMEDOUT";
+  if (!isTimeout && !(error?.isAxiosError || error?.response || error?.request)) return null;
+  console.error(`${context}:`, {
+    code,
+    status: error?.response?.status,
+    message: error?.message
+  });
+  if (isTimeout) {
+    return res.status(504).json({ message: "Hệ thống khách hàng phản hồi quá chậm" });
+  }
+  return res.status(502).json({ message: "Không kết nối được hệ thống khách hàng" });
+};
+
 const ensureCustomerAccessByExternalId = async (req, res, externalId) => {
-  const customer = await CustomerModel.findOne({ external_id: externalId, isDeleted: false });
+  // external_id đi thẳng vào truy vấn Mongo → chỉ nhận chuỗi (chặn ?external_id[$ne]=...)
+  if (typeof externalId !== "string") {
+    res.status(400).json({ message: "external_id không hợp lệ" });
+    return false;
+  }
+  // Dữ liệu chi tiết (hồ sơ, biến động số dư, khoản đầu tư) chỉ lấy được từ hệ thống TIKLUY (CMS TIKLUY có các API
+  // /crm/...; CMS VNFITE không có). Tìm đúng khách của app TIKLUY — không để mã khách app khác trùng rồi trả nhầm hồ sơ.
+  const tikluyApp = await AppModel.findOne({ code: "tikluy" }).lean();
+  const customer = tikluyApp
+    ? await CustomerModel.findOne({
+        external_id: externalId,
+        app_id: tikluyApp._id,
+        isDeleted: false
+      })
+    : null;
   if (!customer) {
-    res.status(404).json({ message: "Không tìm thấy khách hàng" });
+    const otherApp = await CustomerModel.findOne({ external_id: externalId, isDeleted: false })
+      .select("app_id")
+      .populate("app_id", "name")
+      .lean();
+    res.status(404).json({
+      message: otherApp
+        ? `Chi tiết khách hàng chỉ hỗ trợ app TIKLUY (khách này thuộc ${otherApp.app_id?.name ?? "app khác"})`
+        : "Không tìm thấy khách hàng"
+    });
     return false;
   }
 
@@ -711,6 +751,9 @@ const CustomerController = {
       if (!external_id) {
         return res.status(400).json({ message: "Thiếu external_id" });
       }
+      if (typeof external_id !== "string") {
+        return res.status(400).json({ message: "external_id không hợp lệ" });
+      }
       if (!(await ensureCustomerAccessByExternalId(req, res, external_id))) return undefined;
 
       const detailRes = await tikluyClient.get(`/user/detail-info/crm/${external_id}`);
@@ -727,15 +770,20 @@ const CustomerController = {
           portraitPath: decrypt(data.portraitPath ?? "") ?? ""
         };
 
-        console.log(result);
-
         return res.status(200).json({
           message: "Lấy thông tin chi tiết thành công",
           data: result
         });
       }
+
+      // Hệ thống khách trả về nhưng không có hồ sơ chi tiết (vd khách chưa hoàn tất đăng ký): phải trả lời, nếu không request treo tới khi trình duyệt báo timeout.
+      return res.status(404).json({
+        message: "Hệ thống khách hàng không có thông tin chi tiết"
+      });
     } catch (error) {
-      console.error("Error fetching detail info:", error?.response?.data || error.message);
+      const upstream = respondUpstreamError(res, error, "Error fetching detail info");
+      if (upstream) return upstream;
+      console.error("Error fetching detail info:", error.message);
       return res.status(500).json({
         message: "Lỗi lấy thông tin chi tiết",
         error: error.message
@@ -751,6 +799,13 @@ const CustomerController = {
         return res.status(400).json({
           message: "Thiếu external_id"
         });
+      }
+      if (
+        typeof external_id !== "string" ||
+        (start_date !== undefined && typeof start_date !== "string") ||
+        (end_date !== undefined && typeof end_date !== "string")
+      ) {
+        return res.status(400).json({ message: "Tham số không hợp lệ" });
       }
       if (!(await ensureCustomerAccessByExternalId(req, res, external_id))) return undefined;
 
@@ -773,9 +828,9 @@ const CustomerController = {
       }
 
       const fluctuationRes = await tikluyClient.get(
-        `/user/fluctuation/crm/alls?userId=${external_id}&startDate=${
+        `/user/fluctuation/crm/alls?userId=${encodeURIComponent(external_id)}&startDate=${encodeURIComponent(
           start_date ?? ""
-        }&endDate=${end_date ?? ""}`
+        )}&endDate=${encodeURIComponent(end_date ?? "")}`
       );
 
       if (fluctuationRes.data?.result?.isOK && fluctuationRes.data?.data) {
@@ -807,7 +862,9 @@ const CustomerController = {
         message: "Không tìm thấy biến động số dư"
       });
     } catch (error) {
-      console.error("Error fetching fluctuation info:", error?.response?.data || error.message);
+      const upstream = respondUpstreamError(res, error, "Error fetching fluctuation info");
+      if (upstream) return upstream;
+      console.error("Error fetching fluctuation info:", error.message);
 
       return res.status(500).json({
         message: "Internal server error",
@@ -856,6 +913,12 @@ const CustomerController = {
         return res.status(400).json({
           success: false,
           message: "Thiếu external_id"
+        });
+      }
+      if (typeof external_id !== "string") {
+        return res.status(400).json({
+          success: false,
+          message: "external_id không hợp lệ"
         });
       }
       if (!(await ensureCustomerAccessByExternalId(req, res, external_id))) return undefined;
@@ -916,15 +979,18 @@ const CustomerController = {
         data: response.data
       });
     } catch (error) {
-      console.error(
-        "Error fetching customer investment holding:",
-        error?.response?.data || error.message
+      const upstream = respondUpstreamError(
+        res,
+        error,
+        "Error fetching customer investment holding"
       );
+      if (upstream) return upstream;
+      console.error("Error fetching customer investment holding:", error.message);
 
-      return res.status(error?.response?.status || 500).json({
+      return res.status(500).json({
         success: false,
         message: "Không lấy được danh sách khoản đầu tư",
-        error: error?.response?.data || error.message || "Internal server error"
+        error: error.message || "Internal server error"
       });
     }
   },

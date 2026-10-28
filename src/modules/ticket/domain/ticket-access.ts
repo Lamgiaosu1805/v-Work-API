@@ -28,12 +28,15 @@ export function isHandler(ticket: Pick<TicketProps, "assignment">, actor: Ticket
   );
 }
 
-// Liên quan tới ticket: người tạo, nhóm xử lý, hoặc người được giao đích danh (chưa nhận).
+// Liên quan tới ticket: người tạo, nhóm xử lý, hoặc người được giao đích danh khi ticket CHƯA có chủ trì.
+// Có chủ trì rồi thì quyền xem thuộc về nhóm xử lý hiện tại — người từng được giao nhưng đã bị gỡ / đã trả lại
+// không còn thấy ticket hạn chế và file nhạy cảm (mục 6.1).
 export function isInvolved(ticket: AccessProps, actor: TicketActor): boolean {
   return (
     isRequester(ticket, actor) ||
     isHandler(ticket, actor) ||
-    ticket.assignment.memberIds.some((id) => sameId(id, actor.employeeId))
+    (!ticket.assignment.ownerId &&
+      ticket.assignment.memberIds.some((id) => sameId(id, actor.employeeId)))
   );
 }
 

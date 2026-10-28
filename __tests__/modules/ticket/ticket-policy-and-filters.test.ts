@@ -106,6 +106,16 @@ describe("planNotifications — chỉ báo đúng người cần", () => {
     expect(planNotifications(normal, context({}, { responsibleIds: [] }))).toEqual([]);
   });
 
+  it("ticket tạo ra đã có chủ trì thì không báo 'ticket mới' (không còn chờ nhận)", () => {
+    const owned = new TicketCreatedDomainEvent({
+      aggregateId: "t1",
+      actorId: REQUESTER,
+      urgency: "urgent",
+      ownerAtCreation: true
+    });
+    expect(planNotifications(owned, context())).toEqual([]);
+  });
+
   it("ticket mức Khẩn và Cao báo với tiêu đề riêng của từng mức", () => {
     const planFor = (urgency: "urgent" | "high") =>
       planNotifications(
@@ -560,7 +570,8 @@ describe("buildListFilter", () => {
         { created_by: ME },
         { "assignment.owner_id": ME },
         { "assignment.collaborator_ids": ME },
-        { "assignment.member_ids": ME }
+        // Người được giao đích danh chỉ thấy khi ticket chưa có chủ trì
+        { "assignment.owner_id": null, "assignment.member_ids": ME }
       ])
     );
     expect(visibilityFilter(actor({ canViewRestricted: true }))).toEqual({});

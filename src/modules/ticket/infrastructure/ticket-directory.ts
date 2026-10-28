@@ -155,8 +155,14 @@ export class MongooseTicketDirectory implements TicketDirectory {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  async searchEmployees(query: string, limit: number): Promise<EmployeeSummary[]> {
+  async searchEmployees(
+    query: string,
+    limit: number,
+    onlyIds?: string[]
+  ): Promise<EmployeeSummary[]> {
     const filter: Record<string, unknown> = { isDeleted: false, resignation_date: null };
+    // Giới hạn trong một tập người ngay ở câu truy vấn (không lọc sau khi đã cắt `limit`)
+    if (onlyIds) filter._id = { $in: onlyIds };
     const keyword = query.trim();
     if (keyword) {
       const pattern = new RegExp(escapeRegex(keyword), "i");

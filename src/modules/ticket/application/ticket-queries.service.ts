@@ -30,9 +30,15 @@ import {
   visibilityFilter
 } from "./ticket-query-filters";
 
-// Phía ĐỌC (CQRS-lite, theo CLAUDE.md): query thẳng Mongoose, không dựng Entity để trả về.
-
 type Props = ReturnType<TicketEntity["getProps"]>;
+
+// Dòng lịch sử ghi mã nhân viên trong `note`
+const COLLABORATOR_ACTIVITIES = ["collaborator_added", "collaborator_removed"];
+// Dòng lịch sử "đã giao việc" ghi kiểu giao trong `note`
+const ASSIGNMENT_MODE_LABELS: Record<string, string> = {
+  department: "Giao cho phòng ban",
+  members: "Giao cho người cụ thể"
+};
 
 export interface TicketQueryDeps {
   directory: TicketDirectory;
@@ -94,38 +100,52 @@ export class TicketQueryService {
     const categoryName = new Map(categories.map((item) => [item.id, item.name]));
 
     return {
-      data: tickets.map((ticket) => ({
-        id: ticket.id,
-        code: ticket.code,
-        title: ticket.title,
-        status: ticket.status,
-        urgency: ticket.urgency,
-        product: { id: ticket.productId, name: productName.get(ticket.productId) ?? "" },
-        category: { id: ticket.categoryId, name: categoryName.get(ticket.categoryId) ?? "" },
-        // Danh sách không cần mã khách (userId) nên không trả cho ai
-        customer: ticket.customer ? { ...ticket.customer, externalId: null } : null,
-        relatedEmployee: ticket.relatedEmployeeId
-          ? { id: ticket.relatedEmployeeId, name: names.get(ticket.relatedEmployeeId) ?? "" }
-          : null,
-        createdBy: { id: ticket.createdBy, name: names.get(ticket.createdBy) ?? "" },
-        owner: ticket.assignment.ownerId
-          ? { id: ticket.assignment.ownerId, name: names.get(ticket.assignment.ownerId) ?? "" }
-          : null,
-        collaboratorCount: ticket.assignment.collaboratorIds.length,
-        assignmentMode: ticket.assignment.mode,
-        // Cảnh báo vàng: ai cũng thấy ticket bị bôi vàng (không gửi thông báo)
-        yellow: isYellow(ticket, now)
-          ? { reason: ticket.alertReason, since: ticket.alertAt }
-          : null,
-        approval: { required: ticket.approval.required, status: ticket.approval.status },
-        restricted: ticket.visibility === "restricted",
-        resolution: ticket.resolution
-          ? { code: ticket.resolution.code, label: RESOLUTION_LABELS[ticket.resolution.code] }
-          : null,
-        dueHintAt: ticket.dueHintAt,
-        createdAt: ticket.createdAt,
-        lastActivityAt: ticket.lastActivityAt
-      })),
+      data: tickets.map((ticket) => {
+        // Ticket hạn chế đã kết thúc: người liên quan chỉ còn thấy thông tin chung (như màn chi tiết, mục 6.1)
+        const summary = accessLevel(ticket, actor) === "summary";
+        return {
+          id: ticket.id,
+          code: ticket.code,
+          title: ticket.title,
+          status: ticket.status,
+          urgency: ticket.urgency,
+          product: summary
+            ? { id: "", name: "" }
+            : { id: ticket.productId, name: productName.get(ticket.productId) ?? "" },
+          category: summary
+            ? { id: "", name: "" }
+            : { id: ticket.categoryId, name: categoryName.get(ticket.categoryId) ?? "" },
+          // Danh sách không cần mã khách (userId) nên không trả cho ai
+          customer: ticket.customer && !summary ? { ...ticket.customer, externalId: null } : null,
+          relatedEmployee:
+            ticket.relatedEmployeeId && !summary
+              ? { id: ticket.relatedEmployeeId, name: names.get(ticket.relatedEmployeeId) ?? "" }
+              : null,
+          createdBy: { id: ticket.createdBy, name: names.get(ticket.createdBy) ?? "" },
+          owner:
+            ticket.assignment.ownerId && !summary
+              ? { id: ticket.assignment.ownerId, name: names.get(ticket.assignment.ownerId) ?? "" }
+              : null,
+          collaboratorCount: summary ? 0 : ticket.assignment.collaboratorIds.length,
+          assignmentMode: ticket.assignment.mode,
+          // Cảnh báo vàng: ai cũng thấy ticket bị bôi vàng (không gửi thông báo)
+          yellow: isYellow(ticket, now)
+            ? { reason: ticket.alertReason, since: ticket.alertAt }
+            : null,
+          approval: { required: ticket.approval.required, status: ticket.approval.status },
+          restricted: ticket.visibility === "restricted",
+          resolution: ticket.resolution
+            ? { code: ticket.resolution.code, label: RESOLUTION_LABELS[ticket.resolution.code] }
+            : null,
+          dueHintAt: summary ? null : ticket.dueHintAt,
+          createdAt: ticket.createdAt,
+          lastActivityAt: ticket.lastActivityAt,
+          // Thao tác nhanh ngay trên danh sách: server báo người xem làm được gì và version đang hiển thị
+          // (gửi lại khi thao tác để ticket bị đổi giữa chừng thì báo tải lại, không ghi đè)
+          capabilities: capabilitiesOf(ticket, actor, now),
+          version: ticket.version
+        };
+      }),
       total,
       page,
       limit
@@ -179,6 +199,7 @@ export class TicketQueryService {
       return {
         accessLevel: "summary" as const,
         id: ticket.id,
+        version: ticket.version,
         code: ticket.code,
         title: ticket.title,
         status: ticket.status,
@@ -217,7 +238,11 @@ export class TicketQueryService {
       ticket.approval.verifiedBy,
       ...messages.flatMap((message: any) => [message.author_id, ...(message.mention_ids ?? [])]),
       ...attachments.map((file: any) => file.uploaded_by),
-      ...activities.map((activity: any) => activity.actor_id)
+      ...activities.map((activity: any) => activity.actor_id),
+      // Dòng lịch sử thêm/gỡ người phối hợp ghi mã nhân viên trong `note` — đổi ra tên khi trả về
+      ...activities
+        .filter((activity: any) => COLLABORATOR_ACTIVITIES.includes(activity.action))
+        .map((activity: any) => activity.note)
     ];
     const allNames = await this.employeeNames([
       ...peopleIds,
@@ -227,7 +252,12 @@ export class TicketQueryService {
     const nameOf = (id: unknown) => (id ? (allNames.get(String(id)) ?? "") : null);
 
     // Ticket liên quan / ticket gốc (khi đóng "Trùng"): chỉ trả những ticket người xem được phép thấy
-    const linkedIds = [...ticket.relatedTicketIds, ticket.duplicateOf].filter(Boolean);
+    // (cả ticket nhắc trong lịch sử "đã liên kết" để hiện mã thay vì id)
+    const linkedIds = [
+      ...ticket.relatedTicketIds,
+      ticket.duplicateOf,
+      ...activities.filter((activity: any) => activity.action === "linked").map((a: any) => a.note)
+    ].filter(Boolean);
     const linkedDocs = linkedIds.length
       ? ((await TicketModel.find({
           $and: [{ _id: { $in: linkedIds }, isDeleted: false }, visibilityFilter(actor)]
@@ -342,11 +372,70 @@ export class TicketQueryService {
           : null,
         from: activity.from,
         to: activity.to,
-        changes: activity.changes ?? [],
-        note: activity.note,
+        changes: this.readableChanges(
+          this.redactChanges(activity.changes ?? [], customerRule.includeExternalId),
+          {
+            productId: new Map(products.map((item) => [item.id, item.name])),
+            categoryId: new Map(categories.map((item) => [item.id, item.name]))
+          }
+        ),
+        // `note` của vài loại dòng lịch sử chứa mã (nhân viên, ticket, kiểu giao) — đổi ra chữ người đọc được
+        note: this.readableNote(activity, nameOf, linkedDocs),
         createdAt: activity.createdAt
       }))
     };
+  }
+
+  // Lịch sử sửa khách chứa cả snapshot khách cũ/mới: mã khách (externalId) chỉ giữ cho người được phép thấy
+  // (cùng quy tắc customerVisibility với trường customer của ticket).
+  // eslint-disable-next-line class-methods-use-this
+  private redactChanges(
+    changes: Array<{ field: string; from: unknown; to: unknown }>,
+    includeExternalId: boolean
+  ) {
+    if (includeExternalId) return changes;
+    const strip = (value: unknown) =>
+      value && typeof value === "object" ? { ...(value as object), externalId: null } : value;
+    return changes.map((change) =>
+      change.field === "customer"
+        ? { ...change, from: strip(change.from), to: strip(change.to) }
+        : change
+    );
+  }
+
+  // Lịch sử sửa: mã sản phẩm / loại yêu cầu đổi ra tên để người đọc không thấy ObjectId.
+  // eslint-disable-next-line class-methods-use-this
+  private readableChanges(
+    changes: Array<{ field: string; from: unknown; to: unknown }>,
+    names: { productId: Map<string, string>; categoryId: Map<string, string> }
+  ) {
+    const lookup = (field: "productId" | "categoryId", value: unknown) =>
+      value ? (names[field].get(String(value)) ?? "") : value;
+    return changes.map((change) =>
+      change.field === "productId" || change.field === "categoryId"
+        ? {
+            ...change,
+            from: lookup(change.field, change.from),
+            to: lookup(change.field, change.to)
+          }
+        : change
+    );
+  }
+
+  // eslint-disable-next-line class-methods-use-this
+  private readableNote(
+    activity: { action: string; note?: string | null },
+    nameOf: (id: unknown) => string | null,
+    linkedDocs: Array<{ _id: unknown; code: string }>
+  ) {
+    const { action, note } = activity;
+    if (!note) return note;
+    if (COLLABORATOR_ACTIVITIES.includes(action)) return nameOf(note) ?? "";
+    if (action === "linked") {
+      return linkedDocs.find((linked) => String(linked._id) === String(note))?.code ?? "";
+    }
+    if (action === "assigned") return ASSIGNMENT_MODE_LABELS[note] ?? "";
+    return note;
   }
 
   // Tìm file để tải về; kiểm tra quyền (ticket + file nhạy cảm) ở mọi lần tải.
@@ -408,8 +497,17 @@ export class TicketQueryService {
     };
   }
 
-  searchEmployees(query: string, limit = 20) {
-    return this.deps.directory.searchEmployees(query, Math.min(Math.max(limit, 1), 50));
+  // `assignableFor`: chọn người để GIAO VIỆC. Trưởng bộ phận (chỉ có ticket.assign_member) chỉ giao được cho người
+  // trong phòng mình nên chỉ trả những người đó — tránh để họ chọn người rồi mới bị từ chối ở bước giao.
+  async searchEmployees(query: string, limit = 20, assignableFor?: TicketActor) {
+    const capped = Math.min(Math.max(limit, 1), 50);
+    if (assignableFor && !assignableFor.canAssignDepartment) {
+      const own = await this.deps.directory.getOwnDepartmentTreeEmployeeIds(
+        assignableFor.employeeId
+      );
+      return this.deps.directory.searchEmployees(query, capped, own);
+    }
+    return this.deps.directory.searchEmployees(query, capped);
   }
 
   listDepartments() {
@@ -422,17 +520,24 @@ export class TicketQueryService {
     if (!keyword) return [];
     const filter = buildListFilter({ q: keyword }, actor, this.deps.now());
     const docs = await TicketModel.find(filter)
-      .select("code title status customer")
+      .select("code title status customer visibility")
       .sort({ createdAt: -1 })
       .limit(Math.min(Math.max(limit, 1), 20))
       .lean();
-    return docs.map((doc: any) => ({
-      id: String(doc._id),
-      code: doc.code,
-      title: doc.title,
-      status: doc.status,
-      customerPhone: doc.customer?.phone ?? null
-    }));
+    return docs.map((doc: any) => {
+      // Ticket hạn chế đã kết thúc chỉ còn thông tin chung với người liên quan: không trả SĐT khách
+      const summaryOnly =
+        doc.visibility === "restricted" &&
+        ["closed", "cancelled"].includes(doc.status) &&
+        !actor.canViewRestricted;
+      return {
+        id: String(doc._id),
+        code: doc.code,
+        title: doc.title,
+        status: doc.status,
+        customerPhone: summaryOnly ? null : (doc.customer?.phone ?? null)
+      };
+    });
   }
 
   // ---- nội bộ -------------------------------------------------------------------------------

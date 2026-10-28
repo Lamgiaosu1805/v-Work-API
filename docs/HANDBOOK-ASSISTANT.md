@@ -109,6 +109,24 @@ npx ts-node scripts/handbook/publish-handbook.ts --version=2
 - Dev/test: `scripts/handbook/seed-sample-handbook.ts` nạp bộ **văn bản mẫu** (giả); từ chối chạy ở production.
 - Citation mang phiên bản (`NOI_QUY@3`), nên không cần giữ id/Điều ổn định giữa các phiên bản.
 
+### Văn bản hướng dẫn đơn từ (không phải nội quy — viết từ luồng thực tế của vWork)
+
+Trợ lý còn trả lời cách dùng chức năng Đơn từ trên vWork (tạo đơn, luồng duyệt, quy tắc từng loại đơn). Nguồn là
+`docs/HUONG-DAN-DON-TU.md`, **được commit** (không phải văn bản mật) và là một văn bản riêng `HUONG_DAN_DON_TU`
+(12 mục, ~5 nghìn token). Cấu trúc file: mỗi `## Mục N. Tiêu đề` là một đơn vị trích dẫn, mỗi dòng là một khối.
+
+```bash
+# dựng manifest từ file .md (giữ lại câu hỏi gợi ý cũ, thêm của hướng dẫn); không đụng DB
+npx ts-node --transpile-only scripts/handbook/build-guide-manifest.ts --output=guide.manifest.json --with-suggestions-of=noi-quy.manifest.json
+# nạp bản nháp (văn bản khác của bản hiệu lực giữ nguyên) + publish như mục trên
+npx ts-node --transpile-only scripts/handbook/import-handbook.ts --manifest=guide.manifest.json --count-tokens --note="Thêm hướng dẫn đơn từ"
+```
+
+- Khi luồng đơn từ đổi (ngưỡng duyệt nhiều cấp, giới hạn, tên nút...) thì sửa file `.md` rồi nạp lại. Test
+  `handbookAssistantGuide` so các ngưỡng 2 ngày / đơn thứ 4 / lần quên thứ 6 với `RequestEntity` để nhắc quên sửa.
+- Hướng dẫn mô tả cách vWork **đang** hoạt động, không thay nội quy: thời hạn báo trước khi nghỉ, mức xử lý... vẫn theo nội quy.
+- Câu hỏi gợi ý của manifest nạp vào *thay thế* danh sách của bản đang hiệu lực (tối đa 12 câu) nên phải gộp (`--with-suggestions-of`).
+
 ### Theo dõi
 
 - Mỗi câu ghi 1 dòng log (token, cache, chi phí ước tính, ttft) và `handbook_message.ai`; cộng dồn ở `handbook_usage`.
@@ -139,7 +157,20 @@ phải nói rõ chỉ nêu khi thật sự mâu thuẫn; (4) câu ngoài phạm 
 
 Khi đổi prompt/văn bản/model nên chạy lại bộ câu hỏi mẫu với Claude thật (tốn vài cent) thay vì tin vào cảm giác.
 
+Thêm văn bản hướng dẫn đơn từ (10/2026): prompt mở rộng phạm vi ("cách dùng chức năng Đơn từ") và dặn trả lời thao tác thành
+các bước đánh số. Đánh giá lại bằng Claude thật, effort `low`: **24/24** câu mới về đơn từ (tạo đơn, ai duyệt, đơn thứ 4,
+quên chấm công, hết phép, thu hồi, ngày lễ, nghỉ ốm không có loại đơn riêng → nói rõ chưa quy định, 2 câu ngoài phạm vi vẫn bị
+từ chối) và **30/30** câu cũ về nội quy (không hỏng gì), chi phí ~$0.07 cho cả hai bộ. Bộ ngưỡng nằm ở
+`scripts/handbook/private/eval-questions-don-tu.json` (không commit).
+
 ## 9. Lưu ý & giới hạn đã biết
+
+- **Câu trả lời thỉnh thoảng "nói xong rồi chép lại nguyên văn"**: khi bật citations, Claude (Haiku) đôi khi viết ý của
+  mình rồi nối thêm đúng câu trong văn bản (để gắn trích dẫn). Đo bằng 54 câu hỏi thật (10/2026): ~25–33% câu trả lời có
+  một chuỗi ≥7 từ xuất hiện 2 lần; không ảnh hưởng độ đúng (mọi câu qua kiểm tra), chỉ dài và lặp. Thử thêm quy tắc
+  "mỗi ý chỉ nêu một lần, không chép thêm nguyên văn" vào system prompt **không giảm** tỉ lệ (6/24 → 7/24, 10/30 → 9/30)
+  nên không giữ. Hướng xử lý nếu cần: lọc ở server theo khối có trích dẫn (phải bỏ stream từng phần), hoặc thử effort
+  `medium`/model khác. Công cụ đo: `scripts/handbook/private/dup-check.py` (không commit).
 
 - **PDF scan (ảnh) không có lớp chữ**: `extract-handbook` không đọc được. Bản đầu tiên được chép tay từ ảnh + đối chiếu OCR
   rồi kiểm tra độc lập; ghi lại các chỗ sửa lỗi phông chữ. Nên xin P.HCNS bản Word/PDF có chữ khi cập nhật.

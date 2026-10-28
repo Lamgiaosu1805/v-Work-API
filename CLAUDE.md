@@ -47,7 +47,7 @@ src/
     timesheet/                  # Engine đối soát ngày công — sở hữu WorkSheetModel + WorkDayStatusModel
     attendance/                 # Wifi/geofence check-in/out (thuần), CRUD wifi/shift, Excel parser
     customer-care/              # Quy định 183A: kho khách chung, phân tự động, SLA liên hệ, thu hồi (route /customer-care)
-    handbook-assistant/         # Trợ lý Nội quy (AI hỏi đáp nội quy, Claude + citations + stream socket; route /handbook-assistant) — xem docs/HANDBOOK-ASSISTANT.md
+    handbook-assistant/         # Trợ lý Nội quy (AI hỏi đáp nội quy, Claude + citations + stream socket; route /handbook-assistant) — xem docs/HANDBOOK-ASSISTANT.md; còn trả lời cách dùng Đơn từ trên vWork từ docs/HUONG-DAN-DON-TU.md
   workflows/                    # Tầng orchestration xuyên module — xem mục "workflows/" trong "DDD + Hexagonal"
     request-side-effects/       # Side-effect theo request_type (leave/late_early/forgot_checkin/away-day)
   controllers/                  # Pattern CŨ — xử lý logic request/response trực tiếp (chưa migrate)

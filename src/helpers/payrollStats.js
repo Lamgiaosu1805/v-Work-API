@@ -2,6 +2,9 @@ const moment = require("moment-timezone");
 const WorkSheetModel = require("../models/WorkSheetModel");
 const WorkDayStatusModel = require("../models/WorkDayStatusModel");
 const HolidayModel = require("../models/HolidayModel");
+const EmploymentStatusModel = require("../models/EmploymentStatusModel");
+const LeaveBalanceModel = require("../models/LeaveBalanceModel");
+const { LEAVE_BALANCE_REASON } = require("../constants");
 const { buildHolidayDefaultWorkUnitMap } = require("../modules/timesheet");
 const { correctDayStatuses } = require("./attendanceHelper");
 const { calcStandardWorkUnits } = require("./payrollPeriod");
@@ -15,6 +18,83 @@ function getPayrollPeriodByMonth(month, year) {
     periodStart: refDate.clone().subtract(1, "month").date(26).startOf("day"),
     periodEnd: refDate.clone().date(25).endOf("day")
   };
+}
+
+// Loại hợp đồng "Thử việc" (scripts/seedEmploymentStatus.js)
+const PROBATION_EMPLOYMENT_STATUS_CODE = "probation";
+
+async function loadProbationStatusIds() {
+  const statuses = await EmploymentStatusModel.find(
+    { code: PROBATION_EMPLOYMENT_STATUS_CODE },
+    "_id"
+  ).lean();
+  return new Set(statuses.map((s) => s._id.toString()));
+}
+
+function isOnProbationContract(user, probationStatusIds) {
+  return Boolean(user?.employment_status) && probationStatusIds.has(String(user.employment_status));
+}
+
+// Công của ngày `date` có phải công thử việc không. probation_end_date là ngày thử việc cuối cùng →
+// công của chính ngày đó vẫn là công thử việc. Trống: đang hợp đồng Thử việc → chưa biết ngày kết
+// thúc, toàn bộ là công thử việc (dòng Excel tô vàng để HR bổ sung); loại khác → vào làm chính thức luôn.
+function makeIsProbationDay(user, probationStatusIds) {
+  if (user.probation_end_date) {
+    const probationEnd = moment.tz(user.probation_end_date, TZ).startOf("day");
+    return (date) => moment.tz(date, TZ).isSameOrBefore(probationEnd, "day");
+  }
+  const onProbation = isOnProbationContract(user, probationStatusIds);
+  return () => onProbation;
+}
+
+// Số ngày phép của 1 trạng thái leave_paid. Thứ 7 chỉ làm buổi sáng: đơn nghỉ lưu period "full" nhưng
+// chỉ trừ 0,5 phép — đếm khớp quỹ phép
+function paidLeaveDays(dateKey, period) {
+  if (moment.tz(dateKey, TZ).day() === 6) return 0.5;
+  return period === "full" ? 1 : 0.5;
+}
+
+// Bút toán trừ / hoàn phép theo đơn nghỉ: ghi lúc gửi, từ chối, huỷ đơn hoặc khi ngày nghỉ vẫn đi làm —
+// không theo ngày nghỉ thật, nên không dùng để tính phép tồn theo kỳ
+const LEAVE_REQUEST_REASONS = [
+  LEAVE_BALANCE_REASON.LEAVE_REQUEST_DEDUCTION,
+  LEAVE_BALANCE_REASON.REJECT_REFUND,
+  LEAVE_BALANCE_REASON.CANCEL_REFUND,
+  LEAVE_BALANCE_REASON.AUTO_REJECT_REFUND,
+  LEAVE_BALANCE_REASON.ATTENDANCE_OVERRIDE_REFUND
+];
+
+// Phép tồn đầu kỳ = phép được cộng / điều chỉnh (không gắn đơn) ghi trước kỳ − số ngày nghỉ có phép đã
+// nghỉ thật trước kỳ (đếm như cột Nghỉ phép). Đơn đăng ký trước, gửi bù hay đang chờ duyệt không làm lệch
+// số → tồn kỳ sau = tồn kỳ này + phép cộng trong kỳ − nghỉ phép trong kỳ. Trả Map userId → số ngày.
+async function buildLeaveCarryOver(userIds, periodStart) {
+  const before = periodStart.toDate();
+  const [credits, paidLeaves] = await Promise.all([
+    LeaveBalanceModel.aggregate([
+      {
+        $match: {
+          user_id: { $in: userIds },
+          isDeleted: false,
+          createdAt: { $lt: before },
+          reason: { $nin: LEAVE_REQUEST_REASONS }
+        }
+      },
+      { $group: { _id: "$user_id", total: { $sum: "$amount" } } }
+    ]),
+    WorkDayStatusModel.find(
+      { user_id: { $in: userIds }, isDeleted: false, status: "leave_paid", date: { $lt: before } },
+      "user_id date period"
+    ).lean()
+  ]);
+
+  const totals = new Map(credits.map((c) => [c._id.toString(), c.total]));
+  for (const s of paidLeaves) {
+    const key = s.user_id.toString();
+    const dateKey = moment.tz(s.date, TZ).format("YYYY-MM-DD");
+    totals.set(key, (totals.get(key) ?? 0) - paidLeaveDays(dateKey, s.period));
+  }
+  for (const [key, total] of totals) totals.set(key, Math.round(total * 100) / 100);
+  return totals;
 }
 
 function isHolidayInScope(holiday, branchId) {
@@ -38,7 +118,7 @@ function isHolidayInScope(holiday, branchId) {
 async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = false }) {
   const userIds = users.map((u) => u._id);
 
-  const [worksheets, dayStatuses, holidays] = await Promise.all([
+  const [worksheets, dayStatuses, holidays, probationStatusIds] = await Promise.all([
     WorkSheetModel.find({
       user_id: { $in: userIds },
       date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
@@ -52,7 +132,8 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
     HolidayModel.find({
       date: { $gte: periodStart.toDate(), $lte: periodEnd.toDate() },
       isDeleted: false
-    })
+    }),
+    loadProbationStatusIds()
   ]);
 
   const standardUnitsByBranch = new Map();
@@ -125,9 +206,7 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
       dsByDate.get(key).push(ds);
     }
 
-    const probationEnd = u.probation_end_date
-      ? moment.tz(u.probation_end_date, TZ).startOf("day")
-      : null;
+    const isProbationDay = makeIsProbationDay(u, probationStatusIds);
 
     let work_unit_total = 0;
     let work_unit_official = 0;
@@ -141,8 +220,7 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
     for (const ws of wss) {
       const wu = ws.work_unit ?? 0;
       work_unit_total += wu;
-      const isProbation = probationEnd && moment.tz(ws.date, TZ).isBefore(probationEnd, "day");
-      if (isProbation) work_unit_probation += wu;
+      if (isProbationDay(ws.date)) work_unit_probation += wu;
       else work_unit_official += wu;
       penalty_amount_total += ws.penalty_amount ?? 0;
       if ((ws.minutes_late ?? 0) > 0) {
@@ -159,8 +237,7 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
     for (const [dateStr, wu] of holidayDefaultMap) {
       if (wsByDate.has(dateStr) || !isEmployedOn(dateStr)) continue;
       work_unit_total += wu;
-      const isProbation = probationEnd && moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
-      if (isProbation) work_unit_probation += wu;
+      if (isProbationDay(dateStr)) work_unit_probation += wu;
       else work_unit_official += wu;
     }
 
@@ -176,15 +253,13 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
     for (const [dateKey, statusesOfDate] of dsByDate) {
       const corrected = correctDayStatuses(statusesOfDate, wsByDate.get(dateKey));
       correctedByDate.set(dateKey, corrected);
-      const isSaturday = moment.tz(dateKey, TZ).day() === 6;
       for (const s of corrected) {
         const w = s.period === "full" ? 1 : 0.5;
         if (s.status === "present") present_days += w;
         // "Quên chấm" đếm theo SỐ LẦN (nguyên), không theo trọng số buổi — mỗi buổi/ngày quên = 1.
         else if (s.status === "missed_clock") missed_clock_days += 1;
         else if (s.status === "absent") absent_days += w;
-        // Thứ 7 chỉ làm buổi sáng: đơn nghỉ lưu period "full" nhưng chỉ trừ 0,5 phép — đếm khớp quỹ phép
-        else if (s.status === "leave_paid") leave_paid_days += isSaturday ? 0.5 : w;
+        else if (s.status === "leave_paid") leave_paid_days += paidLeaveDays(dateKey, s.period);
         else if (s.status === "leave_unpaid") leave_unpaid_days += w;
         else if (s.status === "remote") remote_days += w;
         else if (s.status === "business_trip") business_trip_days += w;
@@ -256,4 +331,13 @@ async function buildPayrollRows({ users, periodStart, periodEnd, includeDaily = 
   return { rows, holidays };
 }
 
-module.exports = { buildPayrollRows, getPayrollPeriodByMonth, TZ };
+module.exports = {
+  buildPayrollRows,
+  buildLeaveCarryOver,
+  getPayrollPeriodByMonth,
+  loadProbationStatusIds,
+  isOnProbationContract,
+  makeIsProbationDay,
+  paidLeaveDays,
+  TZ
+};

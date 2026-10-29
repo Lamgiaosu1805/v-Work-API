@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { authenticate, isAdmin } = require("../middlewares/authMiddleware");
 const { uploadInternal } = require("../middlewares/uploadInternal");
+// uploadError dùng chung: trả 413 kèm thông báo khi file vượt giới hạn 50MB thay vì 500 "Lỗi server"
+const { uploadError } = require("../middlewares/uploadShared");
 const { InternalFileController } = require("../controllers/InternalFileController");
 
 router.get("/departments", authenticate, InternalFileController.getAccessibleDepartments);
@@ -16,7 +18,13 @@ router.delete("/:deptId/folders/:folderId", authenticate, InternalFileController
 
 // File routes
 router.get("/:deptId/files", authenticate, InternalFileController.getFilesByDept);
-router.post("/:deptId/upload", authenticate, uploadInternal.array("files", 20), InternalFileController.uploadFile);
+router.post(
+  "/:deptId/upload",
+  authenticate,
+  uploadInternal.array("files", 20),
+  uploadError,
+  InternalFileController.uploadFile
+);
 router.get("/file/:fileId/view", authenticate, InternalFileController.viewFile);
 router.patch("/file/:fileId/rename", authenticate, InternalFileController.renameFile);
 router.patch("/file/:fileId/move", authenticate, InternalFileController.moveFile);

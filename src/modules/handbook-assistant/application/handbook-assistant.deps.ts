@@ -2,6 +2,7 @@ import type { HandbookErrorCode } from "../domain/handbook-assistant.errors";
 import type { CitationView } from "../infrastructure/ai/citation-mapper";
 import type { ReleaseLock } from "../infrastructure/busy-lock";
 import type { HandbookAnswerer } from "./ports/handbook-answerer.port";
+import type { PersonalContextProvider } from "./ports/personal-context.port";
 import type { RunningAnswersRegistry } from "./running-answers.registry";
 
 // Nơi phát sự kiện `handbook:*` tới MỌI tab của tài khoản (interface/handbook-assistant.socket.ts
@@ -25,5 +26,8 @@ export interface HandbookAssistantDeps {
   registry: RunningAnswersRegistry;
   // null = tiến trình khác đang giữ khoá của tài khoản (→ BUSY).
   acquireBusyLock(accountId: string, ttlMs: number): Promise<ReleaseLock | null>;
+  // Thông tin cá nhân của CHÍNH người hỏi (số ngày phép còn lại). Không có = trợ lý chỉ trả lời theo văn bản.
+  // Do tầng workflows/ cài đặt và index.js nối vào (module không được import module khác).
+  personalContext?: PersonalContextProvider;
   now?: () => Date;
 }

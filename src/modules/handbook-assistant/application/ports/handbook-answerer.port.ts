@@ -1,4 +1,5 @@
 import type { HistoryTurn } from "../../domain/history-selection";
+import type { PersonalContext } from "./personal-context.port";
 
 // Cổng gọi AI. Phần còn lại của module chỉ biết interface này nên có thể thay nhà cung cấp (hoặc
 // tách thành service riêng) bằng cách viết adapter mới, không đụng tới luồng hỏi/hủy/quota.
@@ -20,6 +21,8 @@ export interface AnswerRequest {
   articles: PromptArticle[];
   history: HistoryTurn[];
   question: string;
+  // Dữ liệu cá nhân của CHÍNH người hỏi (số ngày phép còn lại); không có = không chèn gì vào prompt.
+  personal?: PersonalContext | null;
   signal: AbortSignal;
 }
 

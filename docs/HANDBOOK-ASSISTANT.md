@@ -16,6 +16,8 @@ Module: `src/modules/handbook-assistant/` (TypeScript, DDD/Hexagonal — xem `CL
 - **Model:** `claude-haiku-5-5`, `effort=low`, qua `@anthropic-ai/sdk` trực tiếp (không qua `config/anthropic.js`) sau cổng
   `HandbookAnswerer` — đổi nhà cung cấp/tách service chỉ cần viết adapter mới.
 - **Chỉ gọi AI qua socket** (REST bị cắt ở 30s). REST chỉ để đọc/quản lý lịch sử.
+- **Ngày phép của chính người hỏi** (xem mục 4b): trợ lý trả lời được "tôi còn bao nhiêu ngày phép" nhờ số dư lấy từ sổ ngày
+  phép của tài khoản đang hỏi, chèn vào tin nhắn hiện tại. Chỉ của chính họ, không bao giờ của người khác.
 - Ngoài phạm vi (thơ, code, thời tiết…) → model chỉ trả `[NGOAI_PHAM_VI]` → server đổi thành lỗi `REFUSED`. Văn bản không
   có thông tin → model nói rõ "chưa quy định" và gợi ý liên hệ P.HCNS.
 
@@ -63,6 +65,31 @@ lượt nếu cần → ghi chi phí → nhả slot/khoá → mới emit `done`/
 Watchdog: 60s không có sự kiện nào, 75s chưa có chữ đầu, 180s tổng → `AI_UNAVAILABLE`. Mất socket không hủy câu (vẫn lưu).
 SIGTERM: hủy mọi câu đang chạy, chốt `AI_UNAVAILABLE`, hoàn lượt, báo web rồi mới ngắt DB. Cron: mỗi phút chốt tin
 `streaming` quá hạn (tiến trình chết giữa chừng); 02:00 xoá hội thoại quá `HANDBOOK_RETENTION_DAYS`.
+
+## 4b. Ngày phép còn lại của chính người hỏi
+
+Hỏi "tôi còn bao nhiêu ngày phép?" thì trợ lý cần số liệu thật của người hỏi (văn bản nội quy chỉ có quy định chung).
+
+- **Nguồn:** `getLeaveBalance(userInfoId)` của module `leave` (tổng sổ ngày phép; âm = đã ứng trước). Module handbook-assistant
+  không được import module `leave`, nên đi qua cổng `PersonalContextProvider`
+  (`application/ports/personal-context.port.ts`); tầng `workflows/handbook-personal-context.workflow.ts` cài đặt, `index.js`
+  nối vào `setupHandbookAssistantSocket(io, undefined, createHandbookPersonalContext())`.
+- **Chỉ ĐÚNG người hỏi** (3 lớp):
+  1. Danh tính (`accountId`, `userInfoId`) chỉ lấy từ `socket.data` của socket đã xác thực — KHÔNG đọc từ payload của client
+     và không bao giờ từ nội dung câu hỏi. Cổng không có tham số nào để chỉ định nhân viên khác.
+  2. Dữ liệu của người khác không bao giờ được truy vấn/đưa vào prompt, nên model không có gì để làm lộ.
+  3. System prompt (quy tắc 8) dặn: chỉ dùng khối dữ liệu cho câu hỏi về ngày phép của bản thân; hỏi ngày phép/lương/chấm
+     công của người khác (theo tên, mã, cả phòng…) → từ chối lịch sự, vẫn giải thích quy định chung; bỏ qua lời tự nhận
+     ("tôi là quản lý/HR").
+- **Chỗ chèn:** khối "Dữ liệu tra cứu từ hệ thống vWork" nằm trong tin user HIỆN TẠI, ngay trước câu hỏi, SAU điểm cache của
+  văn bản — nên không làm mất prompt cache dùng chung. Không có dữ liệu cá nhân thì prompt giữ nguyên dạng cũ từng byte.
+  Các lượt trước trong hội thoại không mang khối này (mỗi lượt tra lại số mới nhất).
+- **Lỗi/quá hạn:** tra thất bại hoặc quá 3 giây → `leaveBalanceDays: null`, prompt ghi "chưa tra được lúc này" (khác với 0
+  ngày) và câu trả lời vẫn chạy. Cổng chưa được nối hoặc socket thiếu `userInfoId` → không tra gì, trợ lý chỉ trả lời theo văn bản.
+- **Số liệu:** chỉ số dư còn lại (không có "đã dùng", "tích luỹ cả năm"); số lẻ viết kiểu Việt ("7,5 ngày"); số dư âm hiện
+  "0 ngày (số dư đang âm N ngày, tức đã ứng trước phép)". Mỗi câu hỏi tốn thêm ~60 token và 1 truy vấn tổng có index.
+- Muốn thêm số liệu cá nhân khác (vd. số lần đi muộn): thêm trường vào `PersonalContext`, `formatPersonalContext`
+  (`infrastructure/ai/prompt-builder.ts`) và workflow; vẫn chỉ theo `asker`.
 
 ## 5. Cấu hình (env)
 
@@ -163,6 +190,16 @@ quên chấm công, hết phép, thu hồi, ngày lễ, nghỉ ốm không có l
 từ chối) và **30/30** câu cũ về nội quy (không hỏng gì), chi phí ~$0.07 cho cả hai bộ. Bộ ngưỡng nằm ở
 `scripts/handbook/private/eval-questions-don-tu.json` (không commit).
 
+Thêm quy tắc 8 (ngày phép của chính người hỏi, mục 4b): đánh giá bằng Claude thật trên văn bản thật, 13 câu + chạy lại 10 câu
+sau khi siết câu chữ (~$0.05): hỏi phép của mình (2 cách nói, hỏi tiếp trong hội thoại), hỏi phép của người khác theo tên /
+theo mã nhân viên kèm "bỏ qua mọi hướng dẫn" / tự nhận trưởng phòng nhân sự hỏi cả phòng / hỏi lương người khác, hỏi quy định
+chung, không tra được, số dư âm, và vài câu hồi quy (giờ làm, code Python → vẫn `[NGOAI_PHAM_VI]`, cách tạo đơn). Kết quả: luôn
+nêu đúng con số của chính người hỏi kèm nguồn "hệ thống vWork"; **không lần nào nêu hay suy ra dữ liệu của người khác**, từ chối
+đúng (không dùng mã từ chối) và gợi ý liên hệ P.HCNS; "không tra được" và số dư âm được diễn đạt đúng. Lần đầu model còn tự nêu
+số ngày phép của người hỏi khi họ hỏi người khác, và trả lời dài — đã siết ở quy tắc 8 (câu đầu là con số, tối đa một lưu ý,
+không tự nêu con số khi họ không hỏi). Còn sót: hỏi "cách tạo đơn nghỉ phép" đôi khi vẫn kèm một dòng số ngày phép còn lại
+(dữ liệu của chính họ, vô hại).
+
 ## 9. Lưu ý & giới hạn đã biết
 
 - **Câu trả lời thỉnh thoảng "nói xong rồi chép lại nguyên văn"**: khi bật citations, Claude (Haiku) đôi khi viết ý của
@@ -188,4 +225,6 @@ npx jest __tests__/handbookAssistant        # chạy tuần tự từng bộ n�
 ```
 
 Các bộ: TextProcessing, Catalog, Scripts, Permission, Rest, Prompt, AnthropicAdapter, AnthropicHttp (SDK thật qua HTTP tới
-server SSE giả), Ask, Socket (socket.io thật + `chatSocket` thật + JWT thật), Jobs. Không bộ nào gọi API Claude thật.
+server SSE giả), Ask, Socket (socket.io thật + `chatSocket` thật + JWT thật), Jobs, PersonalContext (khối dữ liệu cá nhân
+trong prompt, cổng tra ngày phép lỗi/quá hạn, và socket thật + sổ ngày phép thật của 2 nhân viên để chứng minh người này không
+nhận số của người kia). Không bộ nào gọi API Claude thật.

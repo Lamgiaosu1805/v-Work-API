@@ -26,6 +26,9 @@ const UserInfoModel = new mongoose.Schema(
     },
     start_date: { type: Date, default: null },
     probation_end_date: { type: Date, default: null },
+    // Ngày chính thức = ngày hiệu lực lần đổi loại hợp đồng sang Chính thức gần nhất (null = chưa đổi
+    // qua hệ thống, dữ liệu cũ). Khi có, probation_end_date bị khoá theo ngày này.
+    official_date: { type: Date, default: null },
     resignation_date: { type: Date, default: null },
     // "Quản lý trực tiếp" (Duyệt cấp 1, theo LUỒNG PHÂN QUYỀN CHẤM CÔNG V-WORK) — HCNS gán thủ công
     // cho từng nhân viên, có thể khác phòng ban (vd CV Pháp chế do TP TCKT duyệt). Quản lý gián tiếp

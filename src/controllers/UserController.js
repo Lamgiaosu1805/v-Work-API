@@ -20,6 +20,8 @@ const DepartmentModel = require("../models/DepartmentModel");
 const LaborContractModel = require("../models/LaborContractModel");
 const WorkScheduleModel = require("../models/WorkScheduleModel");
 const { sign, serializeUser } = require("../helpers/staticUrl");
+const { loadProbationStatusIds, isOnProbationContract } = require("../helpers/payrollStats");
+const { isFixedCtv } = require("../helpers/timesheetExcel");
 const { getEffectivePermissions, invalidateRbacCache } = require("../helpers/rbac");
 const { invalidatePermissionCache } = require("../core/authorization/invalidate-permission-cache");
 const AppModel = require("../models/AppModel");
@@ -36,6 +38,89 @@ const WorkSheetModel = require("../models/WorkSheetModel");
 const TZ_VN = "Asia/Ho_Chi_Minh";
 const toDateKey = (date) => (date ? moment.tz(date, TZ_VN).format("YYYY-MM-DD") : null);
 const formatDateKey = (key) => moment.tz(key, "YYYY-MM-DD", TZ_VN).format("DD/MM/YYYY");
+
+// Loại hợp đồng "Chính thức" (scripts/seedEmploymentStatus.js)
+const OFFICIAL_EMPLOYMENT_STATUS_CODE = "official";
+
+// Ngày hết thử việc suy ra từ ngày chính thức: ngày liền trước, hoặc null nếu chính thức ngay từ ngày
+// vào làm (không có thử việc)
+const probationEndForOfficialDate = (startKey, officialDate) => {
+  const official = moment.tz(officialDate, TZ_VN).startOf("day");
+  return official.format("YYYY-MM-DD") === startKey
+    ? null
+    : official.clone().subtract(1, "day").toDate();
+};
+
+// Hồ sơ đang làm cần HR bổ sung ngày — cùng quy tắc tô vàng ở bảng công Excel: thiếu ngày vào làm, hoặc
+// hợp đồng Thử việc chưa có ngày hết thử việc (công đang tạm tính thử việc). Đã nghỉ việc và CTV cố định
+// công thì bỏ qua. Trả trường đang thiếu ("start_date" | "probation_end_date") hoặc null.
+function findMissingEmploymentDate(user, positionNames, probationStatusIds, now) {
+  if (user.resignation_date && user.resignation_date < now) return null;
+  if (isFixedCtv(positionNames)) return null;
+  if (!user.start_date) return "start_date";
+  if (isOnProbationContract(user, probationStatusIds) && !user.probation_end_date) {
+    return "probation_end_date";
+  }
+  return null;
+}
+
+const EMPLOYMENT_DATE_LABELS = {
+  start_date: "Ngày vào làm",
+  probation_end_date: "Ngày hết thử việc"
+};
+
+// Ngày vào làm / ngày hết thử việc gửi lên dạng "YYYY-MM-DD" (giờ VN), lưu đầu ngày; "" hoặc null =
+// xoá ngày. Chỉ trả về trường có gửi. current = giá trị đang lưu, để kiểm tra khi chỉ sửa 1 trong 2 ngày.
+// Trả { values } hoặc { message } khi sai định dạng / ngày hết thử việc trước ngày vào làm.
+function readEmploymentDates(body, current = {}) {
+  const values = {};
+  for (const [field, label] of Object.entries(EMPLOYMENT_DATE_LABELS)) {
+    const raw = body[field];
+    if (raw === undefined) continue;
+    if (raw === null || raw === "" || raw === "null") {
+      values[field] = null;
+      continue;
+    }
+    const parsed = moment.tz(String(raw), "YYYY-MM-DD", true, TZ_VN);
+    if (!parsed.isValid()) return { message: `${label} phải có định dạng YYYY-MM-DD` };
+    values[field] = parsed.startOf("day").toDate();
+  }
+
+  const pick = (field) => (field in values ? values[field] : current[field]);
+  const startKey = toDateKey(pick("start_date"));
+
+  // Đã có ngày chính thức (đổi hợp đồng qua hệ thống) → ngày hết thử việc khoá theo ngày đó; chỉ sửa
+  // được bằng cách đổi lại ngày hiệu lực ở thẻ Loại hợp đồng
+  const officialKey = toDateKey(current.official_date);
+  if (officialKey) {
+    if (startKey && officialKey < startKey) {
+      return {
+        message: `Ngày vào làm không được sau ngày chính thức (${formatDateKey(officialKey)})`
+      };
+    }
+    const lockedProbationEnd = probationEndForOfficialDate(startKey, current.official_date);
+    if (
+      "probation_end_date" in values &&
+      toDateKey(values.probation_end_date) !== toDateKey(lockedProbationEnd)
+    ) {
+      return {
+        message: `Ngày hết thử việc đang theo hợp đồng Chính thức từ ${formatDateKey(officialKey)} — muốn sửa, đổi lại ngày hiệu lực ở thẻ Loại hợp đồng`
+      };
+    }
+    if ("start_date" in values || "probation_end_date" in values) {
+      values.probation_end_date = lockedProbationEnd;
+    }
+    return { values };
+  }
+
+  const probationEndKey = toDateKey(pick("probation_end_date"));
+  if (startKey && probationEndKey && probationEndKey < startKey) {
+    return {
+      message: `Ngày hết thử việc không được trước ngày vào làm (${formatDateKey(startKey)})`
+    };
+  }
+  return { values };
+}
 
 // Nhân sự trong phạm vi quyền employee.resign (đánh dấu nghỉ việc) của người thao tác.
 // Trả { user } hoặc { status, message } để controller trả lỗi.
@@ -225,6 +310,13 @@ const UserController = {
         return res.status(400).json({ message: "Vui lòng nhập thông tin chi nhánh" });
       }
 
+      const employmentDates = readEmploymentDates(req.body);
+      if (employmentDates.message) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: employmentDates.message });
+      }
+
       const existingUser = await UserInfoModel.findOne({ cccd }).session(session);
       if (existingUser) {
         await session.abortTransaction();
@@ -258,7 +350,8 @@ const UserController = {
             ma_nv: maNV,
             employment_type,
             branch_id: branch_id || null,
-            employment_status: employment_status || null
+            employment_status: employment_status || null,
+            ...employmentDates.values
           }
         ],
         { session }
@@ -597,13 +690,16 @@ const UserController = {
       ]);
 
       const userIds = users.map((u) => u._id);
-      const udpList = await UserDepartmentPositionModel.find({
-        user: { $in: userIds },
-        isDeleted: false
-      })
-        .populate("department", "department_name department_code")
-        .populate("position", "position_name")
-        .lean();
+      const [udpList, probationStatusIds] = await Promise.all([
+        UserDepartmentPositionModel.find({
+          user: { $in: userIds },
+          isDeleted: false
+        })
+          .populate("department", "department_name department_code")
+          .populate("position", "position_name")
+          .lean(),
+        loadProbationStatusIds()
+      ]);
 
       const udpMap = {};
       for (const item of udpList) {
@@ -638,12 +734,21 @@ const UserController = {
         );
       }
 
-      const data = users.map((u) => ({
-        ...serializeUser(u),
-        departments: udpMap[u._id.toString()] || [],
-        can_edit: editableIds.has(u._id.toString()),
-        can_resign: resignableIds.has(u._id.toString())
-      }));
+      const data = users.map((u) => {
+        const departments = udpMap[u._id.toString()] || [];
+        return {
+          ...serializeUser(u),
+          departments,
+          can_edit: editableIds.has(u._id.toString()),
+          can_resign: resignableIds.has(u._id.toString()),
+          missing_employment_date: findMissingEmploymentDate(
+            u,
+            departments.map((d) => d.position?.position_name),
+            probationStatusIds,
+            now
+          )
+        };
+      });
 
       return res.status(200).json({
         message: "Lấy danh sách nhân viên thành công",
@@ -807,9 +912,8 @@ const UserController = {
         "address",
         "tinh_trang_hon_nhan",
         "employment_type",
-        "branch_id",
-        "start_date",
-        "probation_end_date"
+        "branch_id"
+        // start_date, probation_end_date đọc riêng qua readEmploymentDates (kiểm tra định dạng, thứ tự)
         // resignation_date KHÔNG sửa ở đây — chỉ qua PATCH /user/:id/resignation (quyền employee.resign,
         // kiểm tra ngày đã có công, lưu cuối ngày làm việc cuối cùng)
       ];
@@ -820,6 +924,14 @@ const UserController = {
           updates[field] = req.body[field];
         }
       }
+
+      const employmentDates = readEmploymentDates(req.body, user);
+      if (employmentDates.message) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: employmentDates.message });
+      }
+      Object.assign(updates, employmentDates.values);
 
       const previousBranchId = user.branch_id;
       const hasBranchChange =
@@ -1232,9 +1344,46 @@ const UserController = {
         return res.status(404).json({ message: "Không tìm thấy loại hợp đồng" });
       }
 
-      const effectiveMoment = new Date(effective_date);
+      const effectiveDay = moment.tz(String(effective_date), "YYYY-MM-DD", true, TZ_VN);
+      if (!effectiveDay.isValid()) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "effective_date phải có định dạng YYYY-MM-DD" });
+      }
+      // Không thể đổi hợp đồng trước khi vào làm — thường là nhập nhầm ngày hiệu lực hoặc ngày vào làm
+      // trong hồ sơ đang sai; chặn để HR sửa thay vì âm thầm bỏ qua. Trùng ngày vào làm vẫn hợp lệ.
+      const startKey = toDateKey(userInfo.start_date);
+      const effectiveKey = effectiveDay.format("YYYY-MM-DD");
+      if (startKey && effectiveKey < startKey) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          message: `Ngày hiệu lực không được trước ngày vào làm (${formatDateKey(startKey)})`
+        });
+      }
+      const isOfficial = newStatus.code === OFFICIAL_EMPLOYMENT_STATUS_CODE;
+      const isStatusChanged = String(userInfo.employment_status || "") !== newStatus._id.toString();
+      // Đang Chính thức, chọn lại Chính thức với ngày hiệu lực khác = sửa ngày chính thức (chọn nhầm)
+      const isOfficialDateCorrection =
+        !isStatusChanged && isOfficial && effectiveKey !== toDateKey(userInfo.official_date);
+      if (!isStatusChanged && !isOfficialDateCorrection) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: "Loại hợp đồng và ngày hiệu lực không thay đổi" });
+      }
+      // Đổi loại hợp đồng cần ngày vào làm: thiếu thì không biết thời gian thử việc — lên chính thức sẽ
+      // ghi ngày hết thử việc tuỳ tiện, còn hồ sơ Thử việc không có mốc để chia công thử việc
+      if (!startKey) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          message: "Cần nhập ngày vào làm trước khi đổi loại hợp đồng"
+        });
+      }
 
-      if (newStatus.retroactive_on_promote && userInfo.start_date) {
+      // Cộng bù phép chỉ khi thực sự đổi loại — sửa ngày chính thức không cộng thêm (HR chỉnh tay nếu cần)
+      if (isStatusChanged && newStatus.retroactive_on_promote) {
+        const effectiveMoment = new Date(effective_date);
         const startMoment = new Date(userInfo.start_date);
         const months = Math.floor(
           (effectiveMoment.getFullYear() - startMoment.getFullYear()) * 12 +
@@ -1250,6 +1399,23 @@ const UserController = {
             allowNegative: true,
             session
           });
+        }
+      }
+
+      if (isOfficial) {
+        // Ngày hiệu lực là ngày chính thức đầu tiên → lưu lại và khoá ngày hết thử việc theo nó
+        const officialDate = effectiveDay.clone().startOf("day").toDate();
+        userInfo.official_date = officialDate;
+        userInfo.probation_end_date = probationEndForOfficialDate(startKey, officialDate);
+      } else {
+        // Từ Chính thức về loại khác: ngày chính thức và ngày hết thử việc cũ không còn đúng → xoá, HR
+        // nhập lại ngày hết thử việc dự kiến (bảng công tô vàng tới khi có)
+        const previousStatus = userInfo.employment_status
+          ? await EmploymentStatusModel.findById(userInfo.employment_status, "code").lean()
+          : null;
+        if (userInfo.official_date || previousStatus?.code === OFFICIAL_EMPLOYMENT_STATUS_CODE) {
+          userInfo.official_date = null;
+          userInfo.probation_end_date = null;
         }
       }
 

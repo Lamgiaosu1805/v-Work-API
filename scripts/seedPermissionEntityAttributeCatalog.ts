@@ -719,6 +719,12 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
     subjectAttributes: [],
     resourceAttributes: [],
     fields: []
+  },
+  {
+    entity: "Ticket",
+    subjectAttributes: [],
+    resourceAttributes: [],
+    fields: []
   }
 ];
 

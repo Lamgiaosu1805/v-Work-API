@@ -122,6 +122,7 @@ const GENERIC_ALL_COMPANY_ENTITIES: Record<string, string> = {
   SHARED_FOLDER_AUDIT_LOG_ALL_COMPANY: "SharedFolderAuditLog",
   KPI_METRIC_ALL_COMPANY: "KpiMetric",
   PRINT_JOB_ALL_COMPANY: "PrintJob",
+  TICKET_ALL_COMPANY: "Ticket",
   AGENT_ALL_COMPANY: "Agent",
   CLAIM_PERIOD_ALL_COMPANY: "ClaimPeriod",
   CUSTOMER_CLAIM_REQUEST_ALL_COMPANY: "CustomerClaimRequest",

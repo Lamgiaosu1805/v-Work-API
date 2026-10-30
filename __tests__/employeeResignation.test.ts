@@ -396,13 +396,13 @@ describe("Bảng công & xuất Excel — nhân sự nghỉ việc", () => {
     let midRow: ExcelJS.Row | undefined;
     sheet.eachRow((row, rowNumber) => {
       if (rowNumber <= 12 || typeof row.getCell(1).value !== "number") return;
-      exportedNames.push(String(row.getCell(2).value));
-      if (row.getCell(2).value === "Nghỉ giữa kỳ") midRow = row;
+      exportedNames.push(String(row.getCell(3).value));
+      if (row.getCell(3).value === "Nghỉ giữa kỳ") midRow = row;
     });
     expect(exportedNames.sort()).toEqual(rows.map((r) => r.full_name).sort());
 
     const dayCol = (date: string) =>
-      5 + moment.tz(date, TZ).diff(moment.tz("2026-05-26", TZ), "days");
+      6 + moment.tz(date, TZ).diff(moment.tz("2026-05-26", TZ), "days");
     expect(midRow!.getCell(dayCol("2026-06-03")).value).toBe("X");
     expect(midRow!.getCell(dayCol("2026-06-04")).value).toBeNull(); // sau ngày nghỉ: trống, không K
     expect(midRow!.getCell(dayCol("2026-06-10")).value).toBeNull(); // lễ sau ngày nghỉ: trống, không L

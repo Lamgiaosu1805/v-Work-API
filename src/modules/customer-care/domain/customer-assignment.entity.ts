@@ -1,7 +1,7 @@
 import { AggregateRoot } from "../../../core/ddd/aggregate-root.base";
 import { ArgumentInvalidException, ConflictException } from "../../../core/exceptions/exceptions";
 import { CarePolicy } from "./care-policy";
-import { WorkingCalendar } from "./working-calendar";
+import { WorkingCalendar } from "../../../shared-kernel/working-calendar";
 
 // Một LƯỢT GIAO khách cho 1 Sale (Quy định 183A, Điều 7–8). Mỗi lần giao/phân lại tạo 1 lượt mới,
 // lượt cũ kết thúc kèm lý do — nhờ vậy giữ được lịch sử thu hồi/phân lại và mốc SLA của từng Sale.

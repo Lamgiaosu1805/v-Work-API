@@ -32,6 +32,11 @@ const BASELINE_GRANTS: PermissionGrantDoc[] = [
     fieldScopePolicyCode: null
   },
   {
+    permissionCode: "shift_config.view",
+    dataScopePolicyCode: "SHIFT_CONFIG_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
     permissionCode: "post.view",
     dataScopePolicyCode: "POST_ALL_COMPANY",
     fieldScopePolicyCode: null

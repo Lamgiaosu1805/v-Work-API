@@ -594,6 +594,14 @@ const DEFINITIONS: PermissionDef[] = [
     actionKind: "WRITE",
     validDataScopePolicies: ["PRINT_JOB_ALL_COMPANY"]
   },
+  {
+    code: "handbook_assistant.use",
+    module: "workplace",
+    name: "Hỏi Trợ lý Nội quy (AI)",
+    entity: "HandbookAssistant",
+    actionKind: "WRITE",
+    validDataScopePolicies: ["HANDBOOK_ASSISTANT_ALL_COMPANY"]
+  },
 
   // ---- Ticket hỗ trợ nội bộ (module ticket — docs/TICKET-MODULE-PLAN.md mục 10.3) ----
   // Phạm vi ticket (người tạo / chủ trì / người được giao...) do domain tính theo từng ticket, nên chỉ

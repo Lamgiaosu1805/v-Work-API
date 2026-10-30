@@ -12,6 +12,13 @@ const mongoose = require("mongoose");
 const db = require("./src/config/connectDB");
 const route = require("./src/routes");
 const setupChatSocket = require("./src/sockets/chatSocket");
+const {
+  setupHandbookAssistantSocket
+} = require("./src/modules/handbook-assistant/interface/handbook-assistant.socket");
+const { shutdownHandbookAssistant } = require("./src/modules/handbook-assistant");
+const {
+  createHandbookPersonalContext
+} = require("./src/workflows/handbook-personal-context.workflow");
 const { setIO } = require("./src/sockets/ioRegistry");
 const { startCronJobs } = require("./src/jobs");
 const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
@@ -39,6 +46,8 @@ io.on("connection", (socket) => {
 app.set("io", io);
 setIO(io);
 setupChatSocket(io);
+// Trợ lý Nội quy tra được số ngày phép còn lại của CHÍNH người hỏi (nối module leave qua workflows/).
+setupHandbookAssistantSocket(io, undefined, createHandbookPersonalContext());
 
 app.set("trust proxy", 1);
 
@@ -109,8 +118,15 @@ app.use(errorHandlerMiddleware);
       console.log(`App listening on port ${port}`);
     });
 
-    const shutdown = (signal) => {
+    const shutdown = async (signal) => {
       console.log(`${signal} received — shutting down gracefully`);
+      setTimeout(() => process.exit(1), 15000).unref();
+      // Hủy + chốt các câu trả lời Trợ lý Nội quy đang stream TRƯỚC khi ngắt DB.
+      try {
+        await shutdownHandbookAssistant(8000);
+      } catch (err) {
+        console.error("Lỗi khi dừng Trợ lý Nội quy:", err);
+      }
       httpServer.close(async () => {
         try {
           await mongoose.disconnect();
@@ -120,7 +136,6 @@ app.use(errorHandlerMiddleware);
         }
         process.exit(0);
       });
-      setTimeout(() => process.exit(1), 15000).unref();
     };
     process.on("SIGTERM", () => shutdown("SIGTERM"));
     process.on("SIGINT", () => shutdown("SIGINT"));

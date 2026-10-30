@@ -8,9 +8,24 @@ const { registerChurnDetectionJob } = require("./churnDetectionJob");
 const { registerSharedFolderCleanupJob } = require("./sharedFolderCleanupJob");
 const { registerReconcileFecLeadCommissionJob } = require("./reconcileFecLeadCommission");
 const { registerCustomerCareJobs } = require("./customerCareJob");
+const { registerHandbookAssistantJobs } = require("./handbookAssistantJob");
 const { registerTicketSweepJob } = require("./ticketSweepJob");
 
+// DISABLE_CRON=1: không đăng ký cron nào — để chạy local/dev trỏ vào DB dùng chung (test) mà không
+// làm các job (chốt công, cộng phép, đối soát hoa hồng, nhắc báo cáo...) ghi vào dữ liệu đó.
+function isCronDisabled() {
+  return ["1", "true"].includes(
+    String(process.env.DISABLE_CRON ?? "")
+      .trim()
+      .toLowerCase()
+  );
+}
+
 function startCronJobs() {
+  if (isCronDisabled()) {
+    console.log("⏸️  DISABLE_CRON bật — bỏ qua toàn bộ cron job");
+    return;
+  }
   registerGenWorkSheetJob();
   registerFinalizeWorkDayJob();
   registerCleanupDeviceTokensJob();
@@ -21,6 +36,7 @@ function startCronJobs() {
   registerSharedFolderCleanupJob();
   registerReconcileFecLeadCommissionJob();
   registerCustomerCareJobs();
+  registerHandbookAssistantJobs();
   registerTicketSweepJob();
 }
 

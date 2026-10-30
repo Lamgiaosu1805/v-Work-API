@@ -133,7 +133,8 @@ const GENERIC_ALL_COMPANY_ENTITIES: Record<string, string> = {
   SALE_OMICALL_PROFILE_ALL_COMPANY: "SaleOmicallProfile",
   HOTLINE_ADMIN_ALL_COMPANY: "HotlineAdmin",
   PERMISSION_SYSTEM_ALL_COMPANY: "PermissionSystem",
-  INTERNAL_GROUP_ALL_COMPANY: "InternalGroup"
+  INTERNAL_GROUP_ALL_COMPANY: "InternalGroup",
+  HANDBOOK_ASSISTANT_ALL_COMPANY: "HandbookAssistant"
 };
 
 const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [

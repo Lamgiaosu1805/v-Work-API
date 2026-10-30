@@ -14,6 +14,11 @@ declare global {
   }
 }
 
+// Nạp rule quyền của nhân viên (cache Redis không hết hạn, xem invalidate-permission-cache). Vẫn export tên
+// `loadRules` để kiểm tra quyền ngoài Express (socket) qua can-employee.ts mà dùng chung cache; hàm thật nằm ở
+// employee-permissions.ts (dùng chung với module ticket để kiểm tra quyền của người KHÁC).
+export { loadEmployeeRules as loadRules } from "./employee-permissions";
+
 export function requirePermission(action: string, subject: string) {
   return requireAnyPermission([action], subject);
 }

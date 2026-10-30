@@ -35,6 +35,7 @@ const customerCallRouter = require("../modules/customer-call/interface/customer-
 const crmSaleAdminRouter = require("../modules/customer-call/interface/crm-sale-admin.routes");
 const hotlineAdminRouter = require("../modules/customer-call/interface/hotline-admin.routes");
 const customerCareRouter = require("../modules/customer-care/interface/customer-care.routes");
+const handbookAssistantRouter = require("../modules/handbook-assistant/interface/handbook-assistant.routes");
 const ticketRouter = require("../modules/ticket/interface/ticket.routes");
 
 const route = (app) => {
@@ -75,6 +76,7 @@ const route = (app) => {
   app.use("/customer-call", crmSaleAdminRouter);
   app.use("/customer-call", hotlineAdminRouter);
   app.use("/customer-care", customerCareRouter);
+  app.use("/handbook-assistant", handbookAssistantRouter);
   app.use("/tickets", ticketRouter);
 };
 

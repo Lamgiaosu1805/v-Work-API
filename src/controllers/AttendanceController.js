@@ -35,14 +35,22 @@ const { correctDayStatuses } = require("../helpers/attendanceHelper");
 const { getPayrollPeriodRange, calcStandardWorkUnits } = require("../helpers/payrollPeriod");
 const { sendExceptionResponse } = require("../core/http/handle-exception");
 const { mapWithConcurrency } = require("../core/async/map-with-concurrency");
-const { buildPayrollRows, getPayrollPeriodByMonth } = require("../helpers/payrollStats");
+const {
+  buildPayrollRows,
+  buildLeaveCarryOver,
+  getPayrollPeriodByMonth,
+  loadProbationStatusIds,
+  isOnProbationContract,
+  makeIsProbationDay,
+  paidLeaveDays
+} = require("../helpers/payrollStats");
 const { buildTimesheetWorkbook, isFixedCtv } = require("../helpers/timesheetExcel");
 const { stillEmployedAtFilter } = require("../shared-kernel/resignation");
 
 const IMPORT_EXCEL_DAY_CONCURRENCY = 10;
 
 const PAYROLL_USER_FIELDS =
-  "ma_nv full_name probation_end_date resignation_date employment_type branch_id";
+  "ma_nv full_name start_date probation_end_date official_date resignation_date employment_type branch_id employment_status";
 
 // Nhân sự nghỉ việc TRONG kỳ (ngày làm cuối nằm trong kỳ) nhưng không có công nào → không đưa vào
 // bảng công. CTV (chức vụ "CTV") giữ lại vì tính công cố định, không dựa trên chấm công.
@@ -558,9 +566,7 @@ const AttendanceController = {
       let early_days = 0;
       let total_minutes_early = 0;
 
-      const probationEnd = userInfo.probation_end_date
-        ? moment.tz(userInfo.probation_end_date, TZ).startOf("day")
-        : null;
+      const isProbationDay = makeIsProbationDay(userInfo, await loadProbationStatusIds());
 
       const daily = [...allDates].sort().map((dateStr) => {
         const ws = wsMap.get(dateStr);
@@ -571,8 +577,7 @@ const AttendanceController = {
         if (ws) {
           const wu = ws.work_unit ?? 0;
           work_unit_total += wu;
-          const isProbation = probationEnd && moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
-          if (isProbation) work_unit_probation += wu;
+          if (isProbationDay(dateStr)) work_unit_probation += wu;
           else work_unit_official += wu;
           penalty_amount_total += ws.penalty_amount ?? 0;
           if ((ws.minutes_late ?? 0) > 0) {
@@ -585,8 +590,7 @@ const AttendanceController = {
           }
         } else if (holidayDefaultWorkUnit) {
           work_unit_total += holidayDefaultWorkUnit;
-          const isProbation = probationEnd && moment.tz(dateStr, TZ).isBefore(probationEnd, "day");
-          if (isProbation) work_unit_probation += holidayDefaultWorkUnit;
+          if (isProbationDay(dateStr)) work_unit_probation += holidayDefaultWorkUnit;
           else work_unit_official += holidayDefaultWorkUnit;
         }
         for (const s of statuses) {
@@ -594,7 +598,8 @@ const AttendanceController = {
           if (s.status === "present") present_days += w;
           else if (s.status === "missed_clock") missed_clock_days += 1;
           else if (s.status === "absent") absent_days += w;
-          else if (s.status === "leave_paid") leave_paid_days += w;
+          // Thứ 7 chỉ làm buổi sáng: đơn nghỉ lưu period "full" nhưng chỉ trừ 0,5 phép — đếm khớp quỹ phép
+          else if (s.status === "leave_paid") leave_paid_days += paidLeaveDays(dateStr, s.period);
           else if (s.status === "leave_unpaid") leave_unpaid_days += w;
           else if (s.status === "remote") remote_days += w;
           else if (s.status === "business_trip") business_trip_days += w;
@@ -812,20 +817,31 @@ const AttendanceController = {
       });
       const users = await UserInfoModel.find(userFilter, PAYROLL_USER_FIELDS).sort({ ma_nv: 1 });
 
-      const [{ rows, holidays }, memberships, departmentDoc] = await Promise.all([
-        buildPayrollRows({ users, periodStart, periodEnd, includeDaily: true }),
-        UserDepartmentPositionModel.find({
-          user: { $in: users.map((u) => u._id) },
-          isDeleted: false
-        })
-          .populate("department", "department_name")
-          .populate("position", "position_name")
-          .sort({ createdAt: 1 })
-          .lean(),
-        department && mongoose.Types.ObjectId.isValid(department)
-          ? DepartmentModel.findById(department, "department_name").lean()
-          : null
-      ]);
+      const userIds = users.map((u) => u._id);
+      const [{ rows, holidays }, memberships, departmentDoc, carryOverByUser, probationStatusIds] =
+        await Promise.all([
+          buildPayrollRows({ users, periodStart, periodEnd, includeDaily: true }),
+          UserDepartmentPositionModel.find({
+            user: { $in: userIds },
+            isDeleted: false
+          })
+            .populate("department", "department_name")
+            .populate("position", "position_name")
+            .sort({ createdAt: 1 })
+            .lean(),
+          department && mongoose.Types.ObjectId.isValid(department)
+            ? DepartmentModel.findById(department, "department_name").lean()
+            : null,
+          buildLeaveCarryOver(userIds, periodStart),
+          loadProbationStatusIds()
+        ]);
+
+      const userById = new Map(users.map((u) => [u._id.toString(), u]));
+      // Hồ sơ cần HR bổ sung: chưa có ngày vào làm, hoặc đang ở loại hợp đồng Thử việc mà ngày hết thử
+      // việc trống (toàn bộ công tạm tính thử việc tới khi có ngày)
+      const isOnProbation = (user) => isOnProbationContract(user, probationStatusIds);
+      const isMissingEmploymentDates = (user) =>
+        Boolean(user) && (!user.start_date || (isOnProbation(user) && !user.probation_end_date));
 
       const membershipsByUser = new Map();
       for (const m of memberships) {
@@ -837,9 +853,17 @@ const AttendanceController = {
 
       const employees = rows
         .map((row) => {
-          const userMemberships = membershipsByUser.get(row.user_id.toString()) || [];
+          const userId = row.user_id.toString();
+          const userMemberships = membershipsByUser.get(userId) || [];
+          const user = userById.get(userId);
           return {
             row,
+            leaveCarryOver: carryOverByUser.get(userId) ?? 0,
+            startDate: user?.start_date,
+            probationEndDate: user?.probation_end_date,
+            officialDate: user?.official_date,
+            isOnProbation: isOnProbation(user),
+            missingEmploymentDates: isMissingEmploymentDates(user),
             departmentNames: uniqueNames(userMemberships.map((m) => m.department?.department_name)),
             positionNames: uniqueNames(userMemberships.map((m) => m.position?.position_name))
           };

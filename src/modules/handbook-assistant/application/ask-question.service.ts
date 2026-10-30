@@ -23,6 +23,9 @@ const LOCK_TTL_MARGIN_MS = 60_000;
 
 export interface AskInput {
   accountId: string;
+  // _id UserInfo của người hỏi, LẤY TỪ SOCKET ĐÃ XÁC THỰC (không bao giờ từ nội dung câu hỏi). Có thì mới tra
+  // được thông tin cá nhân (số ngày phép) của chính họ.
+  userInfoId?: string;
   conversationId: unknown;
   question: unknown;
   clientId: unknown;
@@ -273,6 +276,7 @@ export async function prepareAsk(
           messageId,
           conversationId: turn.conversationId,
           accountId: input.accountId,
+          userInfoId: input.userInfoId,
           question,
           versionId: active._id,
           versionNo: active.versionNo,

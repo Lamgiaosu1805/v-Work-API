@@ -16,6 +16,9 @@ const {
   setupHandbookAssistantSocket
 } = require("./src/modules/handbook-assistant/interface/handbook-assistant.socket");
 const { shutdownHandbookAssistant } = require("./src/modules/handbook-assistant");
+const {
+  createHandbookPersonalContext
+} = require("./src/workflows/handbook-personal-context.workflow");
 const { setIO } = require("./src/sockets/ioRegistry");
 const { startCronJobs } = require("./src/jobs");
 const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
@@ -43,7 +46,8 @@ io.on("connection", (socket) => {
 app.set("io", io);
 setIO(io);
 setupChatSocket(io);
-setupHandbookAssistantSocket(io);
+// Trợ lý Nội quy tra được số ngày phép còn lại của CHÍNH người hỏi (nối module leave qua workflows/).
+setupHandbookAssistantSocket(io, undefined, createHandbookPersonalContext());
 
 app.set("trust proxy", 1);
 

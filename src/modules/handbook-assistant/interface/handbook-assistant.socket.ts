@@ -7,6 +7,7 @@ import type {
   HandbookAssistantDeps,
   HandbookEventSink
 } from "../application/handbook-assistant.deps";
+import type { PersonalContextProvider } from "../application/ports/personal-context.port";
 import { runningAnswers } from "../application/running-answers.registry";
 import { toHandbookError } from "../application/to-handbook-error";
 import { HandbookAssistantError } from "../domain/handbook-assistant.errors";
@@ -58,12 +59,16 @@ export function createSocketEventSink(io: Server): HandbookEventSink {
   };
 }
 
-export function createDefaultDeps(io: Server): HandbookAssistantDeps {
+export function createDefaultDeps(
+  io: Server,
+  personalContext?: PersonalContextProvider
+): HandbookAssistantDeps {
   return {
     answerer: new AnthropicHandbookAnswerer(),
     events: createSocketEventSink(io),
     registry: runningAnswers,
-    acquireBusyLock
+    acquireBusyLock,
+    personalContext
   };
 }
 
@@ -88,8 +93,10 @@ async function handleAsk(
       throw new HandbookAssistantError("FORBIDDEN");
     }
 
+    // Danh tính (accountId/userInfoId) chỉ lấy từ socket đã xác thực — KHÔNG đọc từ payload của client.
     accepted = await prepareAsk(deps, {
       accountId,
+      userInfoId,
       conversationId: body.conversationId,
       question: body.question,
       clientId: body.clientId
@@ -139,9 +146,14 @@ async function handleCancel(
 
 // Đăng ký `handbook:ask` / `handbook:cancel` cho mọi socket. Gọi SAU setupChatSocket(io) trong index.js:
 // xác thực socket (socket.data.accountId/userInfoId, room account:<id>) do middleware của chatSocket
-// đảm nhiệm. `deps` chỉ được truyền vào trong test.
-export function setupHandbookAssistantSocket(io: Server, deps?: HandbookAssistantDeps): void {
-  const resolved = deps ?? createDefaultDeps(io);
+// đảm nhiệm. `deps` chỉ được truyền vào trong test; `personalContext` (tra số ngày phép của chính người hỏi)
+// do index.js truyền vào từ tầng workflows/.
+export function setupHandbookAssistantSocket(
+  io: Server,
+  deps?: HandbookAssistantDeps,
+  personalContext?: PersonalContextProvider
+): void {
+  const resolved = deps ?? createDefaultDeps(io, personalContext);
   io.on("connection", (socket: Socket) => {
     socket.on(HANDBOOK_SOCKET_EVENTS.ASK, (payload: unknown, callback: unknown) => {
       runDetached(handleAsk(resolved, socket, payload, callback), "handbook:ask");

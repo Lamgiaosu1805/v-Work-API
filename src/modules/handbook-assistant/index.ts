@@ -32,6 +32,11 @@ export {
   isHandbookAssistantError
 } from "./domain/handbook-assistant.errors";
 export type { HandbookErrorCode } from "./domain/handbook-assistant.errors";
+export type {
+  PersonalAsker,
+  PersonalContext,
+  PersonalContextProvider
+} from "./application/ports/personal-context.port";
 export { shutdownHandbookAssistant } from "./application/shutdown-handbook-assistant";
 export { recoverStaleAnswers as recoverStaleHandbookAnswers } from "./application/recover-stale-answers.service";
 export { purgeExpiredConversations as purgeExpiredHandbookConversations } from "./application/purge-expired-conversations.service";

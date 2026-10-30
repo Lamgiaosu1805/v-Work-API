@@ -1,7 +1,8 @@
 import { TicketActor } from "../domain/types";
 
 // Bộ lọc danh sách ticket (thuần, không đọc DB) — tách riêng để test được. Quy tắc xem (docs mục 6.1):
-// ticket thường ai cũng thấy; ticket hạn chế chỉ người liên quan hoặc người có quyền xem ticket hạn chế.
+// ticket thường: người xử lý / quản lý thấy hết, nhân viên thường chỉ thấy ticket của mình và người cùng phòng;
+// ticket hạn chế chỉ người liên quan hoặc người có quyền xem ticket hạn chế.
 
 export const TICKET_TABS = [
   "my",
@@ -54,7 +55,11 @@ export function visibilityFilter(actor: TicketActor): Filter {
   if (actor.canViewRestricted) return {};
   return {
     $or: [
-      { visibility: "normal" },
+      // Ticket thường: người xử lý / quản lý xem hết; nhân viên thường chỉ ticket người cùng phòng tạo (ticket của
+      // chính mình, được giao, phối hợp đã có ở các nhánh dưới) — khớp isCreatedByColleague ở domain
+      actor.canViewAll
+        ? { visibility: "normal" }
+        : { visibility: "normal", created_by: { $in: actor.colleagueIds } },
       { created_by: actor.employeeId },
       { "assignment.owner_id": actor.employeeId },
       { "assignment.collaborator_ids": actor.employeeId },
@@ -81,10 +86,17 @@ function myFilter(scope: string, actor: TicketActor): Filter {
     "assignment.owner_id": null,
     "assignment.member_ids": me
   };
+  // Giao riêng cho tôi, chưa có chủ trì: vẫn thuộc "của tôi" khi đang chờ bổ sung / tạm hoãn (chip "Giao cho tôi" chỉ
+  // lấy ticket đang chờ nhận).
+  const assignedPending: Filter = {
+    status: { $nin: ["closed", "cancelled"] },
+    "assignment.owner_id": null,
+    "assignment.member_ids": me
+  };
   const handling: Filter = {
     $or: [{ "assignment.owner_id": me }, { "assignment.collaborator_ids": me }]
   };
-  const everything: Filter = { $or: [{ created_by: me }, handling, assignedWaiting] };
+  const everything: Filter = { $or: [{ created_by: me }, handling, assignedPending] };
 
   switch (scope) {
     case "open":
@@ -183,12 +195,20 @@ export function buildListFilter(
   if (keyword) {
     // Escape trước khi đưa vào $regex để từ khoá không thành biểu thức (ReDoS / NoSQL injection)
     const pattern = new RegExp(escapeRegex(keyword), "i");
+    // Ticket hạn chế đã kết thúc chỉ còn thông tin chung với người liên quan (không thấy khách) nên không cho tìm
+    // theo SĐT / tên khách — nếu không có thể dò SĐT của khách qua kết quả khớp.
+    const customerMatch: Filter = {
+      $or: [{ "customer.phone": pattern }, { "customer.name": pattern }]
+    };
+    const summaryOnly: Filter = {
+      visibility: "restricted",
+      status: { $in: ["closed", "cancelled"] }
+    };
     parts.push({
       $or: [
         { code: pattern },
         { title: pattern },
-        { "customer.phone": pattern },
-        { "customer.name": pattern }
+        actor.canViewRestricted ? customerMatch : { $and: [customerMatch, { $nor: [summaryOnly] }] }
       ]
     });
   }

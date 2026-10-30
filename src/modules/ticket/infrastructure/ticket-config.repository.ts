@@ -50,7 +50,8 @@ export function toTemplateDef(doc: any): TemplateDef {
       required: Boolean(field.required),
       placeholder: field.placeholder ?? "",
       help: field.help ?? "",
-      options: field.options ?? []
+      options: field.options ?? [],
+      appCodes: field.app_codes ?? []
     })),
     requiredDocuments: (doc.required_documents ?? []).map((item: any) => ({
       kind: item.kind,

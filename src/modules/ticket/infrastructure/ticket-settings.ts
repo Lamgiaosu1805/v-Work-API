@@ -74,7 +74,7 @@ export async function loadTicketCalendar(
     isDeleted: false,
     scope_type: "all",
     date: {
-      $gte: new Date(from.getTime() - 7 * DAY_MS),
+      $gte: new Date(from.getTime() - 30 * DAY_MS),
       $lte: new Date(from.getTime() + 90 * DAY_MS)
     }
   })

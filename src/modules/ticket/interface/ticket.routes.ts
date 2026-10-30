@@ -2,7 +2,10 @@ import express from "express";
 import { authenticate } from "../../../middlewares/authMiddleware";
 import { uploadTicketFiles } from "../../../middlewares/uploadTicket";
 import { asyncHandler } from "../../../core/http/async-handler";
-import { requirePermission } from "../../../core/authorization/require-permission.middleware";
+import {
+  requireAnyPermission,
+  requirePermission
+} from "../../../core/authorization/require-permission.middleware";
 import { ticketHttpController } from "./ticket.http.controller";
 
 const router = express.Router();
@@ -13,6 +16,12 @@ const guard = (action: string) => [authenticate, requirePermission(action, "Tick
 const view = guard("ticket.view");
 const create = guard("ticket.create");
 const handle = guard("ticket.handle");
+// Ban lãnh đạo / quản lý ticket (ticket.manage) được "đóng hộ": thao tác như nhóm xử lý (domain canActAsHandler) mà
+// không cần ticket.handle. Nhận việc và trả lại vẫn chỉ dành cho người có ticket.handle (chủ trì thật).
+const handleOrManage = [
+  authenticate,
+  requireAnyPermission(["ticket.handle", "ticket.manage"], "Ticket")
+];
 const config = guard("ticket.config");
 
 // ---- cấu hình + danh mục (đặt TRƯỚC các route /:id) -----------------------------------------
@@ -55,20 +64,24 @@ router.post(
 router.post("/:id/claim", ...handle, asyncHandler(ticketHttpController.claim));
 router.post("/:id/release", ...handle, asyncHandler(ticketHttpController.release));
 router.post("/:id/assign", ...view, asyncHandler(ticketHttpController.assign));
-router.post("/:id/collaborators", ...handle, asyncHandler(ticketHttpController.addCollaborator));
+router.post(
+  "/:id/collaborators",
+  ...handleOrManage,
+  asyncHandler(ticketHttpController.addCollaborator)
+);
 router.delete(
   "/:id/collaborators/:employeeId",
-  ...handle,
+  ...handleOrManage,
   asyncHandler(ticketHttpController.removeCollaborator)
 );
-router.post("/:id/request-info", ...handle, asyncHandler(ticketHttpController.requestInfo));
+router.post("/:id/request-info", ...handleOrManage, asyncHandler(ticketHttpController.requestInfo));
 router.post("/:id/approval/verify", ...view, asyncHandler(ticketHttpController.verifyApproval));
-router.post("/:id/hold", ...handle, asyncHandler(ticketHttpController.hold));
-router.post("/:id/resume", ...handle, asyncHandler(ticketHttpController.resume));
-router.post("/:id/resolve", ...handle, asyncHandler(ticketHttpController.resolve));
-router.post("/:id/close", ...handle, asyncHandler(ticketHttpController.close));
-router.post("/:id/due-hint", ...handle, asyncHandler(ticketHttpController.setDueHint));
-router.post("/:id/links", ...handle, asyncHandler(ticketHttpController.linkRelated));
+router.post("/:id/hold", ...handleOrManage, asyncHandler(ticketHttpController.hold));
+router.post("/:id/resume", ...handleOrManage, asyncHandler(ticketHttpController.resume));
+router.post("/:id/resolve", ...handleOrManage, asyncHandler(ticketHttpController.resolve));
+router.post("/:id/close", ...handleOrManage, asyncHandler(ticketHttpController.close));
+router.post("/:id/due-hint", ...handleOrManage, asyncHandler(ticketHttpController.setDueHint));
+router.post("/:id/links", ...handleOrManage, asyncHandler(ticketHttpController.linkRelated));
 
 // Trao đổi: ai thấy ticket đầy đủ (và chưa kết thúc) đều nhắn được
 router.post(

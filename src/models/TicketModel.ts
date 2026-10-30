@@ -160,6 +160,9 @@ const TicketSchema = new Schema(
       enum: ["unclaimed", "silent", "overdue", "hold_unknown", null],
       default: null
     },
+    // Mốc `alert_at` đã được báo cho người phụ trách (chỉ ticket Khẩn/Cao chưa ai nhận). Chỉ cron ghi (không đi
+    // qua mapper); `alert_at` đổi (ticket vào lại "open") thì khác mốc này nên được báo lại.
+    alert_notified_for: { type: Date, default: null },
     auto_close_at: { type: Date, default: null },
     remind_at: { type: Date, default: null },
     reminder_sent_at: { type: Date, default: null },

@@ -1,15 +1,8 @@
 import { NextFunction, Request, Response } from "express";
-import redis from "../../config/redis";
-import { logger } from "../../config/logger";
 import { asyncHandler } from "../http/async-handler";
 import { ForbiddenException } from "../exceptions/exceptions";
-import {
-  resolveEffectiveRules,
-  buildAbility,
-  Ability,
-  RawCaslRule
-} from "../../modules/permission";
-import { buildPermissionCacheKey } from "./permission-cache-key";
+import { buildAbility, Ability, RawCaslRule } from "../../modules/permission";
+import { loadEmployeeRules } from "./employee-permissions";
 import { resolveEmployeeId } from "./resolve-employee-id";
 import { resolveManagedRequestEmployeeIds } from "./resolve-managed-request-employee-ids";
 
@@ -21,37 +14,24 @@ declare global {
   }
 }
 
-// Nạp rule quyền của nhân viên (cache Redis không hết hạn, xem invalidate-permission-cache). Export để
-// kiểm tra quyền ngoài Express (socket) qua can-employee.ts mà vẫn dùng chung cache.
-export async function loadRules(employeeId: string): Promise<RawCaslRule[]> {
-  const cacheKey = buildPermissionCacheKey(employeeId);
-
-  try {
-    const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached) as RawCaslRule[];
-  } catch (error) {
-    logger.error("Không đọc được cache quyền nhân viên", { error, employeeId });
-  }
-
-  const rules = await resolveEffectiveRules(employeeId);
-
-  try {
-    await redis.set(cacheKey, JSON.stringify(rules));
-  } catch (error) {
-    logger.error("Không ghi được cache quyền nhân viên", { error, employeeId });
-  }
-
-  return rules;
-}
+// Nạp rule quyền của nhân viên (cache Redis không hết hạn, xem invalidate-permission-cache). Vẫn export tên
+// `loadRules` để kiểm tra quyền ngoài Express (socket) qua can-employee.ts mà dùng chung cache; hàm thật nằm ở
+// employee-permissions.ts (dùng chung với module ticket để kiểm tra quyền của người KHÁC).
+export { loadEmployeeRules as loadRules } from "./employee-permissions";
 
 export function requirePermission(action: string, subject: string) {
+  return requireAnyPermission([action], subject);
+}
+
+// Có MỘT trong các quyền là qua (vd ticket.handle hoặc ticket.manage); ability gắn vào req như requirePermission.
+export function requireAnyPermission(actions: string[], subject: string) {
   return asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
     if (!req.account?._id) {
       throw new ForbiddenException("Chưa đăng nhập");
     }
 
     const employeeId = await resolveEmployeeId(req.account._id);
-    const rawRules = await loadRules(employeeId);
+    const rawRules = await loadEmployeeRules(employeeId);
     if (subject === "Request") {
       const managedEmployeeIds = await resolveManagedRequestEmployeeIds(employeeId);
       if (managedEmployeeIds.length) {
@@ -66,7 +46,7 @@ export function requirePermission(action: string, subject: string) {
     }
     const ability = buildAbility(rawRules);
 
-    if (!ability.can(action, subject)) {
+    if (!actions.some((action) => ability.can(action, subject))) {
       throw new ForbiddenException("Bạn không có quyền thực hiện thao tác này");
     }
 

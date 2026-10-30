@@ -24,6 +24,12 @@ export interface TicketDirectory {
   getOwnDepartmentTreeEmployeeIds(employeeId: string): Promise<string[]>;
   // Nhân viên đang làm việc của một phòng ban, kể cả các phòng con — để báo khi ticket giao cho phòng mà phòng chưa có người quản lý.
   getDepartmentMemberIds(departmentId: string): Promise<string[]>;
+  // Trong danh sách nhân viên, những ai có quyền `action` của ticket (vd "ticket.handle") — kiểm tra người KHÁC người đang thao tác.
+  // `action` là mảng thì chỉ cần có MỘT trong các quyền.
+  filterEmployeesWithPermission(
+    employeeIds: string[],
+    action: string | string[]
+  ): Promise<string[]>;
   getEmployees(ids: string[]): Promise<EmployeeSummary[]>;
   getDepartments(ids: string[]): Promise<DepartmentSummary[]>;
   // `onlyIds`: chỉ tìm trong tập người này (lọc ở câu truy vấn, trước khi cắt `limit`)
@@ -38,6 +44,9 @@ export interface TicketNotification {
   type: string;
   ticketId: string;
   push?: boolean;
+  // true = ném lỗi khi KHÔNG gửi được cho người nào (mặc định nuốt lỗi từng người). Cron dùng để biết có nên đánh dấu
+  // "đã nhắc" hay không.
+  strict?: boolean;
 }
 
 export interface TicketNotifier {

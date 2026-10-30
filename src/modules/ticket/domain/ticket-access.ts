@@ -95,9 +95,26 @@ export function customerVisibility(
   };
 }
 
+// Ticket do người cùng phòng (kể cả phòng con) tạo — nhân viên thường xem được ticket thường của họ.
+export function isCreatedByColleague(
+  ticket: Pick<TicketProps, "createdBy">,
+  actor: TicketActor
+): boolean {
+  return actor.colleagueIds.some((id) => sameId(id, ticket.createdBy));
+}
+
 export function accessLevel(ticket: AccessProps, actor: TicketActor): TicketAccessLevel {
-  if (ticket.visibility === "normal") return "full";
   if (actor.canViewRestricted) return "full";
+  if (ticket.visibility === "normal") {
+    // Ticket thường: người xử lý / quản lý xem hết; nhân viên thường chỉ ticket của mình, người cùng phòng, hoặc
+    // ticket mình là người liên quan (được giao, phối hợp).
+    const inScope =
+      actor.canViewAll ||
+      isInvolved(ticket, actor) ||
+      isDepartmentCandidate(ticket, actor) ||
+      isCreatedByColleague(ticket, actor);
+    return inScope ? "full" : "none";
+  }
   if (!isInvolved(ticket, actor) && !isDepartmentCandidate(ticket, actor)) return "none";
   // Ticket hạn chế đã kết thúc: người liên quan chỉ còn thấy thông tin chung (mã, tiêu đề, trạng
   // thái, kết quả, ghi chú kết luận) — đủ để biết kết quả và mở lại trong hạn.

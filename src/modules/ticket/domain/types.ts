@@ -198,6 +198,12 @@ export interface TicketActor {
   canManage: boolean;
   canViewRestricted: boolean;
   canViewSensitive: boolean;
+  // Xem được MỌI ticket thường của công ty: người xử lý (ticket.handle), quản lý, giao phòng ban, xem ticket hạn
+  // chế. Nhân viên thường chỉ thấy ticket do mình / người cùng phòng tạo (chốt 30/10/2026, mục 6.1).
+  canViewAll: boolean;
+  // Mọi nhân viên cùng phòng ban với người thao tác (kể cả phòng con) — phạm vi "ticket cùng phòng" của nhân
+  // viên thường. Chỉ cần khi canViewAll = false.
+  colleagueIds: string[];
   // Có quyền xem khách hàng trong CRM (customer.view) — được nhận mã khách để mở hồ sơ khách
   canViewCustomer?: boolean;
 }

@@ -11,9 +11,9 @@ Module mới, viết theo pattern DDD/Hexagonal của `src/modules/request` — 
 | Quyết định       | Nội dung                                                                                                                                                                            |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Ai tạo ticket    | **Mọi nhân viên** đều tạo được. Khách không tự tạo: khách báo lỗi qua fanpage/Sale/CSKH → Sale/CSKH vào vWork tạo ticket. Khách không đăng nhập vWork, không có bình luận công khai |
-| Ai xem/nhận      | Ticket thường: **mọi nhân viên xem và nhận được** (cấp qua quyền, sau này thu hẹp chỉ cần sửa role)                                                                                 |
+| Ai xem/nhận      | Ticket thường: **nhân viên thường chỉ xem ticket của mình và của người cùng phòng; người xử lý / quản lý xem hết** (đổi 30/10/2026, mục 6.1). **Chỉ người có quyền `ticket.handle` mới nhận và xử lý được** (role `WORKPLACE_TICKET_HANDLER` / `_STAFF` / `_MANAGER`, đổi 30/10/2026 — trước đó mọi nhân viên nhận được; xem mục 21) |
 | Phân loại        | Tiêu đề tự do (bắt buộc) + nhãn **sản phẩm** + **loại yêu cầu** + **mẫu yêu cầu** (không bắt buộc). Tất cả là dữ liệu cấu hình, không hard-code                                     |
-| SLA              | **Không dùng SLA/hạn chót cứng.** Thay bằng **cảnh báo vàng**: ticket bị bỏ quên được **bôi vàng trên giao diện cho mọi người thấy**, không gửi thông báo (mục 8)                   |
+| SLA              | **Không dùng SLA/hạn chót cứng.** Thay bằng **cảnh báo vàng**: ticket bị bỏ quên được **bôi vàng trên giao diện cho mọi người thấy**, không gửi thông báo, trừ ticket Khẩn / Cao chưa ai nhận (nhắc người phụ trách 1 lần, mục 7.2) (mục 8) |
 | Nhóm xử lý       | Ai trong nhóm (chủ trì + phối hợp) cũng đổi trạng thái, kết luận được. Chủ trì chỉ là đầu mối (mục 3.2)                                                                             |
 | Tờ trình         | Giai đoạn này **chưa duyệt điện tử**: tờ trình gửi qua email, người tạo tải **file/ảnh tờ trình có chữ ký** lên ticket. Chừa sẵn đường cho duyệt điện tử (mục 5)                    |
 | Thông báo        | Chỉ gửi **đúng người cần**, theo bảng quy tắc (mục 7). Không bản tin hằng ngày, không người theo dõi                                                                                |
@@ -101,7 +101,7 @@ Mỗi mẫu là **cấu hình**: trường bắt buộc, giấy tờ (đánh d�
 
 | Tình huống                                              | Ai nhận được                                                                            |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Không ai giao                                           | Mọi người có `ticket.handle` bấm "Nhận xử lý"                                           |
+| Không ai giao                                           | Người có `ticket.handle` bấm "Nhận xử lý" (từ 30/10/2026 quyền này **không** thuộc role nhân viên mặc định) |
 | Ban lãnh đạo giao cho **phòng ban**                     | Thành viên phòng đó tự nhận (tab "Giao cho phòng tôi"), hoặc trưởng phòng chỉ định tiếp |
 | Ban lãnh đạo / trưởng bộ phận giao cho **người cụ thể** | **Chỉ** những người được chỉ định                                                       |
 
@@ -188,7 +188,7 @@ closed (không phải do người tạo xác nhận) ──mở lại trong 3 ng
 **Ghi chú khi đổi trạng thái**: mọi lần đổi đều ghi chú được (không bắt buộc) và hiện trên lịch sử — vd khi
 báo đã xử lý thì ghi đã làm gì, có vấn đề gì phát sinh. **Chỉ bắt buộc** khi thiếu ghi chú sẽ không hiểu
 được: chờ bổ sung (thiếu gì — qua checklist 4.4), tạm hoãn (lý do), đóng với kết quả khác "Đã giải quyết"
-(lý do), huỷ, mở lại, trả lại, đổi mức khẩn.
+(lý do), huỷ, mở lại, trả lại, và đổi mức khẩn **do nhóm xử lý** (người tạo tự đổi mức khẩn thì lý do không bắt buộc).
 
 ### 4.4 Yêu cầu bổ sung và "Cần theo dõi thêm"
 
@@ -259,11 +259,19 @@ Người tạo nhận thông báo → tải bổ sung → bấm "Đã bổ sung"
 
 |                                                                      | Ticket thường | Ticket hạn chế (cần tờ trình / đánh dấu hạn chế)           | File nhạy cảm (CCCD, chứng từ, tờ trình) |
 | -------------------------------------------------------------------- | ------------- | ---------------------------------------------------------- | ---------------------------------------- |
-| Mọi nhân viên                                                        | ✔             | ✘ (không thấy trong danh sách)                             | ✘ — chỉ thấy dòng thông tin file (6.2)   |
-| Ban lãnh đạo, trưởng IT, IT (quyền)                                  | ✔             | ✔ luôn                                                     | ✔ luôn                                   |
+| Nhân viên thường (chỉ có quyền mặc định)                             | ✔ nếu do **mình hoặc người cùng phòng** tạo; ticket phòng khác ✘ | ✘ (không thấy trong danh sách)                             | ✘ — chỉ thấy dòng thông tin file (6.2)   |
+| Người có `ticket.handle`, giao phòng ban, quản lý (xem mọi ticket thường) | ✔ mọi ticket  | chỉ khi liên quan (như dưới)                               | chỉ khi liên quan (như dưới)             |
+| Ban lãnh đạo, trưởng IT, IT (quyền xem ticket hạn chế / file nhạy cảm) | ✔             | ✔ luôn                                                     | ✔ luôn                                   |
 | Người tạo                                                            | ✔             | ✔ khi chưa đóng; **sau khi đóng chỉ thấy thông tin chung** | ✔ khi chưa đóng; ✘ sau khi đóng          |
 | Nhóm xử lý: chủ trì, phối hợp (kể cả ngoài IT, vd Kế toán được giao) | ✔             | ✔ khi chưa đóng                                            | ✔ khi chưa đóng; ✘ sau khi đóng          |
 
+- **"Cùng phòng"** = mọi nhân viên thuộc phòng của người xem, kể cả phòng con và phòng họ làm trưởng (tra lúc xem,
+  không lưu vào ticket nên điều chuyển nhân sự có hiệu lực ngay). Người được giao / phối hợp thì thấy ticket dù khác
+  phòng; thành viên phòng được giao thấy ticket đang chờ phòng nhận. Ticket thường đã đóng vẫn xem đủ với người
+  cùng phòng. Trưởng bộ phận (chỉ có `assign_member`) không xem được ticket chưa giao của phòng khác. Code:
+  `canViewAll` / `colleagueIds` ở `TicketActor`, `accessLevel` (`ticket-access.ts`), `visibilityFilter`
+  (`ticket-query-filters.ts`). `canViewAll` = có một trong `ticket.handle`, `assign_department`, `manage`,
+  `view_restricted`, `view_sensitive`.
 - **Thông tin chung** người tạo vẫn thấy sau khi đóng ticket hạn chế: mã, tiêu đề, trạng thái, kết quả, ghi
   chú kết luận — đủ để biết kết quả và mở lại trong 3 ngày. Không thấy file, tờ trình, phần trao đổi.
 - SĐT khách hiện đầy đủ.
@@ -323,13 +331,15 @@ Toàn bộ là thông báo một-một. Người tự thực hiện hành độn
 | Người tạo bổ sung xong (chưa có chủ trì → người phụ trách)       | Chủ trì + người phối hợp            |
 | Người tạo sửa nội dung sau khi đã có chủ trì                     | Chủ trì                             |
 | Đã xử lý / đã đóng / bị đóng do trùng, chưa đủ cơ sở…           | Người tạo                           |
+| Tạm hoãn · Tiếp tục xử lý · Quay về hàng chờ nhận (chủ trì trả lại, không còn ai) | Người tạo (thêm 30/10/2026) |
+| Ticket **Khẩn / Cao chưa ai nhận** đã quá ngưỡng cảnh báo (bị bôi vàng) | Người phụ trách (7.1), **đúng 1 lần cho mỗi mốc vàng** (cron, thêm 30/10/2026) |
 | Nhắc trước khi tự đóng `waiting_info`                           | Người tạo                           |
 | Được thêm vào nhóm phối hợp                                     | Người được thêm                     |
 | Tới ngày kiểm tra "Cần theo dõi thêm"                           | Chủ trì                             |
 | @nhắc tên trong trao đổi                                        | Người được nhắc ("Bạn được nhắc tên trong ticket …") |
 | Có tin nhắn mới trong trao đổi                                  | Người tạo + chủ trì + người phối hợp; ticket chưa có chủ trì → người được giao đích danh / trưởng phòng được giao + người phụ trách (7.1). Người được nhắc tên chỉ nhận thông báo nhắc tên. |
 
-**Cảnh báo vàng không gửi thông báo** — chỉ bôi vàng trên giao diện (mục 8).
+**Cảnh báo vàng không gửi thông báo** — chỉ bôi vàng trên giao diện (mục 8). **Ngoại lệ duy nhất (30/10/2026):** ticket **Khẩn / Cao chưa ai nhận** khi bị bôi vàng sẽ nhắc người phụ trách 1 lần (cron `ticketSweepJob`, đánh dấu bằng `alert_notified_for`); ticket Bình thường / Thấp vẫn chỉ bôi vàng. Nếu ticket vừa được nâng lên Khẩn / Cao mà mốc vàng đã qua thì người phụ trách có thể nhận cả thông báo "nâng mức" lẫn thông báo nhắc.
 
 **Tin nhắn trong trao đổi** (thêm 27/10/2026): người gửi không tự nhận; mỗi người chỉ nhận một thông báo cho mỗi tin
 (nhắc tên đứng trước thông báo chung). Ticket chưa có chủ trì mà đang chờ người tạo bổ sung (`waiting_info`) chưa báo
@@ -384,12 +394,14 @@ mà không ai đụng tới mới đáng lo.
 - Mẫu đặt mức mặc định, người tạo đổi được, nhóm xử lý điều chỉnh được (kèm ghi chú). Người tạo đổi mức không bắt
   buộc ghi lý do; nhóm xử lý đổi mức bắt buộc ghi lý do.
 - Ticket **chưa ai nhận** bị nâng lên Khẩn / Cao → báo lại người phụ trách (gồm danh sách mặc định), xem 7.1.
+- **Giá trị seed cho cài đặt tạo mới (30/10/2026)**, theo tài liệu "Hướng dẫn gửi ticket hỗ trợ trên CRM": ngưỡng A (chưa ai nhận) = thời hạn phản hồi đầu tiên — Khẩn **30 phút**, Cao **1 giờ**, Bình thường **4 giờ**, Thấp **1 ngày** (đơn vị phút làm việc). Cài đặt đã có trong DB **không bị ghi đè** — chỉnh ở màn Cấu hình → Cài đặt chung. Mốc "xử lý xong" của tài liệu (Khẩn 2 giờ … Thấp 3 ngày) không phải hạn cứng: chỉ là mốc tham khảo, ticket vẫn chỉ vàng khi bị bỏ quên (8.1).
 - Khi chuyển vàng: ticket được **bôi vàng trên giao diện cho mọi người thấy** (danh sách + chi tiết, kèm lý
   do, vd "Chưa ai nhận 1 ngày làm việc") + tab "Cần chú ý" (tên cũ: "Cảnh báo vàng"). **Không gửi thông báo.**
 
 ### 8.4 Lịch làm việc
 
 - **T2–T6 theo ca hành chính, T7 chỉ buổi sáng (ca sáng)**; nghỉ chiều T7, CN và ngày lễ trong
+- **Seed cài đặt tạo mới (30/10/2026):** làm việc **T2–T6, không làm thứ 7**, 1 ngày làm việc = **480 phút** (8 giờ); khung giờ vẫn là 1 khoảng liền 08:00–17:00 nên giờ nghỉ trưa chưa được trừ (lịch chưa hỗ trợ nhiều khung giờ/ngày). Cài đặt đã có vẫn giữ T7 sáng + 540 phút cho tới khi sửa ở màn Cấu hình.
   `HolidayModel` (`scope_type = "all"`). Khớp với chấm công hiện tại (`jobs/genWorkSheet.js` gán ca sáng cho
   T7; `helpers/payrollPeriod.js` tính T7 = 0,5 công).
 - Khung giờ từng thứ lưu trong cấu hình ticket (mặc định T2–T6 08:00–17:00, T7 08:00–12:00), không hard-code.
@@ -428,7 +440,7 @@ src/modules/ticket/
     ticket.entity.ts              # AggregateRoot: máy trạng thái 4.3, chủ trì/phối hợp, quy tắc đóng/mở lại
     approval-gate.ts              # ApprovalGate + DocumentApprovalGate  [CHỜ-DUYỆT-ĐIỆN-TỬ]
     ticket-alert.ts               # tính alert_at / auto_close_at từ trạng thái + WorkingCalendar
-    ticket-visibility.ts          # quy tắc mục 6.1 (thuần, không đọc DB)
+    ticket-access.ts              # quy tắc mục 6.1 (thuần, không đọc DB)
     ticket.errors.ts, types.ts, events/
   infrastructure/
     ticket.repository.ts, ticket.mapper.ts, ticket-config.repository.ts
@@ -471,15 +483,16 @@ Index chính: `{status, createdAt}`, `{"assignment.owner_id", status}`, `{"assig
 
 | Code                                                             | Cấp cho (seed ban đầu)                                     |
 | ---------------------------------------------------------------- | ---------------------------------------------------------- |
-| `ticket.create`, `ticket.view`, `ticket.handle`                  | Mọi nhân viên (role baseline)                              |
-| `ticket.assign_department`                                       | Ban lãnh đạo                                               |
+| `ticket.create`, `ticket.view`                                   | Mọi nhân viên (role baseline)                              |
+| `ticket.handle` (nhận / xử lý)                                   | **Chỉ** 3 role: `WORKPLACE_TICKET_HANDLER` (người của đơn vị khác được giao việc — chỉ có quyền này), `WORKPLACE_TICKET_STAFF` (IT), `WORKPLACE_TICKET_MANAGER` |
+| `ticket.assign_department`                                       | Ban lãnh đạo + role `WORKPLACE_TICKET_STAFF` (IT chuyển việc nghiệp vụ về phòng chủ trì) |
 | `ticket.assign_member`                                           | Trưởng bộ phận (chỉ người trong phòng mình) + ban lãnh đạo |
-| `ticket.view_restricted`, `ticket.view_sensitive`                | Ban lãnh đạo, trưởng IT, IT                                |
-| `ticket.manage` (đổi chủ trì, đóng hộ, sửa phân loại mọi ticket) | Ban lãnh đạo, trưởng IT                                    |
+| `ticket.view_restricted`, `ticket.view_sensitive`                | Ban lãnh đạo, trưởng IT, IT (`WORKPLACE_TICKET_STAFF`)     |
+| `ticket.manage` (đổi chủ trì, đóng hộ, sửa phân loại mọi ticket) | Ban lãnh đạo, trưởng IT. Route `hold` / `resume` / `resolve` / `close` / `due-hint` / `links` / `request-info` / `collaborators` nhận **`ticket.handle` HOẶC `ticket.manage`** (đóng hộ không cần `handle`); `claim` và `release` vẫn chỉ `ticket.handle` |
 | `ticket.config`                                                  | Admin, trưởng IT                                           |
 
 Quyền theo vai trò trên ticket (người tạo, chủ trì, phối hợp, người được giao) do domain tính
-(`ticket-visibility.ts`), không phải permission.
+(`ticket-access.ts`), không phải permission.
 
 ### 10.4 Endpoint `/tickets`
 
@@ -499,14 +512,12 @@ POST   /tickets/:id/hold | /resume
 POST   /tickets/:id/resolve           # + "cần theo dõi thêm"
 POST   /tickets/:id/confirm           # người tạo xác nhận → đóng, khoá mở lại
 POST   /tickets/:id/close | /cancel | /reopen
-POST   /tickets/:id/approval/require | /approval/verify
+POST   /tickets/:id/approval/verify
 POST   /tickets/:id/links             # liên quan / trùng
-POST   /tickets/:id/clone             # tạo ticket mới từ ticket này
-GET    /tickets/:id/messages ; POST /tickets/:id/messages
-POST   /tickets/:id/attachments       # multer riêng, lọc loại file, giới hạn dung lượng
-GET    /tickets/:id/attachments/:attId/url   # kiểm tra quyền → URL có ký
-GET    /tickets/:id/activities
-/ticket-config/products | categories | templates | settings   # CRUD cấu hình
+POST   /tickets/:id/messages         # trao đổi (kèm file, @nhắc tên)
+GET    /tickets/:id/attachments/:attId/download   # kiểm tra quyền → tải file
+# Tin nhắn, file, lịch sử nằm trong GET /tickets/:id; "tạo ticket mới từ ticket này" làm ở web (POST /tickets + liên kết).
+/tickets/config/products | categories | templates | settings   # CRUD cấu hình (quyền ticket.config)
 ```
 
 ### 10.5 Cron `ticketSweepJob` (mỗi 5 phút)
@@ -615,6 +626,7 @@ rõ ở đây).
 3. Seed cấu hình: `npx ts-node --transpile-only scripts/seedTicketConfig.ts` (chỉ tạo mới, không ghi đè cấu hình
    đã chỉnh).
 4. Gán role `WORKPLACE_TICKET_STAFF` cho IT và `WORKPLACE_TICKET_MANAGER` cho trưởng IT ở màn Phân quyền; trên màn cấu hình ticket gán
+   Từ 30/10/2026 `ticket.handle` **không còn** ở role nhân viên: IT gán `WORKPLACE_TICKET_STAFF`; người của đơn vị khác được giao việc (Kế toán, QTRR, ĐVKD) gán `WORKPLACE_TICKET_HANDLER`, nếu không sẽ không nhận được dù được giao.
    người phụ trách (A, B cho mẫu "Reset thiết bị"; danh sách mặc định cho IT).
 
 ### Kiểm thử
@@ -628,7 +640,7 @@ cấu hình). Chạy: `npx jest __tests__/modules/ticket`.
 
 Repo `vWork-website`, nhánh `feat/ticket`, thư mục `src/features/ticket/` + 3 trang
 `src/pages/workplace/Ticket{s,Detail,Config}Screen.jsx`. Menu "Ticket hỗ trợ" nằm trong Workplace (chỉ hiện với
-người có `ticket.view`); thông báo ticket mở thẳng `/workplace/tickets/:id`.
+người có quyền ngoài role nhân viên mặc định: `ticket.handle`, `assign_*`, `view_restricted`, `view_sensitive`, `manage`, `config`; thêm lối vào ở CRM → CSKH & Call Center cho người có `ticket.view`); thông báo ticket mở thẳng `/workplace/tickets/:id`.
 
 | Route | Nội dung |
 |---|---|
@@ -774,3 +786,77 @@ Thẻ được làm gọn (khoảng 480px thay vì 730px) mà không bỏ thông
 - `getDetailInfo` / `getFluctuation` / `getCustomerInvestmentHolding` chỉ nhận khách của app TIKLUY; khách app khác trả 404 với câu
   "Chi tiết khách hàng chỉ hỗ trợ app <tên app>".
 - Trang danh sách khách (`CustomerScreen`) đọc `?app=` (chọn đúng công ty CRM một lần khi mở) và `?search=`.
+
+## 21. Đối chiếu với tài liệu "Hướng dẫn gửi ticket hỗ trợ trên CRM" (30/10/2026)
+
+Nguồn: bản đề xuất 19/10/2026 (đơn vị kinh doanh, QTRR, Kế toán, Hỗ trợ vận hành báo lỗi CRM / hồ sơ vay vướng cho IT). Các điểm lệch đã chốt:
+
+| Nội dung tài liệu | Quyết định | Triển khai |
+| --- | --- | --- |
+| Người nhận: IT và quản trị CRM | Chỉ người có `ticket.handle` nhận / xử lý, không để mọi nhân viên | Bỏ `ticket.handle` khỏi `EMPLOYEE_BASELINE`; thêm vào `WORKPLACE_TICKET_STAFF` (`seedPermissionTicketRoles.ts`) |
+| Việc thuần nghiệp vụ → IT chuyển về đơn vị chủ trì | IT giao được cho phòng ban | `WORKPLACE_TICKET_STAFF` có `ticket.assign_department` |
+| Menu CSKH & Call Center | Giữ ticket ở Workplace, thêm lối vào ở CRM; Workplace chỉ hiện cho người có quyền không phải mặc định | `WorkplaceMenuItems.js` (`permissionAny` các quyền ticket ngoài view/create), `CrmMenuItems.js` (mục "Ticket hỗ trợ" trỏ `/workplace/tickets`) |
+| Sản phẩm "CRM VNFITE" | Chính là **VNFITE APP**, không thêm sản phẩm | — |
+| Loại ticket (Lỗi hệ thống / Hồ sơ vay) | Bỏ qua, không thêm loại; dùng loại "Lỗi / sự cố" | Hai mẫu mới `system_error`, `loan_file_stuck` thuộc loại này (`seedTicketConfig.ts`) |
+| Mã hồ sơ | Không bắt buộc, hiện **theo sản phẩm**: TIKLUY → mã khoản đầu tư, VNFITE → mã khoản vay. Chưa tra cứu bước / đơn vị / cờ SLA của hồ sơ (giai đoạn sau, cần API từ hệ thống hồ sơ vay) | Trường mẫu có `app_codes` (model `TicketTemplateModel`, `ticket-commands.service.ts`, `TicketDynamicFields`, màn cấu hình mẫu) |
+| Mô tả 4 ý (đang làm gì, mong đợi, thực tế, thời điểm) | Chỉ ghi chú hướng dẫn, người gửi tự viết vào mô tả vì không ca nào cũng đủ ý | Nằm trong `guidance` của 2 mẫu mới |
+| Ảnh chụp màn hình bắt buộc với "Lỗi hệ thống" | Có | Giấy tờ bắt buộc `screenshot` của mẫu `system_error` |
+| Hướng dẫn tự kiểm tra trước khi gửi (F5, đúng hồ sơ / bước, có nút sẵn chưa) và danh sách không dùng ticket cho… | Có | `guidance` của 2 mẫu mới |
+| Thời hạn phản hồi đầu tiên (Khẩn 30 phút … Thấp 1 ngày) | Dùng ngưỡng "chưa ai nhận" làm thời hạn phản hồi | Seed cài đặt tạo mới (8.3) |
+| Thời hạn xử lý xong | Chỉ là mốc tham khảo, giữ triết lý cảnh báo vàng | Không đổi code |
+| Ticket Khẩn không ai nhận | Nhắc người phụ trách khi bị vàng | Bước 3 của `ticket-sweep.service.ts` (+ `alert_notified_for` ở `TicketModel`) |
+| Báo người tạo mỗi lần đổi trạng thái | Thêm tạm hoãn / tiếp tục / quay về hàng chờ nhận | `ticket-notification.policy.ts` (`planStatusChange`) |
+| Giờ làm việc 08–12, 13–17, T2–T6 | Bỏ thứ 7, ngày làm việc 480 phút; chưa trừ nghỉ trưa | Seed cài đặt tạo mới (8.4) |
+| (Phát sinh) Ai xem được ticket thường | Nhân viên thường chỉ xem ticket của mình và người cùng phòng; người xử lý / quản lý xem hết (không thêm cờ theo ticket hay theo mẫu) | `TicketActor.canViewAll` + `colleagueIds` (`ticket-actor.ts`), `accessLevel`, `visibilityFilter`; `meta.me.canViewAll`; web ẩn tab "Chưa ai nhận" với nhân viên thường; ticket chỉ hiện ở CRM (người có quyền CRM) hoặc Workplace (còn lại) |
+
+**Không làm (đã chốt bỏ qua):** thêm loại "Hồ sơ vay", mẫu "Mở lại hồ sơ đóng nhầm" (ticket đã có nút "Mở lại" riêng), trường "Kênh liên hệ nhanh", cảnh báo khi ghi CCCD / SĐT khách vào tiêu đề và mô tả.
+
+**Việc phải làm khi triển khai** (seed chỉ tạo mới / cập nhật định nghĩa role, không đụng dữ liệu đã chỉnh):
+
+1. `npx ts-node --transpile-only scripts/seedPermissionAll.ts` (cập nhật role nhân viên + role ticket), rồi `scripts/invalidateAllPermissionCache.ts`.
+2. Gán `WORKPLACE_TICKET_STAFF` cho IT; gán `WORKPLACE_TICKET_HANDLER` (chỉ có `ticket.handle`, không xem file nhạy cảm, không giao phòng ban) cho người của đơn vị khác được giao việc (vd Kế toán). Người chưa có quyền nào vẫn tạo và xem ticket được, nhưng nhận / xử lý thì bị từ chối (403).
+3. `npx ts-node --transpile-only scripts/seedTicketConfig.ts` để tạo 2 mẫu mới. Cài đặt chung đã có trong DB không bị ghi đè: vào Cấu hình → Cài đặt chung để đặt ngưỡng "chưa ai nhận" (30 phút / 1 giờ / 4 giờ / 1 ngày), ngày làm việc 480 phút, bỏ thứ 7.
+4. Gán người phụ trách cho mẫu / sản phẩm VNFITE APP trên màn Cấu hình (người nhận thông báo, kể cả nhắc ticket Khẩn / Cao chưa ai nhận).
+5. Ticket hỗ trợ chỉ hiện ở **một** nơi, theo quyền CRM (`CRM_ACCESS_PERMISSIONS` — cũng là điều kiện vào layout CRM): người **có** quyền CRM thấy mục "Ticket hỗ trợ" ở CRM → CSKH & Call Center (`/ticket-ho-tro`, kèm huy hiệu số ticket cần để ý); người **không có** thấy mục "Ticket hỗ trợ" ở Workplace (`/workplace/tickets`). Mục Workplace có cờ `hiddenWhenCrmAccess` (`WorkplaceMenuItems.js`, đọc ở `WorkplaceLayout.jsx`). Role nhân viên cơ bản không có quyền CRM nào nên nhân viên thường thấy ở Workplace. Phạm vi dữ liệu do backend quyết định (6.1).
+6. Link `/workplace/tickets`, `/workplace/tickets/config`, `/workplace/tickets/:id` (thông báo đẩy, link gửi nhau, gõ tay) tự chuyển sang `/ticket-ho-tro...` nếu người mở có quyền CRM (`WorkplaceTicketRoute.jsx`); thông báo trong web cũng mở thẳng bản CRM với người có quyền CRM (`Header.jsx`). Test phân quyền thật: `__tests__/modules/ticket/ticket-real-permissions.test.ts`.
+7. Nhân viên thường dùng chính mục "Ticket hỗ trợ" để gửi và theo dõi (tab "Ticket của tôi", "Ticket phòng ban"). Trưởng bộ phận muốn điều phối ticket phải được giao ticket cho phòng (hoặc gán `WORKPLACE_TICKET_STAFF`).
+8. Hộp thoại "Bổ sung thông tin" của người tạo có ô **Nội dung bổ sung**: lưu thành tin nhắn của người tạo trong phần trao đổi (`submit-info` nhận `note`). Bắt buộc nhập khi người xử lý hỏi mục chỉ trả lời được bằng chữ (`input: "text"` ở `INFO_REQUEST_CATALOG`: mô tả, các bước tái hiện, SĐT / CCCD khách, mã khoản đầu tư / vay, số tiền và thời điểm, căn cứ); mục `file` / `either` thì ô này không bắt buộc. Lời nhắc trong hộp thoại hiện từng mục kèm ghi chú của người xử lý.
+
+## 22. Rà soát toàn luồng 30/10/2026: các lỗi đã sửa
+
+| Nhóm | Lỗi | Cách sửa |
+| --- | --- | --- |
+| Quyền | Ban lãnh đạo (`ticket.manage`, không có `handle`) không đóng hộ được: route đòi `ticket.handle` | Thêm `requireAnyPermission`; các route thao tác nhóm xử lý nhận `handle` **hoặc** `manage` (10.3); web cũng gating theo cả hai |
+| Giao việc | Giao / mời phối hợp cho người không có `ticket.handle` làm ticket kẹt (nhận, trả lại, báo xong đều 403) | `assertCanHandle` ở `authorizeAssignment` và `addCollaborator` (báo lỗi 400 kèm tên); ô chọn người giao chỉ gợi ý người có quyền. Giao cho **phòng ban** thì không kiểm tra được từng thành viên — gán role cho người của phòng đó |
+| Cron | Lần quét đầu sau triển khai báo dồn mọi ticket Khẩn / Cao đã vàng | Bước nhắc chỉ lấy ticket có trường `alert_notified_for` (ticket tạo từ nay có sẵn, mặc định null); ticket cũ không bị báo dồn |
+| Cron | Cờ "đã nhắc" vẫn ghi dù gửi hỏng (notifier nuốt lỗi) | `TicketNotification.strict`: cron nhận lỗi khi không gửi được cho ai để bỏ cờ và thử lại |
+| Seed | `seedTicketConfig` tạo lại sản phẩm / loại / mẫu admin đã xoá mềm | Lọc theo `code` (không kèm `isDeleted`); mẫu của loại đã xoá thì bỏ qua |
+| Seed | Thiếu `silent_minutes` → ngưỡng "im lặng" tính theo ngày 540 phút | Seed đặt 1 / 2 / 5 / 10 ngày làm việc theo ngày 480 phút |
+| Xem ticket | `relatedTicketIds` / `duplicateOf` trong chi tiết lộ id ticket người xem không được thấy | Chỉ trả id ticket xem được |
+| Xem ticket | Tìm theo từ khoá khớp SĐT / tên khách của ticket hạn chế đã đóng → dò được SĐT | Người không có `view_restricted` không khớp khách ở loại ticket đó |
+| Xem ticket | Đóng "Trùng": 400 / 404 cho biết ticket ẩn có tồn tại và trùng SĐT hay không | Kiểm tra quyền xem ticket đang đóng trước |
+| Xem ticket | Tạo ticket liên kết tới id không tồn tại / không xem được | Kiểm tra tồn tại và quyền xem, tối đa 20 |
+| Xem ticket | Huy hiệu tổng vẫn cộng tab "Chưa ai nhận" với nhân viên thường | Tab này chỉ tính khi `canViewAll` |
+| Xem ticket | Tab "Ticket của tôi" bỏ sót ticket giao riêng đang chờ bổ sung / tạm hoãn | Lấy mọi trạng thái chưa đóng / huỷ |
+| Xem ticket | Trưởng phòng không có dòng thành viên ở phòng mình quản lý không nhận / thấy ticket giao cho phòng | `departmentIds` tính cả phòng làm trưởng (khớp `colleagueIds`) |
+| Thông báo | Huỷ ticket không báo ai; mở lại / trả về hàng chờ không báo người chờ nhận | `cancelled` báo nhóm xử lý / người được giao / trưởng phòng; `reopened_unclaimed`, `returned_to_queue_unclaimed` báo người đang chờ nhận |
+| Thông báo | Người phụ trách / người được @nhắc không mở được ticket vẫn nhận (link chết, lộ tiêu đề / nội dung) | `recipientsWithTicketAccess` lọc người nhận theo quyền xem (trừ thông báo "không còn xử lý" cho người bị gỡ) |
+| Thông báo | Người vừa được giao đích danh lúc tạo nhận cả "ticket mới" lẫn "được giao" | Bỏ người được giao khỏi thông báo "ticket mới" |
+| Tờ trình | Web coi tờ trình đã nộp nếu bất kỳ ai tải lên, backend chỉ tính file của người tạo | Chi tiết trả `uploadedById`; web chỉ tính file của người tạo |
+| Bổ sung | Backend không bắt nhập nội dung với mục `input: "text"` | `submitInfo` trả 400 nếu thiếu nội dung |
+| Dữ liệu | `note`, `reason`, `description`... không phải chuỗi gây 500 | `readPayload` trả 400 |
+| Dữ liệu | Sửa ticket sang sản phẩm / loại đã tắt | Chặn như lúc tạo (giữ nguyên giá trị cũ vẫn được) |
+| Mã lỗi | Nhắn tin vào ticket đã kết thúc trả 403 | 409 `INVALID_STATUS_TRANSITION` như các thao tác khác |
+| Web | Hộp thoại gửi `version` lúc bấm lưu nên ghi đè âm thầm thay đổi của người khác | Chốt `version` lúc mở hộp thoại (409 như thiết kế) |
+| Web | So khớp mã app phân biệt hoa thường | So khớp không phân biệt |
+| Web | `/ticket-ho-tro/...` mở bởi người không có quyền CRM → về dashboard, mất ticket | Chuyển sang `/workplace/tickets/...` |
+| Web | Đổi sản phẩm vẫn lưu giá trị trường đã ẩn; nhân bản ticket không chuyển sang ticket mới; tab "Chưa ai nhận" nháy; dòng ticket không mở tab mới bằng Ctrl+click | Đã sửa |
+| Hạ tầng | Ngày lễ chỉ nạp từ 7 ngày trước | 30 ngày |
+
+**Chưa đổi (quyết định cần chủ hệ thống):**
+
+- **Ngày 480 phút trên khung 08:00–17:00 (540 phút, chưa trừ nghỉ trưa):** "3 ngày làm việc" (tự đóng / mở lại) ngắn hơn khoảng 6 giờ so với 3 ngày thực. Muốn chính xác cần hỗ trợ giờ nghỉ trong `WorkingCalendar` hoặc đặt `workday_minutes = 540`.
+- **Chạy lại `seedPermissionAll` trên production ghi đè `grants` của mọi role hệ thống** (kể cả chỉnh tay ở màn Phân quyền) — chỉ chạy sau khi đối chiếu; sau seed phải chạy `invalidateAllPermissionCache` (cache quyền không có TTL).
+- **Sự kiện thông báo không bền** (EventEmitter2 trong tiến trình, không outbox): tiến trình chết ngay sau commit thì mất thông báo.
+- **Tab "department" và `counts`:** mỗi request quét danh sách phòng ban 1–2 lần; `counts` chạy 6 truy vấn. Chưa tối ưu (chưa thấy chậm).
+- **Lô cron 200 ticket:** một ticket lỗi mãi không phải lỗi version có thể chặn lô; chưa gặp.

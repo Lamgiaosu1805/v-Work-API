@@ -99,7 +99,14 @@ const KINDS: Record<ConfigKind, KindDefinition> = {
         name: trimmed(input.name),
         category_id: input.categoryId,
         title_pattern: input.titlePattern,
-        fields: input.fields,
+        fields: Array.isArray(input.fields)
+          ? input.fields.map(({ appCodes, ...field }: { appCodes?: unknown[] }) => ({
+              ...field,
+              app_codes: [
+                ...new Set((appCodes ?? []).map((code) => String(code).trim().toLowerCase()))
+              ].filter(Boolean)
+            }))
+          : input.fields,
         required_documents: input.requiredDocuments,
         requires_approval: input.requiresApproval,
         default_urgency: input.defaultUrgency,

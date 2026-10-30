@@ -272,7 +272,10 @@ export const ticketHttpController = {
         await getTicketCommandService().submitInfo(
           await actorOf(req),
           param(req, "id"),
-          { approvalReference: approvalReferenceOf(payload) },
+          {
+            approvalReference: approvalReferenceOf(payload),
+            note: typeof payload.note === "string" ? payload.note : undefined
+          },
           readUploadedFiles(req, payload),
           toVersion(payload.version)
         ),

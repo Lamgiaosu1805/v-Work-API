@@ -14,6 +14,8 @@ function actor(employeeId: string, overrides: Partial<TicketActor> = {}): Ticket
     canManage: false,
     canViewRestricted: false,
     canViewSensitive: false,
+    canViewAll: false,
+    colleagueIds: [],
     ...overrides
   };
 }
@@ -37,8 +39,33 @@ function ticket(overrides: Record<string, unknown> = {}) {
 }
 
 describe("accessLevel", () => {
-  it("ticket thường: mọi nhân viên xem đầy đủ", () => {
-    expect(accessLevel(ticket({ visibility: "normal" }), actor("anyone"))).toBe("full");
+  it("ticket thường: người xử lý / quản lý (canViewAll) xem đầy đủ mọi ticket", () => {
+    const handler = actor("anyone", { canViewAll: true });
+    expect(accessLevel(ticket({ visibility: "normal" }), handler)).toBe("full");
+  });
+
+  it("ticket thường: nhân viên thường chỉ thấy ticket của mình và người cùng phòng", () => {
+    const normal = ticket({ visibility: "normal" });
+    expect(accessLevel(normal, actor("stranger"))).toBe("none");
+    expect(accessLevel(normal, actor("requester"))).toBe("full");
+    expect(
+      accessLevel(normal, actor("colleague", { colleagueIds: ["requester", "colleague"] }))
+    ).toBe("full");
+    // được giao / phối hợp thì thấy dù khác phòng
+    expect(accessLevel(normal, actor("collab"))).toBe("full");
+    // đồng nghiệp của người KHÁC thì không thấy
+    expect(accessLevel(normal, actor("other", { colleagueIds: ["someone-else"] }))).toBe("none");
+  });
+
+  it("ticket thường đã đóng: người cùng phòng vẫn xem được (không bị thu về thông tin chung)", () => {
+    const closed = ticket({ visibility: "normal", status: "closed" });
+    const colleague = actor("colleague", { colleagueIds: ["requester"] });
+    expect(accessLevel(closed, colleague)).toBe("full");
+  });
+
+  it("ticket hạn chế: người cùng phòng KHÔNG thấy (chỉ người liên quan)", () => {
+    const colleague = actor("colleague", { colleagueIds: ["requester"] });
+    expect(accessLevel(ticket(), colleague)).toBe("none");
   });
 
   it("ticket hạn chế: người ngoài không thấy", () => {

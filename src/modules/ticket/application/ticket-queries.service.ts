@@ -156,10 +156,11 @@ export class TicketQueryService {
   // "department" đếm ticket đã giao cho phòng và đang chờ nhận.
   async counts(actor: TicketActor): Promise<Record<string, number>> {
     const now = this.deps.now();
+    // Hàng chờ nhận của cả công ty chỉ dành cho người xử lý — nhân viên thường không có tab này nên không cộng vào tổng.
     const badges: Array<{ key: string; tab: string; scope?: string }> = [
       { key: "my", tab: "my", scope: "open" },
       { key: "needs_reply", tab: "needs_reply" },
-      { key: "unclaimed", tab: "unclaimed" },
+      ...(actor.canViewAll ? [{ key: "unclaimed", tab: "unclaimed" }] : []),
       { key: "department", tab: "department", scope: "waiting" },
       { key: "yellow", tab: "yellow" }
     ];
@@ -265,6 +266,8 @@ export class TicketQueryService {
           .select("code title status")
           .lean()) as any[])
       : [];
+    // Chỉ trả id ticket liên quan / ticket gốc mà người xem được phép thấy (không lộ id ticket hạn chế của người khác)
+    const visibleLinkedIds = new Set(linkedDocs.map((linked) => String(linked._id)));
     const linkedSummary = (linked: any) => ({
       id: String(linked._id),
       code: linked.code,
@@ -321,6 +324,9 @@ export class TicketQueryService {
       related: linkedDocs
         .filter((linked) => ticket.relatedTicketIds.includes(String(linked._id)))
         .map(linkedSummary),
+      relatedTicketIds: ticket.relatedTicketIds.filter((id) => visibleLinkedIds.has(id)),
+      duplicateOf:
+        ticket.duplicateOf && visibleLinkedIds.has(ticket.duplicateOf) ? ticket.duplicateOf : null,
       duplicateOfTicket:
         linkedDocs
           .filter((linked) => String(linked._id) === ticket.duplicateOf)
@@ -361,6 +367,7 @@ export class TicketQueryService {
           mimeType: canOpen ? file.mime_type : null,
           size: canOpen ? file.size : null,
           uploadedBy: nameOf(file.uploaded_by),
+          uploadedById: file.uploaded_by ? String(file.uploaded_by) : null,
           createdAt: file.createdAt
         };
       }),
@@ -492,7 +499,8 @@ export class TicketQueryService {
         canAssignMember: actor.canAssignMember,
         canManage: actor.canManage,
         canViewRestricted: actor.canViewRestricted,
-        canViewSensitive: actor.canViewSensitive
+        canViewSensitive: actor.canViewSensitive,
+        canViewAll: actor.canViewAll
       }
     };
   }
@@ -501,13 +509,25 @@ export class TicketQueryService {
   // trong phòng mình nên chỉ trả những người đó — tránh để họ chọn người rồi mới bị từ chối ở bước giao.
   async searchEmployees(query: string, limit = 20, assignableFor?: TicketActor) {
     const capped = Math.min(Math.max(limit, 1), 50);
-    if (assignableFor && !assignableFor.canAssignDepartment) {
+    if (!assignableFor) return this.deps.directory.searchEmployees(query, capped);
+
+    // Chỉ gợi ý người có quyền xử lý ticket (giao cho người khác thì họ không thao tác được); lấy dư rồi lọc.
+    let candidates;
+    if (assignableFor.canAssignDepartment) {
+      candidates = await this.deps.directory.searchEmployees(query, capped * 3);
+    } else {
       const own = await this.deps.directory.getOwnDepartmentTreeEmployeeIds(
         assignableFor.employeeId
       );
-      return this.deps.directory.searchEmployees(query, capped, own);
+      candidates = await this.deps.directory.searchEmployees(query, capped * 3, own);
     }
-    return this.deps.directory.searchEmployees(query, capped);
+    const allowed = new Set(
+      await this.deps.directory.filterEmployeesWithPermission(
+        candidates.map((employee) => employee.id),
+        "ticket.handle"
+      )
+    );
+    return candidates.filter((employee) => allowed.has(employee.id)).slice(0, capped);
   }
 
   listDepartments() {

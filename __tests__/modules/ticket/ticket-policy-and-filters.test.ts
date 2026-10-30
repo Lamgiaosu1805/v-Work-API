@@ -32,6 +32,7 @@ import {
   readPayload
 } from "../../../src/modules/ticket/interface/ticket-request-parsers";
 import { TicketActor } from "../../../src/modules/ticket/domain/types";
+import { recipientsWithTicketAccess } from "../../../src/modules/ticket/application/ticket-recipient-access";
 
 const ME = "emp-me";
 const REQUESTER = "emp-requester";
@@ -47,6 +48,8 @@ function actor(overrides: Partial<TicketActor> = {}): TicketActor {
     canManage: false,
     canViewRestricted: false,
     canViewSensitive: false,
+    canViewAll: true,
+    colleagueIds: [],
     ...overrides
   };
 }
@@ -367,12 +370,105 @@ describe("planNotifications — chỉ báo đúng người cần", () => {
     ).toEqual([OWNER]);
   });
 
-  it("đổi trạng thái không có trong bảng quy tắc (tạm hoãn, tiếp tục, trả lại) thì không báo", () => {
+  it("tạm hoãn, tiếp tục, quay về hàng chờ nhận → báo người tạo", () => {
+    const planned = (from: string, to: string) =>
+      planNotifications(
+        new TicketStatusChangedDomainEvent({
+          aggregateId: "t1",
+          actorId: OWNER,
+          from: from as any,
+          to: to as any
+        }),
+        context()
+      );
+
+    expect(planned("in_progress", "on_hold")).toMatchObject([
+      { type: "on_hold", employeeIds: [REQUESTER] }
+    ]);
+    expect(planned("on_hold", "in_progress")).toMatchObject([
+      { type: "resumed", employeeIds: [REQUESTER] }
+    ]);
+    // chủ trì trả lại, không còn ai → ticket về "open"
+    // ...và báo người đang chờ nhận (người phụ trách) để ticket Bình thường / Thấp không nằm im
+    expect(planned("in_progress", "open")).toMatchObject([
+      { type: "returned_to_queue", employeeIds: [REQUESTER] },
+      { type: "returned_to_queue_unclaimed", employeeIds: ["handler-1", "handler-2"] }
+    ]);
+    expect(planned("on_hold", "open")).toMatchObject([
+      { type: "returned_to_queue", employeeIds: [REQUESTER] },
+      { type: "returned_to_queue_unclaimed", employeeIds: ["handler-1", "handler-2"] }
+    ]);
+  });
+
+  it("huỷ ticket → báo người đang xử lý / đang được giao (người huỷ không tự nhận)", () => {
+    const cancelled = (assignment: Record<string, unknown>, rest: Partial<PolicyContext> = {}) =>
+      planNotifications(
+        new TicketStatusChangedDomainEvent({
+          aggregateId: "t1",
+          actorId: REQUESTER,
+          from: "in_progress",
+          to: "cancelled"
+        }),
+        context(
+          {
+            assignment: {
+              mode: "none",
+              departmentId: null,
+              memberIds: [],
+              assignedBy: null,
+              ownerId: null,
+              collaboratorIds: [],
+              claimedAt: null,
+              ...assignment
+            } as any
+          },
+          rest
+        )
+      );
+
+    expect(cancelled({ ownerId: OWNER, collaboratorIds: ["collab-1"] })).toMatchObject([
+      { type: "cancelled", employeeIds: [OWNER, "collab-1"] }
+    ]);
+    expect(cancelled({ mode: "members", memberIds: ["m1", "m2"] })).toMatchObject([
+      { type: "cancelled", employeeIds: ["m1", "m2"] }
+    ]);
+    expect(
+      cancelled({ mode: "department", departmentId: "d1" }, { departmentManagerId: "boss" })
+    ).toMatchObject([{ type: "cancelled", employeeIds: ["boss"] }]);
+    expect(cancelled({})).toEqual([]);
+  });
+
+  it("mở lại ticket chưa có chủ trì → báo người đang chờ nhận", () => {
+    const reopened = planNotifications(
+      new TicketStatusChangedDomainEvent({
+        aggregateId: "t1",
+        actorId: REQUESTER,
+        from: "closed",
+        to: "open"
+      }),
+      context({
+        assignment: {
+          mode: "none",
+          departmentId: null,
+          memberIds: [],
+          assignedBy: null,
+          ownerId: null,
+          collaboratorIds: [],
+          claimedAt: null
+        }
+      })
+    );
+    expect(reopened).toMatchObject([
+      { type: "reopened_unclaimed", employeeIds: ["handler-1", "handler-2"] }
+    ]);
+  });
+
+  it("đổi trạng thái không có trong bảng quy tắc (vd chờ bổ sung → đang xử lý) thì không báo", () => {
     const event = new TicketStatusChangedDomainEvent({
       aggregateId: "t1",
       actorId: OWNER,
-      from: "in_progress",
-      to: "on_hold"
+      from: "waiting_info",
+      to: "in_progress"
     });
     expect(planNotifications(event, context())).toEqual([]);
   });
@@ -590,7 +686,12 @@ describe("buildListFilter", () => {
     expect(all.$or).toEqual(
       expect.arrayContaining([
         { created_by: ME },
-        { status: "open", "assignment.owner_id": null, "assignment.member_ids": ME }
+        // giao riêng cho tôi, chưa có chủ trì: còn tính khi đang chờ bổ sung / tạm hoãn (chỉ loại đã đóng / huỷ)
+        {
+          status: { $nin: ["closed", "cancelled"] },
+          "assignment.owner_id": null,
+          "assignment.member_ids": ME
+        }
       ])
     );
     expect(tabFilter({ tab: "my", scope: "created" }, actor(), now)).toEqual({ created_by: ME });
@@ -826,5 +927,60 @@ describe("request parsers", () => {
     });
     expect(contentTypeFor("evil.svg").inline).toBe(false);
     expect(contentTypeFor("file.xlsx").inline).toBe(false);
+  });
+});
+
+describe("recipientsWithTicketAccess — chỉ báo người mở được ticket", () => {
+  const props = (visibility: "normal" | "restricted") => ({
+    visibility,
+    createdBy: REQUESTER,
+    assignment: {
+      mode: "none" as const,
+      departmentId: null,
+      memberIds: [],
+      assignedBy: null,
+      ownerId: OWNER,
+      collaboratorIds: ["collab-1"],
+      claimedAt: null
+    }
+  });
+  // viewAll: người có quyền xem mọi ticket thường; restricted: người có ticket.view_restricted
+  const directory = (viewAll: string[], restricted: string[], colleagues: string[] = []) =>
+    ({
+      filterEmployeesWithPermission: async (ids: string[], action: string | string[]) => {
+        const allowed = action === "ticket.view_restricted" ? restricted : viewAll;
+        return ids.filter((id) => allowed.includes(id));
+      },
+      getOwnDepartmentTreeEmployeeIds: async () => colleagues
+    }) as any;
+
+  it("ticket hạn chế: người liên quan luôn mở được; người khác phải có ticket.view_restricted", async () => {
+    const allowed = await recipientsWithTicketAccess(directory([], ["boss"]), props("restricted"), [
+      REQUESTER,
+      OWNER,
+      "collab-1",
+      "boss",
+      "outsider"
+    ]);
+    expect([...allowed].sort()).toEqual(["boss", "collab-1", OWNER, REQUESTER].sort());
+  });
+
+  it("ticket thường: người xử lý (xem mọi ticket) và người cùng phòng người tạo mở được; người phòng khác thì không", async () => {
+    const allowed = await recipientsWithTicketAccess(
+      directory(["handler"], [], ["mate"]),
+      props("normal"),
+      ["handler", "mate", "outsider"]
+    );
+    expect([...allowed].sort()).toEqual(["handler", "mate"]);
+  });
+
+  it("alsoAllowed (trưởng phòng được giao) luôn mở được dù không có quyền riêng", async () => {
+    const allowed = await recipientsWithTicketAccess(
+      directory([], []),
+      props("restricted"),
+      ["dept-manager", "outsider"],
+      ["dept-manager"]
+    );
+    expect([...allowed]).toEqual(["dept-manager"]);
   });
 });

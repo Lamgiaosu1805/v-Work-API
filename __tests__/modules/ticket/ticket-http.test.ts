@@ -43,6 +43,14 @@ jest.mock("../../../src/core/authorization/require-permission.middleware", () =>
     }
     req.permissionAbility = { can: (code: string) => permissions.includes(code) };
     return next();
+  },
+  requireAnyPermission: (actions: string[]) => (req: any, res: any, next: any) => {
+    const permissions: string[] = JSON.parse(req.headers["x-perms"] ?? "[]");
+    if (!actions.some((action) => permissions.includes(action))) {
+      return res.status(403).json({ message: "Bạn không có quyền thực hiện thao tác này" });
+    }
+    req.permissionAbility = { can: (code: string) => permissions.includes(code) };
+    return next();
   }
 }));
 

@@ -2,6 +2,7 @@ import DepartmentModel from "../../../models/DepartmentModel";
 import UserDepartmentPositionModel from "../../../models/UserDepartmentPositionModel";
 import UserInfoModel from "../../../models/UserInfoModel";
 import { resolveEmployeeId } from "../../../core/authorization/resolve-employee-id";
+import { filterEmployeesWithPermission } from "../../../core/authorization/employee-permissions";
 import { DepartmentSummary, EmployeeSummary, TicketDirectory } from "../application/ports";
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -80,8 +81,14 @@ export class MongooseTicketDirectory implements TicketDirectory {
       departments.map((department) => [String(department._id), department.parent])
     );
 
+    // Phòng mình làm trưởng cũng tính (khớp getOwnDepartmentTreeEmployeeIds): trưởng phòng không có dòng thành viên ở
+    // phòng đó vẫn phải nhận / thấy ticket giao cho phòng mình quản lý.
+    const managed = departments
+      .filter((department) => department.manager && String(department.manager) === employeeId)
+      .map((department) => ({ department: department._id }));
+
     const result = new Set<string>();
-    memberships.forEach(({ department }) => {
+    [...memberships, ...managed].forEach(({ department }) => {
       let current: string | null = department ? String(department) : null;
       while (current && !result.has(current)) {
         result.add(current);
@@ -130,6 +137,14 @@ export class MongooseTicketDirectory implements TicketDirectory {
       .select("_id")
       .lean();
     return active.map((user: any) => String(user._id));
+  }
+
+  // eslint-disable-next-line class-methods-use-this
+  async filterEmployeesWithPermission(
+    employeeIds: string[],
+    action: string | string[]
+  ): Promise<string[]> {
+    return filterEmployeesWithPermission(employeeIds, action, "Ticket");
   }
 
   // eslint-disable-next-line class-methods-use-this

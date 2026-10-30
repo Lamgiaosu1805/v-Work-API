@@ -341,7 +341,7 @@ const memberships = await UserDepartmentPositionModel.find({ user: userInfo._id 
 | `ensureDeptFolders.js` | Startup (1 lần) | Tạo folder disk cho dept chưa có |
 | `weeklyReportJob.js` | Thứ 6 8:00 + 17:00 | Nhắc nộp + đánh dấu missing báo cáo tuần |
 | `customerCareJob.js` | Mỗi phút + 00:05 | Quy định 183A: quét SLA chăm sóc khách (cảnh báo/thu hồi) + phân khách từ kho chung; 00:05 thu hồi khách của Sale nghỉ việc/bị khoá. Xem `docs/CRM-CUSTOMER-CARE-SLA-PLAN.md` |
-| `ticketSweepJob.js` | Mỗi 5 phút | Ticket hỗ trợ: tự đóng ticket quá hạn (đã xử lý không xác nhận / chờ bổ sung không phản hồi) + nhắc 1 lần. Cảnh báo vàng KHÔNG nằm ở cron (chỉ là mốc `alert_at`). Khoá Redis có tiền tố môi trường |
+| `ticketSweepJob.js` | Mỗi 5 phút | Ticket hỗ trợ: tự đóng ticket quá hạn (đã xử lý không xác nhận / chờ bổ sung không phản hồi) + nhắc 1 lần. Ticket Khẩn / Cao chưa ai nhận đã vàng thì nhắc người phụ trách 1 lần mỗi mốc `alert_at`; việc bôi vàng không nằm ở cron (chỉ là mốc `alert_at`). Khoá Redis có tiền tố môi trường |
 
 Tất cả cron dùng `node-cron`. Múi giờ server: `Asia/Ho_Chi_Minh` (set ở đầu `index.js`).
 

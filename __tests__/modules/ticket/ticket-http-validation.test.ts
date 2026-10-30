@@ -53,6 +53,10 @@ jest.mock("../../../src/core/authorization/require-permission.middleware", () =>
   requirePermission: () => (req: any, _res: any, next: any) => {
     req.permissionAbility = { can: () => true };
     next();
+  },
+  requireAnyPermission: () => (req: any, _res: any, next: any) => {
+    req.permissionAbility = { can: () => true };
+    next();
   }
 }));
 
@@ -157,6 +161,18 @@ describe("POST /tickets/:id/close", () => {
       expect.objectContaining({ code: "solved", note: "xong" }),
       undefined
     );
+  });
+});
+
+describe("trường chữ sai kiểu", () => {
+  it("note / reason / description không phải chuỗi → 400 (không để rơi thành 500)", async () => {
+    const close = (body: object) => request(app).post(`/tickets/${TICKET}/close`).send(body);
+    expect((await close({ code: "solved", note: 5 })).status).toBe(400);
+    expect((await close({ code: "solved", note: { a: 1 } })).status).toBe(400);
+    const hold = (body: object) => request(app).post(`/tickets/${TICKET}/hold`).send(body);
+    expect((await hold({ reason: ["x"] })).status).toBe(400);
+    const edit = (body: object) => request(app).patch(`/tickets/${TICKET}`).send(body);
+    expect((await edit({ description: 123 })).status).toBe(400);
   });
 });
 

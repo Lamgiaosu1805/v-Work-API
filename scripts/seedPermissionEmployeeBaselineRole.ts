@@ -66,6 +66,11 @@ const BASELINE_GRANTS: PermissionGrantDoc[] = [
     dataScopePolicyCode: "SHARED_FOLDER_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
+  {
+    permissionCode: "handbook_assistant.use",
+    dataScopePolicyCode: "HANDBOOK_ASSISTANT_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
   // Ticket hỗ trợ nội bộ: mọi nhân viên tạo, xem và nhận được ticket thường (chốt 23/10/2026). Muốn thu
   // hẹp chỉ cho IT nhận thì bỏ ticket.handle khỏi role này và gán cho role IT.
   {

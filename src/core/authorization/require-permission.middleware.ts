@@ -21,7 +21,9 @@ declare global {
   }
 }
 
-async function loadRules(employeeId: string): Promise<RawCaslRule[]> {
+// Nạp rule quyền của nhân viên (cache Redis không hết hạn, xem invalidate-permission-cache). Export để
+// kiểm tra quyền ngoài Express (socket) qua can-employee.ts mà vẫn dùng chung cache.
+export async function loadRules(employeeId: string): Promise<RawCaslRule[]> {
   const cacheKey = buildPermissionCacheKey(employeeId);
 
   try {

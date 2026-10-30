@@ -521,6 +521,7 @@ tương ứng với API màn đó cần gọi — không cần permission riêng
 | KpiMetric | kpi_metric.delete | STRUCTURAL | |
 | PrintJob | print_job.view | READ | status/history/stats |
 | PrintJob | print_job.create | WRITE | |
+| HandbookAssistant | handbook_assistant.use | WRITE | Trợ lý Nội quy — REST `/handbook-assistant/*` + socket `handbook:ask`; grant trong `EMPLOYEE_BASELINE` |
 
 *CRM*
 

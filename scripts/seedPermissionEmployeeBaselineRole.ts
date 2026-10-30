@@ -71,8 +71,9 @@ const BASELINE_GRANTS: PermissionGrantDoc[] = [
     dataScopePolicyCode: "HANDBOOK_ASSISTANT_ALL_COMPANY",
     fieldScopePolicyCode: null
   },
-  // Ticket hỗ trợ nội bộ: mọi nhân viên tạo, xem và nhận được ticket thường (chốt 23/10/2026). Muốn thu
-  // hẹp chỉ cho IT nhận thì bỏ ticket.handle khỏi role này và gán cho role IT.
+  // Ticket hỗ trợ nội bộ: mọi nhân viên tạo và xem được ticket (chỉ ticket của mình và người cùng phòng — phạm vi do
+  // module ticket quyết định). Quyền NHẬN / XỬ LÝ (ticket.handle) KHÔNG nằm ở role này (chốt 30/10/2026): chỉ người
+  // được gán role WORKPLACE_TICKET_HANDLER / _STAFF / _MANAGER (seedPermissionTicketRoles.ts).
   {
     permissionCode: "ticket.view",
     dataScopePolicyCode: "TICKET_ALL_COMPANY",
@@ -80,11 +81,6 @@ const BASELINE_GRANTS: PermissionGrantDoc[] = [
   },
   {
     permissionCode: "ticket.create",
-    dataScopePolicyCode: "TICKET_ALL_COMPANY",
-    fieldScopePolicyCode: null
-  },
-  {
-    permissionCode: "ticket.handle",
     dataScopePolicyCode: "TICKET_ALL_COMPANY",
     fieldScopePolicyCode: null
   }

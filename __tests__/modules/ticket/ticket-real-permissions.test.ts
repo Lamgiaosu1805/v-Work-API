@@ -139,7 +139,11 @@ beforeAll(async () => {
   await makePerson("nobody", []);
   await makePerson("it", [BASE, "WORKPLACE_TICKET_STAFF"], deptIt, position);
   await makePerson("itLead", [BASE, "DEPT_LEAD", "WORKPLACE_TICKET_MANAGER"], deptIt, position);
-  await makePerson("itMember", [BASE], deptIt, position);
+  await makePerson("itMember", [BASE, "WORKPLACE_TICKET_STAFF"], deptIt, position);
+  await makePerson("deptLead", [BASE, "DEPT_LEAD"], deptIt, position);
+  await makePerson("employee", [BASE], deptIt, position);
+  await makePerson("saleMate", [BASE], deptSale, position);
+  await makePerson("accountant", [BASE, "WORKPLACE_TICKET_HANDLER"], deptSale, position);
   await makePerson("exec", [BASE, "COMPANY_EXECUTIVE"], dept, position);
   await makePerson("admin", ["PERMISSION_ADMIN"], dept, position);
 
@@ -194,12 +198,28 @@ describe("quyền thật từ các role đã seed", () => {
     await get("nobody", "/tickets/meta").expect(403);
   });
 
-  it("nhân viên (EMPLOYEE_BASELINE): tạo, xem, nhận được ticket; không vào được cấu hình", async () => {
+  it("nhân viên (EMPLOYEE_BASELINE): tạo, xem được ticket nhưng không nhận / xử lý được; không vào được cấu hình", async () => {
     const ticket = await create("sale");
-    await get("itMember", "/tickets?tab=all").expect(200);
+    await get("sale", "/tickets?tab=all").expect(200);
+    await post("sale", `/tickets/${ticket.id}/claim`).expect(403);
     await post("itMember", `/tickets/${ticket.id}/claim`).expect(200);
     await get("sale", "/tickets/config/products").expect(403);
     await get("sale", "/tickets/config/settings").expect(403);
+  });
+
+  it("người xử lý ở đơn vị khác (WORKPLACE_TICKET_HANDLER): nhận được ticket nhưng không giao phòng ban, không xem ticket hạn chế / file nhạy cảm", async () => {
+    const ticket = await create("sale");
+    await post("accountant", `/tickets/${ticket.id}/claim`).expect(200);
+
+    const me = (await get("accountant", "/tickets/meta").expect(200)).body.data.me;
+    expect(me).toMatchObject({
+      canAssignDepartment: false,
+      canAssignMember: false,
+      canManage: false,
+      canViewRestricted: false,
+      canViewSensitive: false
+    });
+    await get("accountant", "/tickets/config/products").expect(403);
   });
 
   it("meta phản ánh đúng quyền từng vai trò", async () => {
@@ -209,9 +229,14 @@ describe("quyền thật từ các role đã seed", () => {
       canAssignMember: false,
       canManage: false,
       canViewRestricted: false,
-      canViewSensitive: false
+      canViewSensitive: false,
+      canViewAll: false
     });
+    expect(await me("deptLead")).toMatchObject({ canAssignMember: true, canViewAll: false });
+    expect(await me("accountant")).toMatchObject({ canViewAll: true });
     expect(await me("it")).toMatchObject({
+      canViewAll: true,
+      canAssignDepartment: true,
       canViewRestricted: true,
       canViewSensitive: true,
       canManage: false
@@ -227,6 +252,37 @@ describe("quyền thật từ các role đã seed", () => {
       canManage: true,
       canViewRestricted: true
     });
+  });
+
+  it("phạm vi xem ticket thường: nhân viên chỉ thấy của mình và người cùng phòng; người xử lý thấy hết", async () => {
+    const ticket = await create("sale"); // phòng Kinh doanh
+
+    // người cùng phòng thấy; người phòng khác (IT) không thấy ở danh sách lẫn chi tiết
+    await get("saleMate", `/tickets/${ticket.id}`).expect(200);
+    await get("employee", `/tickets/${ticket.id}`).expect(404);
+    await get("deptLead", `/tickets/${ticket.id}`).expect(404);
+    const listed = async (key: string) =>
+      (await get(key, "/tickets?tab=all").expect(200)).body.data.map((item: any) => item.id);
+    expect(await listed("saleMate")).toContain(ticket.id);
+    expect(await listed("employee")).not.toContain(ticket.id);
+    expect(await listed("deptLead")).not.toContain(ticket.id);
+
+    // người xử lý (kể cả đơn vị khác IT) và quản lý thấy hết
+    await get("accountant", `/tickets/${ticket.id}`).expect(200);
+    await get("it", `/tickets/${ticket.id}`).expect(200);
+    await get("exec", `/tickets/${ticket.id}`).expect(200);
+    expect(await listed("accountant")).toContain(ticket.id);
+
+    // giao cho phòng IT thì thành viên phòng IT thấy được dù không cùng phòng người tạo
+    await post("exec", `/tickets/${ticket.id}/assign`)
+      .send({ mode: "department", departmentId: String(deptIt._id) })
+      .expect(200);
+    await get("employee", `/tickets/${ticket.id}`).expect(200);
+
+    // ticket của chính mình luôn thấy; ticket cùng phòng nhưng người khác tạo ở phòng khác thì không
+    const mine = await create("employee");
+    await get("employee", `/tickets/${mine.id}`).expect(200);
+    await get("saleMate", `/tickets/${mine.id}`).expect(404);
   });
 
   it("ticket hạn chế (cần tờ trình): IT xem được, nhân viên thường không thấy; file CCCD chỉ IT mở được", async () => {
@@ -245,7 +301,7 @@ describe("quyền thật từ các role đã seed", () => {
         .expect(201)
     ).body.data;
 
-    await get("itMember", `/tickets/${restricted.id}`).expect(404);
+    await get("employee", `/tickets/${restricted.id}`).expect(404);
     const asIt = await get("it", `/tickets/${restricted.id}`).expect(200);
     expect(asIt.body.data.attachments[0].canOpen).toBe(true);
 
@@ -263,7 +319,7 @@ describe("quyền thật từ các role đã seed", () => {
         .attach("files", Buffer.from("cccd"), "cccd.png")
         .expect(201)
     ).body.data;
-    const forMember = await get("itMember", `/tickets/${normal.id}`).expect(200);
+    const forMember = await get("saleMate", `/tickets/${normal.id}`).expect(200);
     expect(forMember.body.data.attachments[0]).toMatchObject({ canOpen: false, name: null });
     const forIt = await get("it", `/tickets/${normal.id}`).expect(200);
     expect(forIt.body.data.attachments[0].canOpen).toBe(true);
@@ -279,20 +335,75 @@ describe("quyền thật từ các role đã seed", () => {
     await post("exec", `/tickets/${ticket.id}/assign`)
       .send(body("department", { departmentId: String(deptIt._id) }))
       .expect(200);
-    await post("itLead", `/tickets/${ticket.id}/assign`)
+    await post("deptLead", `/tickets/${ticket.id}/assign`)
       .send(body("department", { departmentId: String(deptIt._id) }))
-      .expect(403); // trưởng bộ phận không giao cả phòng
+      .expect(403); // trưởng bộ phận (chỉ DEPT_LEAD) không giao cả phòng
+    await post("it", `/tickets/${ticket.id}/assign`)
+      .send(body("department", { departmentId: String(deptSale._id) }))
+      .expect(200); // nhân viên hỗ trợ (IT) chuyển việc nghiệp vụ về phòng chủ trì
 
+    // Trưởng bộ phận chỉ thấy ticket được giao cho phòng mình (không thấy ticket chưa giao của phòng khác)
     const other = await create("sale");
-    await post("itLead", `/tickets/${other.id}/assign`)
+    await post("deptLead", `/tickets/${other.id}/assign`)
+      .send(body("members", { memberIds: [people.itMember.employeeId] }))
+      .expect(404);
+    await post("exec", `/tickets/${other.id}/assign`)
+      .send(body("department", { departmentId: String(deptIt._id) }))
+      .expect(200);
+    await post("deptLead", `/tickets/${other.id}/assign`)
       .send(body("members", { memberIds: [people.sale.employeeId] })) // người phòng Kinh doanh
       .expect(403);
-    await post("itLead", `/tickets/${other.id}/assign`)
+    await post("deptLead", `/tickets/${other.id}/assign`)
       .send(body("members", { memberIds: [people.itMember.employeeId, people.it.employeeId] }))
       .expect(200);
     // người ngoài danh sách được giao thì không nhận được
     await post("exec", `/tickets/${other.id}/claim`).expect(403);
     await post("itMember", `/tickets/${other.id}/claim`).expect(200);
+  });
+
+  it("ban lãnh đạo (manage, không có handle) đóng hộ được nhưng không nhận / trả lại được", async () => {
+    const ticket = await create("sale");
+    await post("exec", `/tickets/${ticket.id}/claim`).expect(403);
+    await post("exec", `/tickets/${ticket.id}/release`).send({ note: "x" }).expect(403);
+    await post("exec", `/tickets/${ticket.id}/close`)
+      .send({ code: "not_a_bug", note: "Hệ thống đúng nghiệp vụ" })
+      .expect(200);
+    // nhân viên thường (không handle, không manage) vẫn bị chặn ở route
+    const other = await create("sale");
+    await post("sale", `/tickets/${other.id}/close`).send({ code: "solved" }).expect(403);
+  });
+
+  it("giao việc cho người chưa có ticket.handle bị từ chối ngay (400), người có quyền thì giao được", async () => {
+    const ticket = await create("sale");
+    await post("exec", `/tickets/${ticket.id}/assign`)
+      .send({ mode: "department", departmentId: String(deptIt._id) })
+      .expect(200);
+
+    // trưởng bộ phận giao cho nhân viên phòng mình nhưng người đó chỉ có role nhân viên
+    await post("deptLead", `/tickets/${ticket.id}/assign`)
+      .send({ mode: "members", memberIds: [people.employee.employeeId] })
+      .expect(400);
+    await post("deptLead", `/tickets/${ticket.id}/assign`)
+      .send({ mode: "members", memberIds: [people.itMember.employeeId] })
+      .expect(200);
+
+    // ô chọn người giao chỉ gợi ý người có quyền xử lý
+    const names = (
+      await get("exec", "/tickets/directory/employees?assignable=1&q=").expect(200)
+    ).body.data.map((item: any) => item.fullName);
+    expect(names).toContain("itMember");
+    expect(names).not.toContain("employee");
+  });
+
+  it("tìm nhân viên không để giao việc (nhân sự liên quan, @nhắc): nhân viên thường tìm được mọi người", async () => {
+    const found = async (key: string, q: string) =>
+      (await get(key, `/tickets/directory/employees?q=${q}`).expect(200)).body.data.map(
+        (item: any) => item.fullName
+      );
+    // người không có ticket.handle vẫn tìm thấy được (chỉ ô chọn người GIAO VIỆC mới giới hạn theo quyền xử lý)
+    expect(await found("sale", "employee")).toContain("employee");
+    expect(await found("employee", "itMember")).toContain("itMember");
+    expect(await found("sale", "NV-employee")).toContain("employee");
   });
 
   it("giao cho phòng ban: người phòng con (IT thuộc Khối CN) nhận được, người phòng khác không", async () => {

@@ -4,8 +4,8 @@ const redis = require("../config/redis");
 const { TicketSweepService } = require("../modules/ticket");
 
 // Ticket hỗ trợ nội bộ — tự đóng ticket quá hạn (đã xử lý không xác nhận / chờ bổ sung không phản hồi)
-// và nhắc 1 lần. Chạy mỗi 5 phút. Cảnh báo vàng KHÔNG nằm ở đây (chỉ là mốc alert_at so với giờ hiện tại
-// khi đọc). Redis lock có tiền tố môi trường để test/live dùng chung Redis không tranh khoá của nhau, và
+// và nhắc 1 lần; ticket Khẩn / Cao chưa ai nhận đã vàng thì nhắc người phụ trách 1 lần cho mỗi mốc alert_at.
+// Chạy mỗi 5 phút. Việc BÔI VÀNG thì không nằm ở đây (chỉ là mốc alert_at so với giờ hiện tại khi đọc). Redis lock có tiền tố môi trường để test/live dùng chung Redis không tranh khoá của nhau, và
 // release nguyên tử (chỉ xoá khoá nếu còn đúng token của mình).
 
 const TZ = "Asia/Ho_Chi_Minh";
@@ -34,7 +34,7 @@ async function withLock(key, ttlMs, fn) {
 async function runTicketSweep() {
   return withLock(LOCK_KEY, LOCK_TTL_MS, async () => {
     const result = await new TicketSweepService().run();
-    if (result.autoClosed || result.reminded) {
+    if (result.autoClosed || result.reminded || result.unclaimedAlerted) {
       console.log("[Ticket]", JSON.stringify(result));
     }
     return result;

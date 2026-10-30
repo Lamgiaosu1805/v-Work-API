@@ -4,10 +4,12 @@ import isEqual from "lodash/isEqual";
 import PermissionRoleModel, { PermissionGrantDoc } from "../src/models/PermissionRoleModel";
 
 // Role cho người xử lý ticket hỗ trợ (docs/TICKET-MODULE-PLAN.md mục 6 & 10.3). Ticket thuộc phân hệ
-// Workplace nên mã role theo quy ước WORKPLACE_*. Quyền tạo/xem/nhận ticket thường đã có ở role
-// EMPLOYEE_BASELINE; 2 role này chỉ cấp thêm quyền xem ticket hạn chế / file nhạy cảm (CCCD, tờ trình),
-// và quyền quản lý + cấu hình cho người quản lý ticket. CHỈ tạo định nghĩa role — gán cho từng người ở
-// màn Phân quyền.
+// Workplace nên mã role theo quy ước WORKPLACE_*. Quyền tạo/xem ticket có ở role EMPLOYEE_BASELINE; quyền
+// NHẬN / XỬ LÝ (ticket.handle) chỉ có ở 3 role này (chốt 30/10/2026). Role nhân viên hỗ trợ còn có quyền xem
+// ticket hạn chế / file nhạy cảm (CCCD, tờ trình) và giao ticket cho phòng ban (chuyển việc nghiệp vụ về
+// đơn vị chủ trì); role quản lý thêm quyền quản lý + cấu hình. CHỈ tạo định nghĩa role — gán cho từng người
+// ở màn Phân quyền. Người của đơn vị khác được giao ticket (vd Kế toán, QTRR, ĐVKD) chỉ cần role HANDLER (chỉ có
+// quyền nhận / xử lý, không xem được file nhạy cảm của ticket khác); IT dùng role STAFF.
 
 const grant = (permissionCode: string): PermissionGrantDoc => ({
   permissionCode,
@@ -15,14 +17,26 @@ const grant = (permissionCode: string): PermissionGrantDoc => ({
   fieldScopePolicyCode: null
 });
 
-const STAFF_GRANTS = [grant("ticket.view_restricted"), grant("ticket.view_sensitive")];
+const STAFF_GRANTS = [
+  grant("ticket.handle"),
+  grant("ticket.assign_department"),
+  grant("ticket.view_restricted"),
+  grant("ticket.view_sensitive")
+];
 
 const ROLES = [
+  {
+    code: "WORKPLACE_TICKET_HANDLER",
+    name: "Người xử lý ticket (đơn vị khác)",
+    description:
+      "Cộng thêm trên role Nhân viên: nhận / xử lý ticket (xem được mọi ticket thường của công ty và hàng chờ nhận). Không xem ticket hạn chế, không mở file nhạy cảm, không giao phòng ban. Dùng cho người của đơn vị khác IT được giao việc (Kế toán, QTRR, ĐVKD).",
+    grants: [grant("ticket.handle")]
+  },
   {
     code: "WORKPLACE_TICKET_STAFF",
     name: "Nhân viên hỗ trợ ticket",
     description:
-      "Cộng thêm trên role Nhân viên: xem ticket hạn chế (cần tờ trình) và file nhạy cảm (CCCD, chứng từ, tờ trình).",
+      "Cộng thêm trên role Nhân viên: nhận / xử lý ticket, giao ticket cho phòng ban, xem ticket hạn chế (cần tờ trình) và file nhạy cảm (CCCD, chứng từ, tờ trình).",
     grants: STAFF_GRANTS
   },
   {

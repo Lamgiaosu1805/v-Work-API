@@ -74,13 +74,35 @@ function finalize(planned: PlannedNotification[], actorId: string | null): Plann
     .filter((item) => item.employeeIds.length > 0);
 }
 
+// Người đang chờ nhận ticket chưa có chủ trì: người được giao đích danh, trưởng phòng được giao, người phụ trách.
+function waitingRecipients(context: PolicyContext): Array<string | null> {
+  const { assignment } = context.ticket.props;
+  return [
+    ...(assignment.mode === "members" ? assignment.memberIds : []),
+    ...(assignment.mode === "department" ? [context.departmentManagerId] : []),
+    ...context.responsibleIds
+  ];
+}
+
 function planStatusChange(
   event: TicketStatusChangedDomainEvent,
   label: string,
-  requester: string,
-  owner: string | null
+  context: PolicyContext
 ): PlannedNotification[] {
   const { from, to } = event;
+  const { props } = context.ticket;
+  const requester = props.createdBy;
+  const owner = props.assignment.ownerId;
+  // Huỷ ticket → báo người đang xử lý / đang được giao (người tạo là người huỷ nên không tự nhận).
+  if (to === "cancelled") {
+    const recipients = owner
+      ? [owner, ...props.assignment.collaboratorIds]
+      : [
+          ...(props.assignment.mode === "members" ? props.assignment.memberIds : []),
+          ...(props.assignment.mode === "department" ? [context.departmentManagerId] : [])
+        ];
+    return [plan("cancelled", recipients, "Ticket đã bị huỷ", label)];
+  }
   if (to === "resolved") {
     return [plan("resolved", [requester], "Ticket đã xử lý, vui lòng xác nhận", label)];
   }
@@ -96,9 +118,35 @@ function planStatusChange(
       )
     ];
   }
-  // Mở lại (từ resolved/closed về in_progress/open) → báo chủ trì.
+  // Mở lại (từ resolved/closed về in_progress/open) → báo chủ trì; về hàng chờ (chưa có chủ trì) → báo người đang chờ nhận.
   if ((from === "resolved" || from === "closed") && (to === "in_progress" || to === "open")) {
-    return [plan("reopened", [owner], "Ticket được mở lại", label)];
+    return [
+      plan("reopened", [owner], "Ticket được mở lại", label),
+      plan(
+        "reopened_unclaimed",
+        owner ? [] : waitingRecipients(context),
+        "Ticket được mở lại, chờ nhận",
+        label
+      )
+    ];
+  }
+  // Tạm hoãn / tiếp tục / quay về hàng chờ nhận (chủ trì trả lại, không còn ai) → báo người tạo.
+  if (to === "on_hold") {
+    return [plan("on_hold", [requester], "Ticket đang tạm hoãn", label)];
+  }
+  if (from === "on_hold" && to === "in_progress") {
+    return [plan("resumed", [requester], "Ticket tiếp tục được xử lý", label)];
+  }
+  if ((from === "in_progress" || from === "on_hold") && to === "open") {
+    return [
+      plan("returned_to_queue", [requester], "Ticket quay về hàng chờ nhận", label),
+      plan(
+        "returned_to_queue_unclaimed",
+        waitingRecipients(context),
+        "Ticket quay về hàng chờ nhận",
+        label
+      )
+    ];
   }
   return [];
 }
@@ -172,16 +220,21 @@ export function planNotifications(
     // người tạo bổ sung xong (TicketInfoSubmittedDomainEvent). Ticket tạo ra đã có chủ trì (giao đích danh kèm
     // chủ trì) thì không còn "chờ nhận" — nhóm xử lý được báo qua sự kiện giao việc.
     if (props.status !== "waiting_info" && !event.ownerAtCreation) {
+      // Người vừa được giao đích danh lúc tạo đã nhận thông báo "được giao" (sự kiện riêng) — không báo thêm lần nữa
+      const assigned = new Set<string>(
+        props.assignment.mode === "members" ? props.assignment.memberIds : []
+      );
+      const responsible = context.responsibleIds.filter((id) => !assigned.has(id));
       planned = TICKET_ESCALATED_URGENCIES.includes(event.urgency)
         ? [
             plan(
               `${event.urgency}_created`,
-              context.responsibleIds,
+              responsible,
               `Ticket mức ${URGENCY_LABELS[event.urgency]} mới`,
               label
             )
           ]
-        : [plan("created", context.responsibleIds, "Có ticket mới thuộc phụ trách của bạn", label)];
+        : [plan("created", responsible, "Có ticket mới thuộc phụ trách của bạn", label)];
     }
   } else if (event instanceof TicketUrgencyRaisedDomainEvent) {
     // Ticket chưa ai nhận bị nâng lên Khẩn / Cao → báo lại người phụ trách (gồm danh sách mặc định). Nâng lên
@@ -247,7 +300,7 @@ export function planNotifications(
       planned = [plan("approval_invalid", [requester], "Tờ trình chưa hợp lệ, cần bổ sung", label)];
     }
   } else if (event instanceof TicketStatusChangedDomainEvent) {
-    planned = planStatusChange(event, label, requester, owner);
+    planned = planStatusChange(event, label, context);
   }
 
   const actorId = (event as unknown as { actorId?: string | null }).actorId ?? null;

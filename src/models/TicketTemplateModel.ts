@@ -17,7 +17,9 @@ const FieldSchema = new Schema(
     required: { type: Boolean, default: false },
     placeholder: { type: String, default: "" },
     help: { type: String, default: "" },
-    options: [{ type: String }]
+    options: [{ type: String }],
+    // Chỉ hiện / bắt buộc khi sản phẩm của ticket có app_code nằm trong danh sách (vd ["tikluy"]). Rỗng = mọi sản phẩm.
+    app_codes: [{ type: String }]
   },
   { _id: false }
 );

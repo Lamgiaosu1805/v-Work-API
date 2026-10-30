@@ -21,19 +21,38 @@ interface MulterFileLike {
 
 // Đọc/kiểm tra dữ liệu request (thuần, không đụng DB) — controller chỉ việc gọi.
 
+// Các trường chữ mà domain gọi .trim() — gửi số / mảng / đối tượng vào đây sẽ thành lỗi 500, nên chặn ở cổng là 400.
+const TEXT_FIELDS = ["note", "reason", "description", "title", "body", "actionTaken"];
+
+function assertTextFields(payload: Record<string, any>): void {
+  const check = (container: Record<string, any> | null | undefined, key: string) => {
+    const value = container?.[key];
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      throw new ArgumentInvalidException(`Trường "${key}" phải là chuỗi ký tự`);
+    }
+  };
+  TEXT_FIELDS.forEach((key) => check(payload, key));
+  check(payload.followUp, "note");
+}
+
 // Request multipart gửi JSON trong field "payload" (kèm file); request JSON thường dùng thẳng body.
 export function readPayload(req: Request): Record<string, any> {
   const body = (req.body ?? {}) as Record<string, any>;
+  let payload: Record<string, any> = body;
   if (typeof body.payload === "string") {
     try {
       const parsed = JSON.parse(body.payload);
-      if (parsed && typeof parsed === "object") return parsed;
-    } catch {
+      if (!parsed || typeof parsed !== "object") {
+        throw new ArgumentInvalidException("Dữ liệu gửi lên không hợp lệ");
+      }
+      payload = parsed;
+    } catch (error) {
+      if (error instanceof ArgumentInvalidException) throw error;
       throw new ArgumentInvalidException("Dữ liệu gửi lên không đúng định dạng JSON");
     }
-    throw new ArgumentInvalidException("Dữ liệu gửi lên không hợp lệ");
   }
-  return body;
+  assertTextFields(payload);
+  return payload;
 }
 
 export function toDate(value: unknown, name = "Ngày"): Date | null {

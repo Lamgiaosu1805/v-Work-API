@@ -13,6 +13,7 @@ import {
 import {
   TicketAlreadyClaimedError,
   TicketForbiddenError,
+  TicketInvalidTransitionError,
   TicketNotFoundError,
   TicketVersionConflictError
 } from "../domain/ticket.errors";
@@ -40,7 +41,8 @@ import { NotificationServiceTicketNotifier } from "../infrastructure/ticket-noti
 import { MongooseSchedulerLoader } from "../infrastructure/ticket-scheduler.loader";
 import { TicketConfigReader } from "./ticket-config.types";
 import { TicketDirectory, TicketNotifier } from "./ports";
-import { authorizeAssignment } from "./ticket-assignment-authorization";
+import { assertCanHandle, authorizeAssignment } from "./ticket-assignment-authorization";
+import { recipientsWithTicketAccess } from "./ticket-recipient-access";
 import { planMessageNotifications } from "./ticket-notification.policy";
 import { resolveResponsibleIds } from "./ticket-responsible";
 import { refreshSchedule, SchedulerLoader, TicketScheduler } from "./ticket-scheduling";
@@ -174,8 +176,15 @@ export class TicketCommandService {
 
     const customFields = cmd.customFields ?? {};
     if (template) {
+      // Trường gắn app_code (vd mã khoản vay chỉ cho VNFITE) chỉ bắt buộc với sản phẩm tương ứng.
       const missingFields = template.fields
-        .filter((field) => field.required && isEmptyValue(customFields[field.key]))
+        .filter(
+          (field) =>
+            field.required &&
+            (!field.appCodes?.length ||
+              (product.appCode && field.appCodes.includes(product.appCode))) &&
+            isEmptyValue(customFields[field.key])
+        )
         .map((field) => field.label);
       if (missingFields.length) {
         throw new ArgumentInvalidException(`Vui lòng nhập: ${missingFields.join(", ")}`);
@@ -205,6 +214,13 @@ export class TicketCommandService {
       relatedEmployeeId = employee.id;
     }
 
+    // Ticket liên quan khi tạo phải có thật và người tạo xem được (không liên kết tới ticket ẩn / không tồn tại)
+    const relatedTicketIds = [...new Set((cmd.relatedTicketIds ?? []).map(String))];
+    if (relatedTicketIds.length > 20) {
+      throw new ArgumentInvalidException("Chỉ liên kết tối đa 20 ticket liên quan");
+    }
+    await this.assertTicketsVisible(actor, relatedTicketIds);
+
     const approvalRequired = Boolean(template?.requiresApproval);
     const code = await this.deps.nextCode(now);
     const ticket = TicketEntity.create(
@@ -230,7 +246,7 @@ export class TicketCommandService {
             }
           : null,
         assignment: cmd.assignment ? { ...cmd.assignment, assignedBy: actor.employeeId } : null,
-        relatedTicketIds: cmd.relatedTicketIds
+        relatedTicketIds
       },
       now
     );
@@ -312,6 +328,7 @@ export class TicketCommandService {
   ) {
     const [employee] = await this.deps.directory.getEmployees([employeeId]);
     if (!employee) throw new ArgumentInvalidException("Nhân viên không tồn tại");
+    await assertCanHandle(this.deps.directory, [employee], [employee.id]);
     return this.execute(
       ticketId,
       actor,
@@ -371,10 +388,16 @@ export class TicketCommandService {
   async submitInfo(
     actor: TicketActor,
     ticketId: string,
-    input: { approvalReference?: { number: string; date?: Date | null; signer?: string } | null },
+    input: {
+      approvalReference?: { number: string; date?: Date | null; signer?: string } | null;
+      // Nội dung người tạo nhập để đáp lại yêu cầu (mô tả rõ hơn, mã khoản vay...): lưu thành tin nhắn trong
+      // phần trao đổi để nhóm xử lý đọc ngay tại ticket.
+      note?: string;
+    },
     files: UploadedTicketFile[] = [],
     expectedVersion?: number
   ) {
+    const note = (input.note ?? "").trim();
     let isSensitive: (kind: string) => boolean = (kind) => DEFAULT_SENSITIVE_KINDS.includes(kind);
     return this.execute(
       ticketId,
@@ -384,6 +407,18 @@ export class TicketCommandService {
         // (CCCD, chứng từ, tờ trình) luôn là nhạy cảm dù người dùng để loại là "Khác".
         isSensitive = await this.sensitivityRule(ticket.getProps());
         const requested = ticket.getProps().infoRequest;
+        // Mục chỉ trả lời được bằng chữ (mô tả, mã khoản vay, SĐT...) thì bắt buộc có nội dung bổ sung — không chỉ
+        // dựa vào web, vì API gọi thẳng vẫn phải bị chặn.
+        const textItems = (requested?.items ?? []).filter(
+          (item) =>
+            !item.fulfilled &&
+            INFO_REQUEST_CATALOG.find((entry) => entry.key === item.key)?.input === "text"
+        );
+        if (textItems.length && !note) {
+          throw new ArgumentInvalidException(
+            `Vui lòng nhập nội dung bổ sung: ${textItems.map((item) => item.label).join(", ")}`
+          );
+        }
         const approvalItem = requested?.items.find(
           (item) => item.key === APPROVAL_DOCUMENT_ITEM_KEY && !item.fulfilled
         );
@@ -415,6 +450,14 @@ export class TicketCommandService {
       },
       { expectedVersion },
       async (saved) => {
+        if (note) {
+          await this.deps.messages.create({
+            ticketId: saved.id,
+            authorId: actor.employeeId,
+            body: note,
+            mentionIds: []
+          });
+        }
         await this.deps.attachments.createMany(
           files.map((file) => ({
             ticketId: saved.id,
@@ -569,10 +612,14 @@ export class TicketCommandService {
     note = "",
     expectedVersion?: number
   ) {
-    if (patch.productId && !(await this.deps.config.findProduct(String(patch.productId)))) {
-      throw new ArgumentInvalidException("Sản phẩm không hợp lệ");
-    }
-    if (patch.categoryId && !(await this.deps.config.findCategory(String(patch.categoryId)))) {
+    const product = patch.productId
+      ? await this.deps.config.findProduct(String(patch.productId))
+      : null;
+    if (patch.productId && !product) throw new ArgumentInvalidException("Sản phẩm không hợp lệ");
+    const category = patch.categoryId
+      ? await this.deps.config.findCategory(String(patch.categoryId))
+      : null;
+    if (patch.categoryId && !category) {
       throw new ArgumentInvalidException("Loại yêu cầu không hợp lệ");
     }
     return this.execute(
@@ -580,6 +627,13 @@ export class TicketCommandService {
       actor,
       (ticket, { now }) => {
         const props = ticket.getProps();
+        // Đổi sang sản phẩm / loại đã tắt thì chặn (như lúc tạo); giữ nguyên giá trị cũ của ticket thì không sao.
+        if (product && !product.isActive && String(patch.productId) !== props.productId) {
+          throw new ArgumentInvalidException("Sản phẩm không hợp lệ");
+        }
+        if (category && !category.isActive && String(patch.categoryId) !== props.categoryId) {
+          throw new ArgumentInvalidException("Loại yêu cầu không hợp lệ");
+        }
         if (isRequester(props, actor)) {
           ticket.edit(patch, "requester", actor.employeeId, note, now);
         } else if (canActAsHandler(props, actor)) {
@@ -657,7 +711,7 @@ export class TicketCommandService {
     const ticket = await this.load(ticketId, actor);
     const props = ticket.getProps();
     if (["closed", "cancelled"].includes(props.status)) {
-      throw new TicketForbiddenError("Ticket đã kết thúc, không thể trao đổi thêm");
+      throw new TicketInvalidTransitionError("Ticket đã kết thúc, không thể trao đổi thêm");
     }
     const isSensitive = await this.sensitivityRule(props);
 
@@ -745,16 +799,29 @@ export class TicketCommandService {
         },
         props.visibility === "restricted"
       );
+      // Người được @nhắc / người phụ trách mà không mở được ticket thì không báo (tránh link chết và lộ nội dung)
+      const allowed = await recipientsWithTicketAccess(
+        this.deps.directory,
+        props,
+        planned.flatMap((item) => item.employeeIds),
+        [departmentManagerId]
+      );
       await Promise.all(
-        planned.map((item) =>
-          this.deps.notifier.notify({
-            employeeIds: item.employeeIds,
-            title: item.title,
-            body: item.body,
-            type: item.type,
-            ticketId
-          })
-        )
+        planned
+          .map((item) => ({
+            ...item,
+            employeeIds: item.employeeIds.filter((id) => allowed.has(id))
+          }))
+          .filter((item) => item.employeeIds.length > 0)
+          .map((item) =>
+            this.deps.notifier.notify({
+              employeeIds: item.employeeIds,
+              title: item.title,
+              body: item.body,
+              type: item.type,
+              ticketId
+            })
+          )
       );
     } catch (error) {
       logger.error("Không gửi được thông báo tin nhắn ticket", { error, ticketId });
@@ -855,6 +922,17 @@ export class TicketCommandService {
     );
   }
 
+  private async assertTicketsVisible(actor: TicketActor, ticketIds: string[]) {
+    const found = await Promise.all(
+      ticketIds.map(async (id) =>
+        mongoose.isValidObjectId(id) ? this.deps.tickets.findOneById(id) : null
+      )
+    );
+    if (found.some((ticket) => !ticket || accessLevel(ticket.getProps(), actor) === "none")) {
+      throw new ArgumentInvalidException("Ticket liên quan không tồn tại");
+    }
+  }
+
   private async assertDuplicateTarget(
     actor: TicketActor,
     ticketId: string,
@@ -870,8 +948,13 @@ export class TicketCommandService {
       this.deps.tickets.findOneById(ticketId),
       this.deps.tickets.findOneById(String(duplicateOf))
     ]);
+    // Kiểm tra quyền xem ticket đang đóng TRƯỚC mọi kết luận về ticket gốc: nếu không, người không xem được ticket này
+    // vẫn dò được ticket có tồn tại và có trùng SĐT khách hay không qua mã lỗi 400 / 404.
+    if (!current || accessLevel(current.getProps(), actor) === "none") {
+      throw new TicketNotFoundError();
+    }
     // Ticket gốc hạn chế mà người đóng không xem được thì coi như không tồn tại (không lộ sự có mặt).
-    if (!current || !original || accessLevel(original.getProps(), actor) === "none") {
+    if (!original || accessLevel(original.getProps(), actor) === "none") {
       throw new TicketNotFoundError("Ticket gốc không tồn tại");
     }
 

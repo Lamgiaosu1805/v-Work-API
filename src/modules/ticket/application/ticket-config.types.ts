@@ -34,6 +34,8 @@ export interface TemplateFieldDef {
   placeholder: string;
   help: string;
   options: string[];
+  // Trường chỉ áp dụng cho sản phẩm có app_code trong danh sách; rỗng = mọi sản phẩm
+  appCodes: string[];
 }
 
 export interface TemplateDocumentDef {

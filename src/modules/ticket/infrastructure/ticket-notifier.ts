@@ -15,7 +15,15 @@ export function ticketUri(ticketId: string): string {
 
 export class NotificationServiceTicketNotifier implements TicketNotifier {
   // eslint-disable-next-line class-methods-use-this
-  async notify({ employeeIds, title, body = "", type, ticketId, push = true }: TicketNotification) {
+  async notify({
+    employeeIds,
+    title,
+    body = "",
+    type,
+    ticketId,
+    push = true,
+    strict = false
+  }: TicketNotification) {
     const uniqueIds = [...new Set(employeeIds.map(String))];
     if (!uniqueIds.length) return;
 
@@ -24,6 +32,7 @@ export class NotificationServiceTicketNotifier implements TicketNotifier {
       .lean()) as unknown as Array<{ id_account: unknown }>;
 
     // Mỗi người một thông báo; lỗi gửi cho 1 người không làm hỏng việc gửi cho người khác.
+    const failures: unknown[] = [];
     await Promise.all(
       accounts.map(async ({ id_account: accountId }) => {
         try {
@@ -38,9 +47,13 @@ export class NotificationServiceTicketNotifier implements TicketNotifier {
             push
           });
         } catch (error) {
+          failures.push(error);
           logger.error("Không gửi được thông báo ticket", { error, ticketId, type });
         }
       })
     );
+    if (strict && accounts.length > 0 && failures.length === accounts.length) {
+      throw failures[0];
+    }
   }
 }

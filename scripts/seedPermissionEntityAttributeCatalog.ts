@@ -691,6 +691,12 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
     fields: []
   },
   {
+    entity: "HandbookAssistant",
+    subjectAttributes: [],
+    resourceAttributes: [],
+    fields: []
+  },
+  {
     entity: "Transaction",
     subjectAttributes: [],
     resourceAttributes: [],
@@ -710,6 +716,12 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
   },
   {
     entity: "AppIntegration",
+    subjectAttributes: [],
+    resourceAttributes: [],
+    fields: []
+  },
+  {
+    entity: "Ticket",
     subjectAttributes: [],
     resourceAttributes: [],
     fields: []

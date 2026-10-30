@@ -1,0 +1,109 @@
+{
+  "note": "Bộ văn bản MẪU (dữ liệu giả cho dev/test, không phải nội quy thật của công ty)",
+  "suggestions": [
+    "Nghỉ phép năm được mấy ngày?",
+    "Đi muộn bị xử lý thế nào?",
+    "Quên chấm công phải làm gì?"
+  ],
+  "documents": [
+    {
+      "documentCode": "NOI_QUY",
+      "documentTitle": "Nội quy lao động (mẫu)",
+      "shortName": "Nội quy",
+      "sourceFileName": null,
+      "sourceSha256": null,
+      "articles": [
+        {
+          "articleIdx": 7,
+          "title": "Điều 7. Thời giờ làm việc",
+          "chapter": "",
+          "blocks": [
+            "1. Thời giờ làm việc từ Thứ Hai đến Thứ Sáu:",
+            "a) Buổi sáng: từ 08h00 đến 12h00;",
+            "b) Buổi chiều: từ 13h30 đến 17h30.",
+            "2. Thứ Bảy làm việc buổi sáng từ 08h00 đến 12h00 theo lịch luân phiên do Trưởng phòng sắp xếp.",
+            "3. Người lao động có nhu cầu làm việc linh hoạt phải được Trưởng phòng và Phòng Hành chính - Nhân sự chấp thuận bằng văn bản."
+          ],
+          "label": "Nội quy – Điều 7"
+        },
+        {
+          "articleIdx": 8,
+          "title": "Điều 8. Chấm công",
+          "chapter": "",
+          "blocks": [
+            "1. Người lao động chấm công trên ứng dụng vWork khi bắt đầu và khi kết thúc ngày làm việc.",
+            "2. Trường hợp quên chấm công, người lao động tạo đơn \"Giải trình chấm công\" trên vWork trong vòng 02 ngày làm việc kể từ ngày quên chấm công và được quản lý trực tiếp xác nhận.",
+            "3. Mỗi người lao động được giải trình quên chấm công tối đa 03 lần trong một tháng.",
+            "4. Nghiêm cấm chấm công hộ hoặc nhờ người khác chấm công hộ."
+          ],
+          "label": "Nội quy – Điều 8"
+        },
+        {
+          "articleIdx": 9,
+          "title": "Điều 9. Đi muộn, về sớm",
+          "chapter": "",
+          "blocks": [
+            "1. Người lao động có mặt sau 08h05 được tính là đi muộn; rời nơi làm việc trước 17h30 được tính là về sớm.",
+            "2. Trường hợp có việc riêng phải đi muộn, về sớm, người lao động tạo đơn xin phép trên vWork và được quản lý trực tiếp phê duyệt trước ít nhất 01 giờ.",
+            "3. Đi muộn, về sớm không xin phép được xử lý theo Bảng bậc xử lý vi phạm."
+          ],
+          "label": "Nội quy – Điều 9"
+        },
+        {
+          "articleIdx": 12,
+          "title": "Điều 12. Nghỉ phép năm",
+          "chapter": "",
+          "blocks": [
+            "1. Người lao động làm việc đủ 12 tháng được nghỉ phép năm 12 ngày làm việc, hưởng nguyên lương.",
+            "2. Người lao động làm việc chưa đủ 12 tháng được nghỉ phép năm theo tỷ lệ tương ứng với số tháng làm việc.",
+            "3. Cứ đủ 05 năm làm việc tại Công ty, số ngày nghỉ phép năm được tăng thêm 01 ngày.",
+            "4. Người lao động đăng ký nghỉ phép trên vWork trước ít nhất 03 ngày làm việc; nghỉ từ 03 ngày liên tục trở lên phải đăng ký trước ít nhất 07 ngày.",
+            "5. Ngày phép năm chưa sử dụng hết được chuyển sang năm sau và sử dụng đến hết Quý I."
+          ],
+          "label": "Nội quy – Điều 12"
+        },
+        {
+          "articleIdx": 13,
+          "title": "Điều 13. Nghỉ việc riêng có hưởng lương",
+          "chapter": "",
+          "blocks": [
+            "1. Kết hôn: nghỉ 03 ngày.",
+            "2. Con đẻ, con nuôi kết hôn: nghỉ 01 ngày.",
+            "3. Cha đẻ, mẹ đẻ, cha nuôi, mẹ nuôi; cha đẻ, mẹ đẻ, cha nuôi, mẹ nuôi của vợ hoặc chồng; vợ hoặc chồng; con đẻ, con nuôi chết: nghỉ 03 ngày."
+          ],
+          "label": "Nội quy – Điều 13"
+        }
+      ]
+    },
+    {
+      "documentCode": "BAC_PHAT",
+      "documentTitle": "Bảng bậc xử lý vi phạm (mẫu)",
+      "shortName": "Bậc phạt",
+      "sourceFileName": null,
+      "sourceSha256": null,
+      "articles": [
+        {
+          "articleIdx": 1,
+          "title": "Đi muộn, về sớm không xin phép",
+          "chapter": "",
+          "blocks": [
+            "- Lần 1 – 2 trong tháng: nhắc nhở.",
+            "- Lần 3 – 5 trong tháng: trừ 50% thưởng chuyên cần của tháng.",
+            "- Từ lần 6 trong tháng: không được hưởng thưởng chuyên cần của tháng và bị khiển trách bằng văn bản."
+          ],
+          "label": "Bậc phạt – Đi muộn"
+        },
+        {
+          "articleIdx": 2,
+          "title": "Quên chấm công không giải trình",
+          "chapter": "",
+          "blocks": [
+            "- Không giải trình hoặc giải trình quá hạn: ngày quên chấm công được tính thiếu công tương ứng với buổi không có dữ liệu chấm công.",
+            "- Quên chấm công quá 03 lần trong tháng: từ lần thứ 4 được xử lý như đi muộn không xin phép."
+          ],
+          "label": "Bậc phạt – Quên chấm công"
+        }
+      ]
+    }
+  ]
+}

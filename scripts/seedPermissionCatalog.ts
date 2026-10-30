@@ -594,6 +594,90 @@ const DEFINITIONS: PermissionDef[] = [
     actionKind: "WRITE",
     validDataScopePolicies: ["PRINT_JOB_ALL_COMPANY"]
   },
+  {
+    code: "handbook_assistant.use",
+    module: "workplace",
+    name: "Hỏi Trợ lý Nội quy (AI)",
+    entity: "HandbookAssistant",
+    actionKind: "WRITE",
+    validDataScopePolicies: ["HANDBOOK_ASSISTANT_ALL_COMPANY"]
+  },
+
+  // ---- Ticket hỗ trợ nội bộ (module ticket — docs/TICKET-MODULE-PLAN.md mục 10.3) ----
+  // Phạm vi ticket (người tạo / chủ trì / người được giao...) do domain tính theo từng ticket, nên chỉ
+  // có 1 data scope generic TICKET_ALL_COMPANY; permission chỉ quyết định "được làm loại thao tác nào".
+  {
+    code: "ticket.view",
+    module: "workplace",
+    name: "Xem ticket hỗ trợ",
+    entity: "Ticket",
+    actionKind: "READ",
+    validDataScopePolicies: ["TICKET_ALL_COMPANY"]
+  },
+  {
+    code: "ticket.create",
+    module: "workplace",
+    name: "Tạo ticket hỗ trợ",
+    entity: "Ticket",
+    actionKind: "WRITE",
+    validDataScopePolicies: ["TICKET_ALL_COMPANY"]
+  },
+  {
+    code: "ticket.handle",
+    module: "workplace",
+    name: "Nhận và xử lý ticket",
+    entity: "Ticket",
+    actionKind: "WRITE",
+    validDataScopePolicies: ["TICKET_ALL_COMPANY"]
+  },
+  {
+    code: "ticket.assign_department",
+    module: "workplace",
+    name: "Giao ticket cho phòng ban / người bất kỳ",
+    entity: "Ticket",
+    actionKind: "WRITE",
+    validDataScopePolicies: ["TICKET_ALL_COMPANY"]
+  },
+  {
+    code: "ticket.assign_member",
+    module: "workplace",
+    name: "Giao ticket cho người trong phòng mình",
+    entity: "Ticket",
+    actionKind: "WRITE",
+    validDataScopePolicies: ["TICKET_ALL_COMPANY"]
+  },
+  {
+    code: "ticket.manage",
+    module: "workplace",
+    name: "Quản lý ticket (đổi chủ trì, đóng hộ, sửa phân loại mọi ticket)",
+    entity: "Ticket",
+    actionKind: "STRUCTURAL",
+    validDataScopePolicies: ["TICKET_ALL_COMPANY"]
+  },
+  {
+    code: "ticket.view_restricted",
+    module: "workplace",
+    name: "Xem ticket hạn chế (cần tờ trình)",
+    entity: "Ticket",
+    actionKind: "READ",
+    validDataScopePolicies: ["TICKET_ALL_COMPANY"]
+  },
+  {
+    code: "ticket.view_sensitive",
+    module: "workplace",
+    name: "Xem file nhạy cảm của ticket (CCCD, chứng từ, tờ trình)",
+    entity: "Ticket",
+    actionKind: "READ",
+    validDataScopePolicies: ["TICKET_ALL_COMPANY"]
+  },
+  {
+    code: "ticket.config",
+    module: "workplace",
+    name: "Cấu hình ticket (sản phẩm, loại yêu cầu, mẫu, ngưỡng cảnh báo)",
+    entity: "Ticket",
+    actionKind: "STRUCTURAL",
+    validDataScopePolicies: ["TICKET_ALL_COMPANY"]
+  },
 
   // ==================== CRM ====================
   {

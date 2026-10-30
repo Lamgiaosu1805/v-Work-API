@@ -5,4 +5,7 @@ serviceAccountKey.json
 tests/
 dist/
 docs/exports/
+# Văn bản nội quy THẬT (manifest/PDF) — không commit
+scripts/handbook/private/
 
+uploads/ticket

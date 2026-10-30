@@ -122,6 +122,7 @@ const GENERIC_ALL_COMPANY_ENTITIES: Record<string, string> = {
   SHARED_FOLDER_AUDIT_LOG_ALL_COMPANY: "SharedFolderAuditLog",
   KPI_METRIC_ALL_COMPANY: "KpiMetric",
   PRINT_JOB_ALL_COMPANY: "PrintJob",
+  TICKET_ALL_COMPANY: "Ticket",
   AGENT_ALL_COMPANY: "Agent",
   CLAIM_PERIOD_ALL_COMPANY: "ClaimPeriod",
   CUSTOMER_CLAIM_REQUEST_ALL_COMPANY: "CustomerClaimRequest",
@@ -132,7 +133,8 @@ const GENERIC_ALL_COMPANY_ENTITIES: Record<string, string> = {
   SALE_OMICALL_PROFILE_ALL_COMPANY: "SaleOmicallProfile",
   HOTLINE_ADMIN_ALL_COMPANY: "HotlineAdmin",
   PERMISSION_SYSTEM_ALL_COMPANY: "PermissionSystem",
-  INTERNAL_GROUP_ALL_COMPANY: "InternalGroup"
+  INTERNAL_GROUP_ALL_COMPANY: "InternalGroup",
+  HANDBOOK_ASSISTANT_ALL_COMPANY: "HandbookAssistant"
 };
 
 const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [

@@ -489,6 +489,10 @@ export class TicketQueryService {
       infoRequestCatalog: INFO_REQUEST_CATALOG,
       resolutions: Object.entries(RESOLUTION_LABELS).map(([code, label]) => ({ code, label })),
       policy: {
+        // Ngưỡng "chưa ai nhận" theo mức khẩn (phút làm việc) = thời hạn tiếp nhận mà form tạo ticket gợi ý; kèm độ
+        // dài 1 ngày làm việc để web quy đổi ra giờ / ngày. Nhân viên thường không đọc được /config/settings.
+        workdayMinutes: settings.policy.workdayMinutes,
+        unclaimedMinutes: settings.policy.unclaimedMinutes,
         autoCloseResolvedDays: settings.policy.autoCloseResolvedDays,
         autoCloseWaitingInfoDays: settings.policy.autoCloseWaitingInfoDays,
         reopenDays: settings.policy.reopenDays

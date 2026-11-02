@@ -31,7 +31,7 @@ export interface TicketSchedulePolicy {
 
 export const DEFAULT_TICKET_SCHEDULE_POLICY: TicketSchedulePolicy = {
   workdayMinutes: 540,
-  // Khẩn (xử lý trong 1 ngày) · Cao (1–2 ngày) · Bình thường (2–5 ngày) · Thấp (5–10 ngày)
+  // Mặc định của schema; giá trị đang dùng lấy từ Cài đặt chung (Cấu hình → Cài đặt chung), có thể khác.
   unclaimedMinutes: { urgent: 6 * 60, high: 1 * 540, normal: 2 * 540, low: 5 * 540 },
   silentMinutes: { urgent: 1 * 540, high: 2 * 540, normal: 5 * 540, low: 10 * 540 },
   holdUnknownDays: 5,

@@ -1,4 +1,10 @@
-import { TicketResolutionCode, TicketUrgency } from "./types";
+import {
+  AlertReason,
+  ApprovalStatus,
+  TicketResolutionCode,
+  TicketStatus,
+  TicketUrgency
+} from "./types";
 import { APPROVAL_DOCUMENT_ITEM_KEY } from "./ticket.entity";
 
 // Danh mục cố định (không phải cấu hình theo công ty): checklist "yêu cầu bổ sung" và nhãn kết quả đóng.
@@ -88,3 +94,30 @@ export const DEFAULT_SENSITIVE_KINDS = [
   "sensitive_other",
   APPROVAL_DOCUMENT_ITEM_KEY
 ];
+
+// Nhãn tiếng Việt hiển thị ở web (features/ticket/constants/ticket.constants.js) — backend cũng cần khi dựng văn bản
+// cho Trợ lý Nội quy (application/ticket-assistant-brief.service.ts). Đổi nhãn ở web thì đổi cả ở đây.
+export const STATUS_LABELS: Record<TicketStatus, string> = {
+  open: "Mới",
+  in_progress: "Đang xử lý",
+  waiting_info: "Chờ bổ sung",
+  on_hold: "Tạm hoãn",
+  resolved: "Đã xử lý",
+  closed: "Đã đóng",
+  cancelled: "Đã huỷ"
+};
+
+export const ALERT_REASON_LABELS: Record<AlertReason, string> = {
+  unclaimed: "Lâu chưa có ai nhận",
+  silent: "Lâu chưa có cập nhật",
+  overdue: "Đã quá ngày dự kiến",
+  hold_unknown: "Tạm hoãn lâu chưa cập nhật"
+};
+
+export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = {
+  not_required: "Không cần tờ trình",
+  missing: "Chưa có tờ trình",
+  submitted: "Đã nộp, chờ xác nhận",
+  verified: "Tờ trình hợp lệ",
+  invalid: "Tờ trình không hợp lệ"
+};

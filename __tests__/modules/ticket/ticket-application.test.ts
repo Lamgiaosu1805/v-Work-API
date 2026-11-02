@@ -17,6 +17,7 @@ import {
 import { TicketConfigService } from "../../../src/modules/ticket/application/ticket-config.service";
 import { TicketQueryService } from "../../../src/modules/ticket/application/ticket-queries.service";
 import { TicketSweepService } from "../../../src/modules/ticket/application/ticket-sweep.service";
+import { describeOwnTickets } from "../../../src/modules/ticket/application/ticket-assistant-brief.service";
 import {
   DepartmentSummary,
   EmployeeSummary,
@@ -82,7 +83,7 @@ class FakeDirectory implements TicketDirectory {
   withoutPermission = new Set<string>();
 
   async filterEmployeesWithPermission(employeeIds: string[]) {
-    return employeeIds.filter((id) => !this.withoutPermission.has(id));
+    return employeeIds.filter((employeeId) => !this.withoutPermission.has(employeeId));
   }
 
   async getOwnDepartmentTreeEmployeeIds(employeeId: string) {
@@ -2029,5 +2030,236 @@ describe("cron nhắc không gửi lặp và không nhắc ticket đã đổi tr
     const after: any = await TicketModel.findById(created.id).lean();
     expect(after.version).toBe(before.version + 1);
     expect(after.remind_at ?? null).toBeNull();
+  });
+});
+
+// ---- tóm tắt ticket cho Trợ lý Nội quy ---------------------------------------------------------
+
+describe("describeOwnTickets — Trợ lý Nội quy tra ticket do CHÍNH người hỏi tạo", () => {
+  const abilityOf = (...granted: string[]) => ({
+    can: (action: string, subject: string) => subject === "Ticket" && granted.includes(action)
+  });
+  const EMPLOYEE_ABILITY = abilityOf("ticket.view", "ticket.create");
+  const HANDLER_ABILITY = abilityOf("ticket.view", "ticket.create", "ticket.handle");
+  const briefDeps = () => ({
+    directory,
+    config: new MongooseTicketConfigReader(),
+    now: () => now
+  });
+  const describeFor = (
+    employeeId: string,
+    codes: string[],
+    ability: { can(action: string, subject: string): boolean } = EMPLOYEE_ABILITY
+  ) => describeOwnTickets({ employeeId, ability, codes }, briefDeps());
+  const textOfBrief = (result: { briefs: Array<{ lines: string[] }> }) =>
+    result.briefs.flatMap((brief) => brief.lines).join("\n");
+
+  it("ticket mới do mình tạo: tiêu đề, trạng thái, mức khẩn, sản phẩm / loại, chưa có người nhận, nút đang có", async () => {
+    const created = await createPlain();
+
+    const result = await describeFor(REQUESTER, [created.code]);
+
+    expect(result.notFoundCodes).toEqual([]);
+    expect(result.briefs).toHaveLength(1);
+    const text = textOfBrief(result);
+    expect(result.briefs[0].code).toBe(created.code);
+    expect(text).toContain("Tiêu đề: Khách không nhận được OTP");
+    expect(text).toContain("Trạng thái: Mới");
+    expect(text).toContain("Mức khẩn: Bình thường");
+    expect(text).toContain("Sản phẩm / loại yêu cầu: TIKLUY APP › Tài khoản");
+    expect(text).toContain("Chưa có người nhận xử lý");
+    expect(text).toContain("Huỷ yêu cầu");
+    expect(text).toContain("Sửa thông tin");
+    // nhân viên thường không có quyền xử lý nên không thấy nút của nhóm xử lý
+    expect(text).not.toMatch(/Nhận xử lý|Báo đã xử lý xong|Đóng ticket/);
+  });
+
+  it("đã có chủ trì: nêu tên người xử lý; người tạo có thêm quyền xử lý thì thấy thêm nút nhận / đóng", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+
+    const text = textOfBrief(await describeFor(REQUESTER, [created.code]));
+    expect(text).toContain("Trạng thái: Đang xử lý");
+    expect(text).toContain("Người xử lý: IT A (chủ trì)");
+
+    const open = await createPlain({ title: "Ticket mở" });
+    const withHandle = textOfBrief(await describeFor(REQUESTER, [open.code], HANDLER_ABILITY));
+    expect(withHandle).toContain("Nhận xử lý");
+  });
+
+  it("Chờ bổ sung: nêu mục đang chờ BẠN bổ sung, hạn tự đóng và nút Gửi bổ sung", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await commands.requestInfo(itA(), created.id, {
+      items: [{ key: "screenshot" }, { key: "other", note: "Số điện thoại khách đang dùng" }]
+    });
+
+    const text = textOfBrief(await describeFor(REQUESTER, [created.code]));
+    expect(text).toContain("Trạng thái: Chờ bổ sung");
+    expect(text).toContain(
+      "Đang chờ BẠN bổ sung: Ảnh/video chụp lỗi; Khác (ghi rõ) (Số điện thoại khách đang dùng)"
+    );
+    expect(text).toMatch(/Không bổ sung thì hệ thống tự đóng lúc: \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}/);
+    expect(text).toContain("Gửi bổ sung");
+  });
+
+  it("Tạm hoãn nêu lý do và ngày tiếp tục; Đã xử lý nêu chờ BẠN xác nhận + hạn tự đóng + nút Xác nhận đã xong", async () => {
+    const held = await createPlain({ title: "Chờ ngân hàng" });
+    await commands.claim(itA(), held.id);
+    await commands.hold(itA(), held.id, { reason: "Chờ ngân hàng phản hồi" });
+    const holdText = textOfBrief(await describeFor(REQUESTER, [held.code]));
+    expect(holdText).toContain("Tạm hoãn vì: Chờ ngân hàng phản hồi");
+    expect(holdText).toContain("Chưa xác định ngày tiếp tục");
+
+    const done = await createPlain({ title: "Đã xong" });
+    await commands.claim(itA(), done.id);
+    await commands.resolve(itA(), done.id, { note: "Đã reset OTP", actionTaken: "Reset trên CMS" });
+    const doneText = textOfBrief(await describeFor(REQUESTER, [done.code]));
+    expect(doneText).toContain("Trạng thái: Đã xử lý");
+    expect(doneText).toContain("Nhóm xử lý đã báo xong: Đã reset OTP");
+    expect(doneText).toContain("Đã làm: Reset trên CMS");
+    expect(doneText).toMatch(/Đang chờ BẠN xác nhận; không phản hồi thì tự đóng lúc/);
+    expect(doneText).toContain("Xác nhận đã xong");
+    expect(doneText).toContain("Mở lại");
+  });
+
+  it("Đã đóng: nêu kết quả, và đã xác nhận thì không mở lại được; nhóm xử lý đóng thì còn hạn mở lại", async () => {
+    const confirmed = await createPlain({ title: "Đã xác nhận" });
+    await commands.claim(itA(), confirmed.id);
+    await commands.resolve(itA(), confirmed.id, { note: "Xong" });
+    await commands.confirm(requester(), confirmed.id);
+    const confirmedText = textOfBrief(await describeFor(REQUESTER, [confirmed.code]));
+    expect(confirmedText).toContain("Trạng thái: Đã đóng");
+    expect(confirmedText).toContain("Kết quả: Đã giải quyết");
+    expect(confirmedText).toContain("Bạn đã xác nhận đã xong nên không mở lại được nữa");
+
+    const closedByIt = await createPlain({ title: "IT đóng" });
+    await commands.claim(itA(), closedByIt.id);
+    await commands.close(itA(), closedByIt.id, { code: "not_a_bug", note: "Hệ thống chạy đúng" });
+    const closedText = textOfBrief(await describeFor(REQUESTER, [closedByIt.code]));
+    expect(closedText).toContain("Kết quả: Không phải lỗi — Hệ thống chạy đúng");
+    expect(closedText).toMatch(/Còn mở lại được đến: \d{2}\/\d{2}\/\d{4}/);
+    expect(closedText).toContain("Mở lại");
+  });
+
+  it("TICKET CỦA NGƯỜI KHÁC → 'không tìm thấy', kể cả người đó là người xử lý / xem được ticket; y hệt mã không tồn tại", async () => {
+    const mine = await createPlain({ title: "Của người tạo" });
+    await commands.claim(itA(), mine.id);
+
+    // IT A đang xử lý ticket này nhưng KHÔNG phải người tạo → không tra được (kể cả có quyền xử lý)
+    const asHandler = await describeFor(IT_A, [mine.code], HANDLER_ABILITY);
+    expect(asHandler.briefs).toEqual([]);
+    expect(asHandler.notFoundCodes).toEqual([mine.code]);
+
+    // Người ngoài, ban lãnh đạo có đủ quyền xem mọi ticket
+    for (const who of [STRANGER, BOSS]) {
+      const result = await describeFor(
+        who,
+        [mine.code],
+        abilityOf("ticket.view", "ticket.manage", "ticket.view_restricted", "ticket.view_sensitive")
+      );
+      expect(result).toEqual({ briefs: [], notFoundCodes: [mine.code] });
+    }
+
+    // Mã không tồn tại trả về cùng một hình dạng → không dò được mã có tồn tại hay không
+    const nonexistent = await describeFor(STRANGER, ["TK-2611-9999"]);
+    const existingButOthers = await describeFor(STRANGER, [mine.code]);
+    expect({ ...nonexistent, notFoundCodes: nonexistent.notFoundCodes.length }).toEqual({
+      ...existingButOthers,
+      notFoundCodes: existingButOthers.notFoundCodes.length
+    });
+  });
+
+  it("ticket đã xoá (xoá mềm) → không tìm thấy", async () => {
+    const created = await createPlain();
+    await TicketModel.updateOne({ _id: created.id }, { isDeleted: true });
+    expect(await describeFor(REQUESTER, [created.code])).toEqual({
+      briefs: [],
+      notFoundCodes: [created.code]
+    });
+  });
+
+  it("nhiều mã: chỉ trả ticket của mình, mã còn lại vào danh sách không tìm thấy; tối đa 3 mã, mã sai định dạng bị bỏ", async () => {
+    const mine = await createPlain({ title: "Của tôi" });
+    const others = await createPlain({ title: "Của người khác" }, itA());
+
+    const result = await describeFor(REQUESTER, [
+      mine.code,
+      others.code,
+      "tk-2611-9999",
+      "ABC",
+      "TK-1-2",
+      "TK-2611-0001",
+      "TK-2611-0002"
+    ]);
+
+    expect(result.briefs.map((brief) => brief.code)).toEqual([mine.code]);
+    // 3 mã hợp lệ đầu tiên: mine, others, TK-2611-9999 (viết hoa) — "ABC" và "TK-1-2" bị bỏ, phần dư bị cắt
+    expect(result.notFoundCodes).toEqual([others.code, "TK-2611-9999"]);
+  });
+
+  it("KHÔNG đưa mô tả, thông tin khách, nội dung trao đổi hay tên file vào văn bản", async () => {
+    const created = await createPlain({
+      description: "MO-TA-BI-MAT-123",
+      customer: {
+        phone: "0987654321",
+        name: "Khách Bí Mật",
+        appCode: "tikluy",
+        externalId: "EXT-777"
+      }
+    });
+    await commands.claim(itA(), created.id);
+    await commands.addMessage(itA(), created.id, { body: "TIN-NHAN-RIENG-TU-456" });
+    await commands.addMessage(requester(), created.id, { body: "kèm file" }, [
+      file("cccd_images", "cccd-bi-mat.png")
+    ]);
+
+    const text = textOfBrief(await describeFor(REQUESTER, [created.code]));
+
+    expect(text).toContain("Trao đổi: 2 tin nhắn; tin gần nhất của Người tạo lúc");
+    [
+      "MO-TA-BI-MAT-123",
+      "0987654321",
+      "Khách Bí Mật",
+      "EXT-777",
+      "TIN-NHAN-RIENG-TU-456",
+      "cccd-bi-mat",
+      "kèm file"
+    ].forEach((secret) => expect(text).not.toContain(secret));
+  });
+
+  it("ticket hạn chế (cần tờ trình) đã đóng: người tạo chỉ còn thông tin chung, không có tờ trình / người xử lý / sản phẩm", async () => {
+    const restricted = await createPlain(
+      {
+        title: "Đổi SĐT khách",
+        templateId: ids.templatePhone,
+        customFields: { new_phone: "0911111111" }
+      } as any,
+      requester()
+    );
+    await commands.cancel(requester(), restricted.id, "Tạo nhầm");
+
+    const text = textOfBrief(await describeFor(REQUESTER, [restricted.code]));
+
+    expect(text).toContain("Trạng thái: Đã huỷ (ticket hạn chế)");
+    expect(text).toContain("Đây là ticket hạn chế đã đóng nên chỉ còn xem được thông tin chung");
+    expect(text).not.toMatch(/Mức khẩn|Sản phẩm|Người xử lý|Tờ trình|Trao đổi:|0911111111/);
+  });
+
+  it("nút theo đúng quyền thô: không có ticket.create thì không có Huỷ yêu cầu / Gửi bổ sung", async () => {
+    const created = await createPlain();
+    const text = textOfBrief(
+      await describeFor(REQUESTER, [created.code], abilityOf("ticket.view"))
+    );
+    expect(text).not.toMatch(/Huỷ yêu cầu|Gửi bổ sung|Xác nhận đã xong/);
+    expect(text).toContain("Sửa thông tin");
+  });
+
+  it("employeeId không hợp lệ → không tìm thấy, không ném lỗi", async () => {
+    const created = await createPlain();
+    expect(await describeFor("không-phải-objectid", [created.code])).toEqual({
+      briefs: [],
+      notFoundCodes: [created.code]
+    });
   });
 });

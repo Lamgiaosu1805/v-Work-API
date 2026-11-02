@@ -211,7 +211,7 @@ describe("quyền thật từ các role đã seed", () => {
     const ticket = await create("sale");
     await post("accountant", `/tickets/${ticket.id}/claim`).expect(200);
 
-    const me = (await get("accountant", "/tickets/meta").expect(200)).body.data.me;
+    const { me } = (await get("accountant", "/tickets/meta").expect(200)).body.data;
     expect(me).toMatchObject({
       canAssignDepartment: false,
       canAssignMember: false,

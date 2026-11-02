@@ -35,8 +35,19 @@ export type { HandbookErrorCode } from "./domain/handbook-assistant.errors";
 export type {
   PersonalAsker,
   PersonalContext,
-  PersonalContextProvider
+  PersonalContextProvider,
+  TicketAccess
 } from "./application/ports/personal-context.port";
+export type {
+  OwnTicketBrief,
+  OwnTicketLookupProvider,
+  OwnTicketsContext,
+  OwnTicketsLookup
+} from "./application/ports/own-ticket-lookup.port";
+export type {
+  ReferenceContext,
+  ReferenceContextProvider
+} from "./application/ports/reference-context.port";
 export { shutdownHandbookAssistant } from "./application/shutdown-handbook-assistant";
 export { recoverStaleAnswers as recoverStaleHandbookAnswers } from "./application/recover-stale-answers.service";
 export { purgeExpiredConversations as purgeExpiredHandbookConversations } from "./application/purge-expired-conversations.service";

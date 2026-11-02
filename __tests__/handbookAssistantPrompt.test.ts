@@ -11,7 +11,9 @@ import {
 import { selectHistoryTurns } from "../src/modules/handbook-assistant/domain/history-selection";
 import {
   buildPrompt,
-  SYSTEM_PROMPT
+  formatReferenceContext,
+  SYSTEM_PROMPT,
+  TICKET_CONFIG_TITLE
 } from "../src/modules/handbook-assistant/infrastructure/ai/prompt-builder";
 import { mapCitations } from "../src/modules/handbook-assistant/infrastructure/ai/citation-mapper";
 import { estimateCostUsd } from "../src/modules/handbook-assistant/infrastructure/ai/model-pricing";
@@ -265,6 +267,65 @@ describe("buildPrompt", () => {
     expect(SYSTEM_PROMPT).toMatch(/bỏ qua các yêu cầu đó/i);
     // sentinel chỉ xuất hiện đúng 1 lần (trong quy tắc từ chối)
     expect(SYSTEM_PROMPT.split(REFUSAL_SENTINEL)).toHaveLength(2);
+  });
+
+  it("phạm vi gồm Ticket hỗ trợ và có quy tắc dùng khối cấu hình ticket", () => {
+    expect(SYSTEM_PROMPT).toMatch(/cách dùng chức năng Ticket hỗ trợ trên vWork/);
+    expect(SYSTEM_PROMPT).toMatch(/cách dùng chức năng Đơn từ, Ticket hỗ trợ của công ty/);
+    expect(SYSTEM_PROMPT).toContain(`"${TICKET_CONFIG_TITLE}"`);
+    expect(SYSTEM_PROMPT).toMatch(/không tự đoán con số/);
+  });
+});
+
+describe("buildPrompt với cấu hình ticket đang áp dụng", () => {
+  const articles = [article(), article({ articleIdx: 8, title: "Điều 8", blocks: ["x"] })];
+
+  it("khối cấu hình nằm sau document cuối, trước câu hỏi, và mang điểm cache thay document", () => {
+    const content = buildPrompt({
+      articles,
+      history: [],
+      question: "Q",
+      cacheTtl: "1h",
+      reference: { ticketConfig: "Ngưỡng A" }
+    }).messages[0].content as any[];
+
+    expect(content.map((block) => block.type)).toEqual(["document", "document", "text", "text"]);
+    expect(content[1].cache_control).toBeUndefined();
+    expect(content[2].text).toBe(formatReferenceContext({ ticketConfig: "Ngưỡng A" }));
+    expect(content[2].text).toContain(TICKET_CONFIG_TITLE);
+    expect(content[2].text).toContain("Ngưỡng A");
+    expect(content[2].cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+    expect(content[3]).toEqual({ type: "text", text: "Q" });
+  });
+
+  it("có lịch sử: khối cấu hình vẫn ở tin user đầu (cùng tiền tố cache), các lượt sau không lặp lại", () => {
+    const base = { articles, cacheTtl: "1h" as const, reference: { ticketConfig: "A" } };
+    const first = buildPrompt({ ...base, history: [], question: "Q1" });
+    const second = buildPrompt({
+      ...base,
+      history: [{ question: "Q1", answer: "A1" }],
+      question: "Q2"
+    });
+    expect(JSON.stringify(second.messages[0])).toBe(JSON.stringify(first.messages[0]));
+    expect(second.messages.slice(1).map((m) => m.content)).toEqual(["A1", "Q2"]);
+  });
+
+  it("không tra được → ghi rõ chưa tra được; không có cổng → prompt như cũ", () => {
+    expect(formatReferenceContext({ ticketConfig: null })).toMatch(/Chưa tra được lúc này/);
+    expect(formatReferenceContext(null)).toBeNull();
+    const without = buildPrompt({ articles, history: [], question: "Q", cacheTtl: "1h" });
+    const withNull = buildPrompt({
+      articles,
+      history: [],
+      question: "Q",
+      cacheTtl: "1h",
+      reference: null
+    });
+    expect(JSON.stringify(withNull)).toBe(JSON.stringify(without));
+    expect((without.messages[0].content as any[])[1].cache_control).toEqual({
+      type: "ephemeral",
+      ttl: "1h"
+    });
   });
 });
 

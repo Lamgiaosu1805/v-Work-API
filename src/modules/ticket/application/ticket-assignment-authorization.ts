@@ -4,6 +4,24 @@ import { TicketForbiddenError } from "../domain/ticket.errors";
 import { TicketActor } from "../domain/types";
 import { TicketDirectory } from "./ports";
 
+// Người được giao / mời phối hợp phải có quyền xử lý ticket (ticket.handle): nếu không họ nhận thông báo "được giao"
+// nhưng nhận / trả lại / báo xong đều bị 403 và ticket kẹt. Báo ngay lúc giao, kèm tên người thiếu quyền.
+export async function assertCanHandle(
+  directory: TicketDirectory,
+  employees: Array<{ id: string; fullName: string }>,
+  employeeIds: string[]
+): Promise<void> {
+  const allowed = new Set(
+    await directory.filterEmployeesWithPermission(employeeIds, "ticket.handle")
+  );
+  const lacking = employees.filter((employee) => !allowed.has(employee.id));
+  if (lacking.length) {
+    throw new ArgumentInvalidException(
+      `Chưa có quyền xử lý ticket (cần gán role người xử lý ticket): ${lacking.map((employee) => employee.fullName).join(", ")}`
+    );
+  }
+}
+
 // Ai được giao việc cho ai (docs/TICKET-MODULE-PLAN.md mục 2 "Giao việc theo cấp"):
 // - Ban lãnh đạo (ticket.assign_department): giao cho phòng ban, hoặc người cụ thể bất kỳ.
 // - Trưởng bộ phận (ticket.assign_member): chỉ giao cho người cụ thể TRONG phòng mình (kể cả phòng con).
@@ -49,22 +67,4 @@ export async function authorizeAssignment(
     );
   }
   await assertCanHandle(directory, found, memberIds);
-}
-
-// Người được giao / mời phối hợp phải có quyền xử lý ticket (ticket.handle): nếu không họ nhận thông báo "được giao"
-// nhưng nhận / trả lại / báo xong đều bị 403 và ticket kẹt. Báo ngay lúc giao, kèm tên người thiếu quyền.
-export async function assertCanHandle(
-  directory: TicketDirectory,
-  employees: Array<{ id: string; fullName: string }>,
-  employeeIds: string[]
-): Promise<void> {
-  const allowed = new Set(
-    await directory.filterEmployeesWithPermission(employeeIds, "ticket.handle")
-  );
-  const lacking = employees.filter((employee) => !allowed.has(employee.id));
-  if (lacking.length) {
-    throw new ArgumentInvalidException(
-      `Chưa có quyền xử lý ticket (cần gán role người xử lý ticket): ${lacking.map((employee) => employee.fullName).join(", ")}`
-    );
-  }
 }

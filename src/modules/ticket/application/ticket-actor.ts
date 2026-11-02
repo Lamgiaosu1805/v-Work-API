@@ -17,13 +17,12 @@ export const TICKET_VIEW_ALL_ACTIONS = [
   "ticket.view_sensitive"
 ];
 
-// Dựng "người thao tác" cho domain từ tài khoản đăng nhập + bộ quyền CASL đã nạp ở requirePermission.
-export async function buildTicketActor(
+// Như trên nhưng đã biết sẵn nhân viên (UserInfo._id) — vd người hỏi Trợ lý Nội quy, danh tính lấy từ socket đã xác thực.
+export async function buildTicketActorForEmployee(
   directory: TicketDirectory,
-  accountId: string,
+  employeeId: string,
   ability?: AbilityLike
 ): Promise<TicketActor> {
-  const employeeId = await directory.resolveEmployeeId(accountId);
   const can = (action: string) => Boolean(ability?.can(action, TICKET_SUBJECT));
   const canAssignDepartment = can("ticket.assign_department");
   const canManage = can("ticket.manage");
@@ -44,4 +43,17 @@ export async function buildTicketActor(
     colleagueIds: canViewAll ? [] : await directory.getOwnDepartmentTreeEmployeeIds(employeeId),
     canViewCustomer: Boolean(ability?.can("customer.view", "Customer"))
   };
+}
+
+// Dựng "người thao tác" cho domain từ tài khoản đăng nhập + bộ quyền CASL đã nạp ở requirePermission.
+export async function buildTicketActor(
+  directory: TicketDirectory,
+  accountId: string,
+  ability?: AbilityLike
+): Promise<TicketActor> {
+  return buildTicketActorForEmployee(
+    directory,
+    await directory.resolveEmployeeId(accountId),
+    ability
+  );
 }

@@ -2,6 +2,7 @@ import type { HandbookErrorCode } from "../domain/handbook-assistant.errors";
 import type { CitationView } from "../infrastructure/ai/citation-mapper";
 import type { ReleaseLock } from "../infrastructure/busy-lock";
 import type { HandbookAnswerer } from "./ports/handbook-answerer.port";
+import type { OwnTicketLookupProvider } from "./ports/own-ticket-lookup.port";
 import type { PersonalContextProvider } from "./ports/personal-context.port";
 import type { ReferenceContextProvider } from "./ports/reference-context.port";
 import type { RunningAnswersRegistry } from "./running-answers.registry";
@@ -33,5 +34,8 @@ export interface HandbookAssistantDeps {
   // Dữ liệu tra cứu dùng chung đang áp dụng (cấu hình ticket). Không có = trợ lý chỉ dựa vào văn bản hướng dẫn.
   // Cũng do tầng workflows/ cài đặt và index.js nối vào.
   referenceContext?: ReferenceContextProvider;
+  // Tra ticket cụ thể do CHÍNH người hỏi tạo (theo mã TK-... trong câu hỏi). Không có = trợ lý không tra được ticket nào.
+  // Cũng do tầng workflows/ cài đặt và index.js nối vào.
+  ownTicketLookup?: OwnTicketLookupProvider;
   now?: () => Date;
 }

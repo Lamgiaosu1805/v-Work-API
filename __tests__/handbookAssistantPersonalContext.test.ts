@@ -299,6 +299,53 @@ describe("hỏi với cổng thông tin cá nhân (service)", () => {
     expect(answerer.calls[0].personal).toBeNull();
   });
 
+  describe("quyền Ticket của người hỏi", () => {
+    const FLAGS = {
+      canCreate: true,
+      canView: true,
+      canHandle: false,
+      canAssignDepartment: false,
+      canAssignMember: false,
+      canManage: false,
+      canViewRestricted: false,
+      canViewSensitive: false,
+      canConfig: false,
+      hasCrmAccess: true
+    };
+    const idents = () => ({ accountId: oid(), userInfoId: oid() });
+
+    it("cờ hợp lệ được chuyển nguyên cho AI", async () => {
+      const getForAsker = jest.fn().mockResolvedValue({ leaveBalanceDays: 1, ticketAccess: FLAGS });
+      await askAndRun({ getForAsker }, idents());
+      expect(answerer.calls[0].personal).toEqual({ leaveBalanceDays: 1, ticketAccess: FLAGS });
+    });
+
+    it("chỉ giữ đúng 10 cờ: trường lạ bị bỏ, không lọt vào prompt", async () => {
+      const getForAsker = jest.fn().mockResolvedValue({
+        leaveBalanceDays: 1,
+        ticketAccess: { ...FLAGS, role: "ADMIN", secret: "x" }
+      });
+      await askAndRun({ getForAsker }, idents());
+      expect(answerer.calls[0].personal?.ticketAccess).toEqual(FLAGS);
+    });
+
+    it.each([
+      ["thiếu một cờ", { ...FLAGS, canHandle: undefined }],
+      ["cờ sai kiểu ('true')", { ...FLAGS, canHandle: "true" }],
+      ["không phải object", "admin"]
+    ])("%s → null (chưa tra được), không tự cho là có quyền", async (_name, bad) => {
+      const getForAsker = jest.fn().mockResolvedValue({ leaveBalanceDays: 1, ticketAccess: bad });
+      await askAndRun({ getForAsker }, idents());
+      expect(answerer.calls[0].personal?.ticketAccess).toBeNull();
+    });
+
+    it("cổng cũ không tra quyền (không có ticketAccess) → prompt không nhắc tới quyền ticket", async () => {
+      const getForAsker = jest.fn().mockResolvedValue({ leaveBalanceDays: 1 });
+      await askAndRun({ getForAsker }, idents());
+      expect(answerer.calls[0].personal?.ticketAccess).toBeUndefined();
+    });
+  });
+
   it("không cấu hình cổng → trợ lý chạy như cũ, không có dữ liệu cá nhân", async () => {
     await askAndRun(undefined, { accountId: oid(), userInfoId: oid() });
     expect(answerer.calls[0].personal).toBeNull();
@@ -307,7 +354,7 @@ describe("hỏi với cổng thông tin cá nhân (service)", () => {
   it("cổng ném lỗi → câu trả lời VẪN chạy, AI nhận 'chưa tra được' (null), không phải 0", async () => {
     const getForAsker = jest.fn().mockRejectedValue(new Error("Mongo down"));
     const accepted = await askAndRun({ getForAsker }, { accountId: oid(), userInfoId: oid() });
-    expect(answerer.calls[0].personal).toEqual({ leaveBalanceDays: null });
+    expect(answerer.calls[0].personal).toEqual({ leaveBalanceDays: null, ticketAccess: null });
     expect(events.terminal(accepted.messageId)[0].type).toBe("done");
   });
 
@@ -330,7 +377,7 @@ describe("hỏi với cổng thông tin cá nhân (service)", () => {
     const startedAt = Date.now();
     const accepted = await askAndRun({ getForAsker }, { accountId: oid(), userInfoId: oid() });
     expect(Date.now() - startedAt).toBeLessThan(6000);
-    expect(answerer.calls[0].personal).toEqual({ leaveBalanceDays: null });
+    expect(answerer.calls[0].personal).toEqual({ leaveBalanceDays: null, ticketAccess: null });
     expect(events.terminal(accepted.messageId)[0].type).toBe("done");
   }, 20000);
 });
@@ -471,7 +518,7 @@ describe("createHandbookPersonalContext + socket thật: chỉ ngày phép của
     expect(ack.ok).toBe(true);
     await settle();
 
-    expect(answerer.calls.at(-1)?.personal).toEqual({ leaveBalanceDays: 7.5 });
+    expect(answerer.calls.at(-1)?.personal).toMatchObject({ leaveBalanceDays: 7.5 });
     expect(textOf(lastPrompt().messages.at(-1)?.content)).toContain("còn lại: 7,5 ngày");
   });
 
@@ -490,7 +537,7 @@ describe("createHandbookPersonalContext + socket thật: chỉ ngày phép của
     await settle();
 
     const request = answerer.calls.at(-1);
-    expect(request?.personal).toEqual({ leaveBalanceDays: 7.5 });
+    expect(request?.personal).toMatchObject({ leaveBalanceDays: 7.5 });
     const everything = JSON.stringify(lastPrompt());
     expect(everything).toContain("7,5 ngày");
     expect(everything).not.toContain(bob.employeeId);
@@ -505,7 +552,7 @@ describe("createHandbookPersonalContext + socket thật: chỉ ngày phép của
       clientId: `e2e-${(seq += 1)}`
     });
     await settle();
-    expect(answerer.calls.at(-1)?.personal).toEqual({ leaveBalanceDays: 3 });
+    expect(answerer.calls.at(-1)?.personal).toMatchObject({ leaveBalanceDays: 3 });
     expect(JSON.stringify(lastPrompt())).not.toContain("7,5");
   });
 
@@ -518,7 +565,7 @@ describe("createHandbookPersonalContext + socket thật: chỉ ngày phép của
       clientId: `e2e-${(seq += 1)}`
     });
     await settle();
-    expect(answerer.calls.at(-1)?.personal).toEqual({ leaveBalanceDays: 0 });
+    expect(answerer.calls.at(-1)?.personal).toMatchObject({ leaveBalanceDays: 0 });
   });
 
   it("số dư âm (đã ứng trước) được chuyển nguyên số âm", async () => {
@@ -531,7 +578,7 @@ describe("createHandbookPersonalContext + socket thật: chỉ ngày phép của
       clientId: `e2e-${(seq += 1)}`
     });
     await settle();
-    expect(answerer.calls.at(-1)?.personal).toEqual({ leaveBalanceDays: -1 });
+    expect(answerer.calls.at(-1)?.personal).toMatchObject({ leaveBalanceDays: -1 });
     expect(textOf(lastPrompt().messages.at(-1)?.content)).toContain("đã ứng trước phép");
   });
 
@@ -549,7 +596,7 @@ describe("createHandbookPersonalContext + socket thật: chỉ ngày phép của
       expect(ack.ok).toBe(true);
       await settle();
       await sleep(20);
-      expect(answerer.calls.at(-1)?.personal).toEqual({ leaveBalanceDays: null });
+      expect(answerer.calls.at(-1)?.personal).toMatchObject({ leaveBalanceDays: null });
     } finally {
       spy.mockRestore();
     }

@@ -109,7 +109,8 @@ export class AnthropicHandbookAnswerer implements HandbookAnswerer {
         question: request.question,
         cacheTtl: config.cacheTtl,
         personal: request.personal,
-        reference: request.reference
+        reference: request.reference,
+        ownTickets: request.ownTickets
       });
 
       const stream = this.getClient(config).messages.stream(

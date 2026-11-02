@@ -1,5 +1,6 @@
 import type { HistoryTurn } from "../../domain/history-selection";
 import type { PersonalContext } from "./personal-context.port";
+import type { OwnTicketsContext } from "./own-ticket-lookup.port";
 import type { ReferenceContext } from "./reference-context.port";
 
 // Cổng gọi AI. Phần còn lại của module chỉ biết interface này nên có thể thay nhà cung cấp (hoặc
@@ -26,6 +27,8 @@ export interface AnswerRequest {
   personal?: PersonalContext | null;
   // Dữ liệu tra cứu dùng chung đang áp dụng (cấu hình ticket); không có = không chèn gì vào prompt.
   reference?: ReferenceContext | null;
+  // Ticket cụ thể do CHÍNH người hỏi tạo mà câu hỏi nhắc tới (mã TK-...); không có = không chèn gì vào prompt.
+  ownTickets?: OwnTicketsContext | null;
   signal: AbortSignal;
 }
 

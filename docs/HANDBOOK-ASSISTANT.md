@@ -18,6 +18,8 @@ Module: `src/modules/handbook-assistant/` (TypeScript, DDD/Hexagonal — xem `CL
 - **Chỉ gọi AI qua socket** (REST bị cắt ở 30s). REST chỉ để đọc/quản lý lịch sử.
 - **Ngày phép của chính người hỏi** (xem mục 4b): trợ lý trả lời được "tôi còn bao nhiêu ngày phép" nhờ số dư lấy từ sổ ngày
   phép của tài khoản đang hỏi, chèn vào tin nhắn hiện tại. Chỉ của chính họ, không bao giờ của người khác.
+- **Ticket hỗ trợ** (xem mục 4c và "Văn bản hướng dẫn ticket"): cách dùng lấy từ `docs/HUONG-DAN-TICKET.md`, còn các con số /
+  danh mục cấu hình được (ngưỡng "Cần chú ý", tự đóng, mẫu yêu cầu...) lấy từ cấu hình ticket đang áp dụng lúc hỏi.
 - Ngoài phạm vi (thơ, code, thời tiết…) → model chỉ trả `[NGOAI_PHAM_VI]` → server đổi thành lỗi `REFUSED`. Văn bản không
   có thông tin → model nói rõ "chưa quy định" và gợi ý liên hệ P.HCNS.
 
@@ -91,6 +93,70 @@ Hỏi "tôi còn bao nhiêu ngày phép?" thì trợ lý cần số liệu thậ
 - Muốn thêm số liệu cá nhân khác (vd. số lần đi muộn): thêm trường vào `PersonalContext`, `formatPersonalContext`
   (`infrastructure/ai/prompt-builder.ts`) và workflow; vẫn chỉ theo `asker`.
 
+## 4c. Cấu hình ticket đang áp dụng (dữ liệu dùng chung, lấy lúc hỏi)
+
+Ngưỡng "Cần chú ý", số ngày tự đóng / mở lại, lịch làm việc, sản phẩm, loại và mẫu yêu cầu của ticket **cấu hình được** và
+mỗi môi trường mỗi khác, nên trợ lý không đọc chúng từ văn bản mà lấy bản đang áp dụng.
+
+- **Nguồn:** `getTicketGuideText()` của module `ticket` (`application/ticket-guide-summary.service.ts`) đọc cài đặt chung + sản
+  phẩm / loại / mẫu đang bật, dựng thành văn bản (không có tên người phụ trách). Đi qua cổng `ReferenceContextProvider`
+  (`application/ports/reference-context.port.ts`); `workflows/handbook-reference-context.workflow.ts` cài đặt (giữ bản đã đọc
+  60 giây, nhiều câu cùng lúc chỉ đọc 1 lần), `index.js` nối vào `setupHandbookAssistantSocket(io, undefined, personal, reference)`.
+- **Chỗ chèn:** một khối chữ "Cấu hình Ticket hỗ trợ đang áp dụng trên vWork" ngay SAU document cuối, và **điểm cache 1 giờ
+  chuyển sang khối này** — dùng chung cả công ty, chỉ ghi cache lại khi cấu hình thật sự đổi (~0,01 USD). Không làm document vì
+  API bắt bật citations cho mọi document hoặc không document nào (nên không có trích dẫn tới khối này). Văn bản phải tất định
+  (không chứa giờ hiện tại). Cổng chưa nối → prompt giữ nguyên dạng cũ từng byte.
+- **Lỗi/quá hạn:** quá 3 giây hoặc lỗi → khối ghi "Chưa tra được lúc này"; quy tắc 9 của system prompt dặn không tự đoán số.
+- **Kích thước:** ~2,9 nghìn token trên cấu hình DB test (11/2026). `import-handbook --count-tokens` **không** tính khối này —
+  cộng thêm khi so với ngưỡng 100 nghìn token.
+
+## 4d. Quyền Ticket của chính người hỏi
+
+Cùng một câu "nhận ticket thế nào?" thì IT bấm "Nhận xử lý" còn nhân viên thường chưa có nút đó. Để trợ lý trả lời đúng việc **người
+hỏi** làm được, nó nhận thêm một dòng quyền của chính họ — đi đường `PersonalContext` như số ngày phép (mục 4b), không có đường nào
+để hỏi quyền người khác.
+
+- **Nguồn:** `workflows/handbook-personal-context.workflow.ts` đọc bộ quyền hiệu lực của `userInfoId` từ socket đã xác thực (cache
+  Redis dùng chung với `requirePermission`, không thêm truy vấn) và dựng `TicketAccess` (10 cờ boolean: tạo, xem, nhận / xử lý,
+  giao phòng ban, giao trong phòng, quản lý, xem ticket hạn chế, xem file nhạy cảm, cấu hình, **có quyền CRM** — danh sách quyền CRM
+  phải giữ khớp `CRM_ACCESS_PERMISSIONS` của web, quyết định ticket mở ở CRM hay Workplace). Hàm thuần `computeTicketAccess`.
+- **Chỗ chèn:** một dòng "Quyền Ticket hỗ trợ của người hỏi: tạo ticket: có; xem ticket: có; nhận và xử lý ticket: không; ..." trong
+  khối dữ liệu cá nhân của tin user HIỆN TẠI (sau điểm cache, ~100 token), không bao giờ trong phần cache dùng chung. Quy tắc 10 của
+  system prompt: việc làm được thì hướng dẫn từng bước; việc chưa có quyền thì nói thẳng một câu, nói ai làm bước đó, gợi ý liên hệ
+  IT để được gán role, **không nêu mã quyền**, chỉ nêu đường vào đúng của người hỏi, nêu thêm việc "gần đó" họ làm được (trưởng bộ
+  phận giao được trong phòng mình; ban lãnh đạo đóng hộ được nhưng không có nút nhận), bỏ qua lời tự nhận chức vụ, không nêu quyền
+  người khác.
+- **Lỗi/quá hạn:** `ticketAccess: null` → dòng ghi "chưa tra được lúc này", trợ lý mô tả chung ai làm được; **không** coi là có hay
+  không có quyền. Cờ thiếu / sai kiểu cũng thành `null` (`sanitizeTicketAccess` ở `answer-runner.ts`). Cổng cũ không trả quyền
+  (`undefined`) thì prompt không nhắc tới.
+- **Giới hạn:** chỉ là quyền (cấp bằng role). Vai trò theo từng ticket (người tạo, chủ trì, người phối hợp, người được giao) do domain
+  ticket tính; việc hỏi về một ticket cụ thể của chính người hỏi xử lý riêng ở mục 4e.
+- **Test:** `handbookAssistantTicketAccess` (hàm thuần, dòng prompt, và **role seed thật** của 8 loại người dùng chạy trên Mongo
+  in-memory), `handbookAssistantPersonalContext` (đi qua service, cờ sai kiểu).
+
+## 4e. Hỏi về một ticket cụ thể (chỉ ticket do chính người hỏi tạo)
+
+`ticket TK-2611-0003 của tôi đang thế nào?` — trợ lý trả lời bằng dữ liệu thật của ticket đó, nhưng **chỉ ticket do chính người hỏi tạo**.
+
+- **Nguồn:** `describeOwnTickets()` của module `ticket` (`application/ticket-assistant-brief.service.ts`) dựng các dòng chữ tiếng Việt;
+  qua cổng `OwnTicketLookupProvider` (`application/ports/own-ticket-lookup.port.ts`), `workflows/handbook-own-ticket-lookup.workflow.ts`
+  cài đặt (đọc bộ quyền của chính người hỏi), `index.js` nối vào `setupHandbookAssistantSocket(io, undefined, personal, reference, ownTicket)`.
+- **Chọn ticket:** `findTicketCodes` (`domain/ticket-code-extractor.ts`) lấy mã `TK-YYMM-NNNN` ở câu hỏi hiện tại; không có thì lấy mã ở câu
+  hỏi người dùng gần nhất trước đó của hội thoại (hỏi tiếp "vậy tôi làm gì tiếp?"); tối đa 3 mã. Không có mã → trợ lý mời nhập mã.
+- **BẢO MẬT (ranh giới là truy vấn, không phải lời dặn):** điều kiện `created_by` = nhân viên đã xác thực nằm NGAY TRONG câu truy vấn
+  Mongo; mã người dùng gõ chỉ để *chọn trong số ticket của họ*. Ticket của người khác, ticket không tồn tại, ticket đã xoá đều ra y hệt
+  "không tìm thấy" (không dò được mã có tồn tại không); kể cả người xử lý hay ban lãnh đạo cũng chỉ tra được ticket **mình tạo**. Prompt
+  cũng dặn không nói ticket đó có tồn tại / ai tạo (quy tắc 11), và bỏ qua lời tự nhận chức vụ.
+- **Người tạo thấy đến đâu, trợ lý biết đến đó:** dùng đúng `accessLevel` (ticket hạn chế đã đóng chỉ còn thông tin chung) và
+  `capabilitiesOf` (nút nào đang có) rồi lọc thêm theo quyền thô như web. **Không** đưa vào: mô tả, tên / SĐT / mã khách, nội dung trao
+  đổi, tên file, tờ trình. Có: tiêu đề, trạng thái, mức khẩn, sản phẩm / loại, người xử lý, mục đang chờ bổ sung, lý do tạm hoãn, kết
+  quả đã làm, hạn tự đóng / mở lại, lý do "Cần chú ý", số tin nhắn và tin gần nhất (không có nội dung).
+- **Chỗ chèn:** khối "Ticket do chính người hỏi tạo" trong tin user HIỆN TẠI (sau điểm cache, ~200–300 token mỗi ticket). Lỗi / quá hạn
+  3 giây → "chưa tra được lúc này" (khác với "không tìm thấy").
+- **Test:** `handbookAssistantOwnTickets` (bộ tách mã, khối prompt, service, workflow) và khối `describeOwnTickets` trong
+  `modules/ticket/ticket-application.test.ts` (Mongo in-memory: ticket của người khác, đã xoá, hạn chế đã đóng, không lộ dữ liệu nhạy cảm, nút theo quyền).
+- **Chưa làm:** tra theo tiêu đề / "ticket mới nhất của tôi" (phải nhập mã); ticket mình *xử lý* nhưng không tạo.
+
 ## 5. Cấu hình (env)
 
 | Biến | Mặc định | Ý nghĩa |
@@ -154,6 +220,36 @@ npx ts-node --transpile-only scripts/handbook/import-handbook.ts --manifest=guid
 - Hướng dẫn mô tả cách vWork **đang** hoạt động, không thay nội quy: thời hạn báo trước khi nghỉ, mức xử lý... vẫn theo nội quy.
 - Câu hỏi gợi ý của manifest nạp vào *thay thế* danh sách của bản đang hiệu lực (tối đa 12 câu) nên phải gộp (`--with-suggestions-of`).
 
+### Văn bản hướng dẫn ticket (Ticket hỗ trợ — 11/2026)
+
+Trợ lý trả lời cách dùng chức năng Ticket hỗ trợ (tạo, theo dõi, bổ sung, tờ trình, xử lý, các lỗi thường gặp). Nguồn là
+`docs/HUONG-DAN-TICKET.md` (**được commit**), văn bản riêng `HUONG_DAN_TICKET` (19 mục, ~14,8 nghìn token đo bằng `count_tokens` ngày 2/11/2026), cùng quy ước với hướng dẫn đơn từ.
+File này **không ghi cứng số cấu hình được** (ngưỡng "Cần chú ý", số ngày tự đóng / mở lại, giờ làm việc, danh sách mẫu): các số đó
+đến từ khối cấu hình đang áp dụng (mục 4c); quyền theo vai trò nêu ở mục "Ai làm được gì" khớp seed (test ghim tên role), còn quyền
+của chính người hỏi đến từ dòng quyền (mục 4d). Phần tình huống, ví dụ ticket và câu hỏi thường gặp lấy từ tài liệu "Hướng dẫn gửi
+ticket hỗ trợ trên CRM" (bản đề xuất 19/10/2026) — chỉ những phần khớp luồng đã xây.
+
+**Ngân sách token — đừng chủ quan:** bản hiệu lực trước khi thêm ticket đo được 75,7 nghìn; thêm hướng dẫn ticket + quy tắc 9–10 của
+system prompt → bản nháp 5 đo **93,7 nghìn** (sau khi nén lại hướng dẫn và quy tắc 9–11), cộng khối cấu hình ~3 nghìn ≈ 96,7 nghìn, tức chỉ
+còn ~3 nghìn cho lịch sử hội thoại trước khi chạm ngưỡng 100 nghìn (Haiku tính giá cao hơn ~5 lần trên ngưỡng; hội thoại quá ~7 lượt sẽ
+vượt). Mỗi nghìn token thêm vào hướng dẫn này cộng vào MỌI câu hỏi; test `handbookAssistantGuide` chặn file vượt ~28 nghìn byte (hiện
+~27,3 nghìn byte ≈ 14,8 nghìn token). Lần đầu viết ước 9–10 nghìn token là SAI (đo thật 19,6 nghìn) —
+luôn đo bằng `import-handbook --count-tokens`, đừng ước. **Mỗi lần nạp tạo một bản nháp MỚI** (không ghi đè nháp cũ): nháp bỏ không
+dùng cứ để đó, chỉ bản `publish` mới có hiệu lực. Danh sách câu hỏi gợi ý đã kín 12 câu nên khi thêm 3 câu ticket phải bỏ 3 câu cũ
+(đã bỏ: sa thải do tự ý nghỉ, báo trước nghỉ không lương, nghỉ phép khi thử việc).
+
+```bash
+# gộp gợi ý với manifest đã nạp gần nhất (manifest đơn từ đã gồm gợi ý nội quy); không đụng DB
+npx ts-node --transpile-only scripts/handbook/build-guide-manifest.ts --input=docs/HUONG-DAN-TICKET.md --code=HUONG_DAN_TICKET --short="Hướng dẫn ticket" --title="Hướng dẫn sử dụng chức năng Ticket hỗ trợ trên vWork" --note="Văn bản hướng dẫn sử dụng chức năng Ticket hỗ trợ trên vWork (từ docs/HUONG-DAN-TICKET.md)" --output=ticket-guide.manifest.json --with-suggestions-of=guide.manifest.json
+npx ts-node --transpile-only scripts/handbook/import-handbook.ts --manifest=ticket-guide.manifest.json --count-tokens --note="Thêm hướng dẫn ticket"
+npx ts-node --transpile-only scripts/handbook/publish-handbook.ts --version=<số bản nháp vừa tạo>
+```
+
+- Test `handbookAssistantGuide` ghim nhãn mức khẩn / kết quả đóng / mục bổ sung (`ticket-catalog.ts`), đuôi file cho phép
+  (`uploadTicket.js`), câu lỗi của backend (`ticket.errors.ts`), và chặn mọi thời lượng "N ngày/giờ/phút" ghi cứng trong file.
+- Đổi luồng ticket (nút, trạng thái, quyền...) thì sửa file `.md` rồi nạp lại; chỉ đổi cấu hình trên màn Cấu hình ticket thì
+  **không** cần nạp lại gì.
+
 ### Theo dõi
 
 - Mỗi câu ghi 1 dòng log (token, cache, chi phí ước tính, ttft) và `handbook_message.ai`; cộng dồn ở `handbook_usage`.
@@ -200,6 +296,39 @@ số ngày phép của người hỏi khi họ hỏi người khác, và trả l
 không tự nêu con số khi họ không hỏi). Còn sót: hỏi "cách tạo đơn nghỉ phép" đôi khi vẫn kèm một dòng số ngày phép còn lại
 (dữ liệu của chính họ, vô hại).
 
+Thêm hướng dẫn Ticket + khối cấu hình ticket (quy tắc 9, 11/2026): đánh giá bằng Claude thật, effort `low`, trên DB test với
+hướng dẫn Đơn từ + Ticket (chưa có bản nội quy thật trên máy đánh giá), 28 câu: cách tạo, mở ở đâu theo quyền CRM, mẫu (quên mật
+khẩu, đổi SĐT), mức khẩn / ngưỡng vàng, tự đóng / mở lại, huỷ, bổ sung, tờ trình, quyền xem, file nhạy cảm, lỗi thường gặp, người
+xử lý (nhận, đóng, tạm hoãn, trùng / liên quan), câu hỏi về người phụ trách / xin quyền, 1 câu Đơn từ (hồi quy), 1 câu ngoài phạm vi.
+Lần 1: 26/27. Đọc tay thấy 3 lỗi mà kiểm tra tự động không bắt: (1) model **tự tính mốc thời gian** ("tạo 15:00 thứ Hai → bôi vàng
+11:00 thứ Ba", sai vì lịch có thứ 7 sáng và ngày 9 giờ) — đã dặn ở quy tắc 9 chỉ nêu số có trong khối, không tự tính thời điểm;
+(2) gợi ý "liên hệ Phòng Hành chính - Nhân sự" cho việc của ticket — đã dặn gợi ý bộ phận IT; (3) câu "sao không thấy nút Báo
+xong" thiếu điều kiện (trạng thái, tờ trình hợp lệ) — đã bổ sung vào mục 15 của hướng dẫn. Lần 2: **28/28** (thêm 1 câu bẫy tự tính
+giờ) và đọc tay các câu đã sửa; còn một câu model bịa "chọn phòng đó trên form" (trưởng phòng nhờ phòng khác) — đã làm rõ ở mục 8
+của hướng dẫn, chạy lại đúng. Chi phí ~$0.15 cho 3 lượt (ghi cache 1 giờ ~37 nghìn token mỗi lần đổi prompt). Bộ câu hỏi nằm ở
+`scripts/handbook/private/eval-ticket.ts` (không commit; có thể chạy lại từng câu bằng `--only=id`).
+
+Đánh giá lần 3 (quyền người hỏi, quy tắc 10, 2/11/2026): trên **bản nháp có nội quy thật** (DB test), 47 câu với 9 "nhân vật" quyền
+giả lập (nhân viên thường, sale có CRM, IT, quản lý ticket, kế toán chỉ có quyền xử lý, trưởng bộ phận, ban lãnh đạo, không có quyền
+nào, chưa tra được quyền) — gồm đúng các câu người dùng thật đã hỏi ("ai được quyền tạo ticket", "tạo ticket như thế nào", "reset
+thiết bị như nào" — trước đó trả "chưa có hướng dẫn" vì hướng dẫn chưa nạp), câu theo quyền (nhận ticket với từng nhân vật, giao
+phòng, cấu hình, file nhạy cảm, hỏi quyền người khác, tự nhận chức vụ, "không thấy nút"), hồi quy và câu hỏi thường gặp của tài liệu
+CRM. Lần đầu 42/47: đọc tay thấy trợ lý nhắc thừa "chưa có quyền vào CRM" khi chỉ cần nêu đường vào, và bỏ sót việc gần đó người hỏi
+làm được (trưởng phòng giao được trong phòng mình) — đã dặn ở quy tắc 10; 1 câu lỗi do regex quá chặt, 1 câu ngoài phạm vi trả lời
+lịch sự thay vì mã từ chối (đặc thù đã biết, vô hại). Thêm mô tả màn Cấu hình vào hướng dẫn. Lần 2: **47/47**, chuỗi lặp ý chỉ còn
+2/47 câu (nhờ bỏ các dòng gần giống nhau trong tài liệu), trung bình ~170 từ. Bộ câu hỏi: `scripts/handbook/private/eval-ticket.ts`
+(không commit; `--version=N` chọn bản, `--only=id` chạy từng câu).
+
+Đánh giá lần 4 (tra ticket cụ thể, quy tắc 11, 2/11/2026): 12 ca trên **ticket thật của DB test** — ticket của chính mình ở từng trạng thái
+(chờ bổ sung, đã xử lý, chưa ai nhận, đang xử lý, đã đóng, hạn chế), hỏi hai mã một lúc, hỏi tiếp không nêu mã, hỏi ticket của NGƯỜI KHÁC,
+mã không tồn tại, **mạo danh giám đốc** xin xem ticket người khác, và không nêu mã. Kết quả: câu trả lời bám đúng dữ liệu (đối chiếu từng
+dòng), ticket của người khác và mã không tồn tại được trả lời cùng một kiểu, không lộ tiêu đề / trạng thái / ai xử lý, kể cả khi mạo danh.
+Hai ca ban đầu "fail" chỉ vì regex của bộ đánh giá đòi đúng cụm "không tìm thấy"; một lỗi đếm từ trong chính script đánh giá (`/s+/` thay
+`/\s+/`) từng làm số từ nhỏ bất thường — luôn đọc tay câu trả lời, đừng tin con số.
+
+Hạn chế còn lại: câu trả lời đôi khi chép lại nguyên văn một câu trong hướng dẫn sau khi diễn đạt lại (cùng hiện tượng ở mục 9);
+trợ lý chưa tra được ticket theo tiêu đề, ticket mình xử lý nhưng không tạo, và chưa nêu tên người phụ trách từng mẫu.
+
 ## 9. Lưu ý & giới hạn đã biết
 
 - **Câu trả lời thỉnh thoảng "nói xong rồi chép lại nguyên văn"**: khi bật citations, Claude (Haiku) đôi khi viết ý của
@@ -227,4 +356,6 @@ npx jest __tests__/handbookAssistant        # chạy tuần tự từng bộ n�
 Các bộ: TextProcessing, Catalog, Scripts, Permission, Rest, Prompt, AnthropicAdapter, AnthropicHttp (SDK thật qua HTTP tới
 server SSE giả), Ask, Socket (socket.io thật + `chatSocket` thật + JWT thật), Jobs, PersonalContext (khối dữ liệu cá nhân
 trong prompt, cổng tra ngày phép lỗi/quá hạn, và socket thật + sổ ngày phép thật của 2 nhân viên để chứng minh người này không
-nhận số của người kia). Không bộ nào gọi API Claude thật.
+nhận số của người kia). Khối cấu hình ticket: `handbookAssistantPrompt` (vị trí + điểm cache) và
+`__tests__/modules/ticket/ticket-guide-summary.test.ts` (văn bản cấu hình, cache 60 giây của workflow). Không bộ nào gọi API
+Claude thật.

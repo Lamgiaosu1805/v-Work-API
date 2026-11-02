@@ -3,7 +3,10 @@
  * lý Nội quy như một văn bản riêng. Chỉ đọc/ghi file, KHÔNG đụng DB. Chạy:
  *   npx ts-node --transpile-only scripts/handbook/build-guide-manifest.ts --output=guide.manifest.json \
  *     [--input=docs/HUONG-DAN-DON-TU.md] [--code=HUONG_DAN_DON_TU] [--short="Hướng dẫn đơn từ"] \
- *     [--title="Hướng dẫn sử dụng chức năng Đơn từ trên vWork"] [--with-suggestions-of=noi-quy.manifest.json]
+ *     [--title="Hướng dẫn sử dụng chức năng Đơn từ trên vWork"] [--note="..."] \
+ *     [--with-suggestions-of=noi-quy.manifest.json]
+ * Hướng dẫn Ticket hỗ trợ: --input=docs/HUONG-DAN-TICKET.md --code=HUONG_DAN_TICKET --short="Hướng dẫn ticket"
+ *   --title="Hướng dẫn sử dụng chức năng Ticket hỗ trợ trên vWork" (xem docs/HANDBOOK-ASSISTANT.md).
  * Sau đó: import-handbook.ts --manifest=guide.manifest.json (văn bản khác của bản hiệu lực được giữ
  * nguyên) rồi publish-handbook.ts.
  */
@@ -28,7 +31,9 @@ function main(): void {
     ? (JSON.parse(fs.readFileSync(path.resolve(baseFile), "utf8")).suggestions ?? [])
     : [];
   const manifest = {
-    note: "Văn bản hướng dẫn sử dụng chức năng Đơn từ trên vWork (từ docs/HUONG-DAN-DON-TU.md)",
+    note:
+      getArg("note") ??
+      "Văn bản hướng dẫn sử dụng chức năng Đơn từ trên vWork (từ docs/HUONG-DAN-DON-TU.md)",
     suggestions: mergeSuggestions(existing, parsed.suggestions),
     documents: parsed.documents
   };

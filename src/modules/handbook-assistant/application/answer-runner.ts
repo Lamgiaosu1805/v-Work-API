@@ -1,5 +1,7 @@
 import { logger } from "../../../config/logger";
 import { selectHistoryTurns } from "../domain/history-selection";
+import { findTicketCodes } from "../domain/ticket-code-extractor";
+import type { HistoryTurn } from "../domain/history-selection";
 import { RefusalSentinelFilter, stripRefusalSentinel } from "../domain/refusal-sentinel";
 import { CitationView, mapCitations } from "../infrastructure/ai/citation-mapper";
 import { estimateCostUsd } from "../infrastructure/ai/model-pricing";
@@ -10,7 +12,9 @@ import {
 } from "../infrastructure/handbook-chat.repository";
 import type { HandbookAssistantDeps } from "./handbook-assistant.deps";
 import { HandbookAssistantConfig, getHandbookAssistantConfig } from "./handbook-assistant.config";
-import type { PersonalContext } from "./ports/personal-context.port";
+import type { OwnTicketsContext } from "./ports/own-ticket-lookup.port";
+import type { PersonalContext, TicketAccess } from "./ports/personal-context.port";
+import type { ReferenceContext } from "./ports/reference-context.port";
 import { getPromptArticles } from "./prompt-articles.service";
 import {
   AnswerFailure,
@@ -39,8 +43,63 @@ export interface RunContext {
   releaseLock: ReleaseLock;
 }
 
-// Tra thông tin cá nhân quá lâu thì bỏ qua (coi như không tra được) thay vì làm chậm câu trả lời.
-const PERSONAL_CONTEXT_TIMEOUT_MS = 3000;
+// Tra dữ liệu (cá nhân / cấu hình) quá lâu thì bỏ qua (coi như không tra được) thay vì làm chậm câu trả lời.
+const CONTEXT_LOOKUP_TIMEOUT_MS = 3000;
+
+// Chạy một lần tra cứu có hạn giờ; quá hạn hoặc lỗi → `unavailable` (không bao giờ ném lỗi).
+async function lookupWithTimeout<T>(
+  lookup: () => Promise<T>,
+  unavailable: T,
+  what: string,
+  messageId: string
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      lookup(),
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => {
+          logger.warn(`Trợ lý Nội quy: tra ${what} quá hạn, bỏ qua`, { messageId });
+          resolve(unavailable);
+        }, CONTEXT_LOOKUP_TIMEOUT_MS);
+      })
+    ]);
+  } catch (error) {
+    logger.warn(`Trợ lý Nội quy: không tra được ${what}`, {
+      messageId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return unavailable;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+const TICKET_ACCESS_KEYS: Array<keyof TicketAccess> = [
+  "canCreate",
+  "canView",
+  "canHandle",
+  "canAssignDepartment",
+  "canAssignMember",
+  "canManage",
+  "canViewRestricted",
+  "canViewSensitive",
+  "canConfig",
+  "hasCrmAccess"
+];
+
+// Chỉ nhận đúng 10 cờ boolean; thiếu / sai kiểu → null (chưa tra được), không đoán có quyền. undefined (cổng không
+// tra quyền ticket) giữ nguyên để prompt không nhắc tới.
+function sanitizeTicketAccess(
+  value: TicketAccess | null | undefined
+): TicketAccess | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object") return null;
+  if (TICKET_ACCESS_KEYS.some((key) => typeof value[key] !== "boolean")) return null;
+  return Object.fromEntries(
+    TICKET_ACCESS_KEYS.map((key) => [key, value[key]])
+  ) as unknown as TicketAccess;
+}
 
 // Thông tin cá nhân của CHÍNH người hỏi, hoặc null nếu không cấu hình/không có danh tính. Không bao giờ ném lỗi:
 // tra thất bại hay quá hạn → `leaveBalanceDays: null` (prompt ghi "chưa tra được") để câu trả lời vẫn chạy.
@@ -49,32 +108,73 @@ async function loadPersonalContext(
   ctx: RunContext
 ): Promise<PersonalContext | null> {
   const provider = deps.personalContext;
-  if (!provider || !ctx.userInfoId) return null;
-  const unavailable: PersonalContext = { leaveBalanceDays: null };
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    const result = await Promise.race([
-      provider.getForAsker({ accountId: ctx.accountId, userInfoId: ctx.userInfoId }),
-      new Promise<PersonalContext>((resolve) => {
-        timer = setTimeout(() => {
-          logger.warn("Trợ lý Nội quy: tra thông tin cá nhân quá hạn, bỏ qua", {
-            messageId: ctx.messageId
-          });
-          resolve(unavailable);
-        }, PERSONAL_CONTEXT_TIMEOUT_MS);
-      })
-    ]);
-    const days = result?.leaveBalanceDays;
-    return { leaveBalanceDays: typeof days === "number" && Number.isFinite(days) ? days : null };
-  } catch (error) {
-    logger.warn("Trợ lý Nội quy: không tra được thông tin cá nhân của người hỏi", {
-      messageId: ctx.messageId,
-      error: error instanceof Error ? error.message : String(error)
-    });
-    return unavailable;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+  const { userInfoId } = ctx;
+  if (!provider || !userInfoId) return null;
+  // Tra lỗi / quá hạn: cả hai đều "chưa tra được" (ticketAccess null ≠ undefined: prompt ghi rõ chưa tra được quyền
+  // thay vì im lặng, để trợ lý không tự cho là có hay không có quyền).
+  const unavailable: PersonalContext = { leaveBalanceDays: null, ticketAccess: null };
+  const result = await lookupWithTimeout(
+    () => provider.getForAsker({ accountId: ctx.accountId, userInfoId }),
+    unavailable,
+    "thông tin cá nhân của người hỏi",
+    ctx.messageId
+  );
+  const days = result?.leaveBalanceDays;
+  return {
+    leaveBalanceDays: typeof days === "number" && Number.isFinite(days) ? days : null,
+    ticketAccess: sanitizeTicketAccess(result?.ticketAccess)
+  };
+}
+
+// Dữ liệu tra cứu dùng chung (cấu hình ticket đang áp dụng), hoặc null nếu không cấu hình. Lỗi / quá hạn →
+// `ticketConfig: null` (prompt ghi "chưa tra được") để câu trả lời vẫn chạy.
+async function loadReferenceContext(
+  deps: HandbookAssistantDeps,
+  ctx: RunContext
+): Promise<ReferenceContext | null> {
+  const provider = deps.referenceContext;
+  if (!provider) return null;
+  const result = await lookupWithTimeout(
+    () => provider.getCurrent(),
+    { ticketConfig: null },
+    "cấu hình ticket",
+    ctx.messageId
+  );
+  const text = result?.ticketConfig;
+  return { ticketConfig: typeof text === "string" && text.trim() ? text : null };
+}
+
+// Ticket cụ thể do CHÍNH người hỏi tạo mà câu hỏi nhắc tới (mã TK-... ở câu hỏi này, hoặc ở câu hỏi gần nhất trước đó
+// của hội thoại). undefined = không có gì để tra (cổng chưa nối, không có danh tính, hoặc câu hỏi không nêu mã).
+// Lỗi / quá hạn → "chưa tra được" (không ném lỗi). Danh tính chỉ lấy từ socket; mã chỉ để CHỌN trong ticket của họ.
+async function loadOwnTickets(
+  deps: HandbookAssistantDeps,
+  ctx: RunContext,
+  history: HistoryTurn[]
+): Promise<OwnTicketsContext | undefined> {
+  const provider = deps.ownTicketLookup;
+  const { userInfoId } = ctx;
+  if (!provider || !userInfoId) return undefined;
+  const codes = findTicketCodes(
+    ctx.question,
+    history.map((turn) => turn.question)
+  );
+  if (!codes.length) return undefined;
+  const unavailable: OwnTicketsContext = { status: "unavailable", codes };
+  const result = await lookupWithTimeout<OwnTicketsContext>(
+    async () => {
+      const found = await provider.lookup({ accountId: ctx.accountId, userInfoId }, codes);
+      return {
+        status: "ok",
+        briefs: Array.isArray(found?.briefs) ? found.briefs : [],
+        notFoundCodes: Array.isArray(found?.notFoundCodes) ? found.notFoundCodes : []
+      };
+    },
+    unavailable,
+    "ticket do người hỏi tạo",
+    ctx.messageId
+  );
+  return result;
 }
 
 type Outcome =
@@ -336,21 +436,28 @@ export async function runAnswer(deps: HandbookAssistantDeps, ctx: RunContext): P
 
     // Hủy có thể tới ngay sau ack, trước cả khi gọi AI → kiểm tra trước mỗi bước tốn kém.
     if (!entry.controller.signal.aborted) {
-      const [loadedArticles, messages, personal] = await Promise.all([
+      const [loadedArticles, messages, personal, reference] = await Promise.all([
         getPromptArticles(ctx.versionId),
         chatRepo.listFinishedMessages(ctx.conversationId),
-        loadPersonalContext(deps, ctx)
+        loadPersonalContext(deps, ctx),
+        loadReferenceContext(deps, ctx)
       ]);
       articles = loadedArticles;
+      const history = selectHistoryTurns(messages, ctx.userSeq);
+      const ownTickets = entry.controller.signal.aborted
+        ? undefined
+        : await loadOwnTickets(deps, ctx, history);
 
       if (!entry.controller.signal.aborted) {
         watchdogs.start();
         result = await deps.answerer.answer(
           {
             articles,
-            history: selectHistoryTurns(messages, ctx.userSeq),
+            history,
             question: ctx.question,
             personal,
+            reference,
+            ownTickets,
             signal: entry.controller.signal
           },
           {

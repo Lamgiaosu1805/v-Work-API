@@ -383,10 +383,10 @@ mà không ai đụng tới mới đáng lo.
 
 | Mức khẩn    | Mốc xử lý tham khảo | A: chưa ai nhận | B: im lặng      | C: tạm hoãn chưa xác định |
 | ----------- | ------------------- | --------------- | --------------- | ------------------------- |
-| Khẩn        | 1 ngày làm việc     | 6 giờ làm việc  | 1 ngày làm việc  | 5 ngày làm việc           |
-| Cao         | 1–2 ngày làm việc   | 1 ngày làm việc | 2 ngày làm việc  | 5 ngày làm việc           |
-| Bình thường | 2–5 ngày làm việc   | 2 ngày làm việc | 5 ngày làm việc  | 5 ngày làm việc           |
-| Thấp        | 5–10 ngày làm việc  | 5 ngày làm việc | 10 ngày làm việc | 5 ngày làm việc           |
+| Khẩn        | 1 ngày làm việc     | 1 giờ làm việc  | 1 ngày làm việc  | 5 ngày làm việc           |
+| Cao         | 2 ngày làm việc     | 4 giờ làm việc  | 2 ngày làm việc  | 5 ngày làm việc           |
+| Bình thường | 3 ngày làm việc     | 1 ngày làm việc | 3 ngày làm việc  | 5 ngày làm việc           |
+| Thấp        | 5 ngày làm việc     | 2 ngày làm việc | 5 ngày làm việc  | 5 ngày làm việc           |
 
 - Ngưỡng nhập theo **giờ hoặc ngày làm việc** trên màn Cấu hình (lưu bằng phút làm việc). Mức càng gấp ngưỡng càng
   ngắn: **Khẩn ≤ Cao ≤ Bình thường ≤ Thấp** — hệ thống từ chối lưu nếu sai thứ tự.

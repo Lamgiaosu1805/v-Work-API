@@ -383,16 +383,17 @@ mà không ai đụng tới mới đáng lo.
 
 | Mức khẩn    | Mốc xử lý tham khảo | A: chưa ai nhận | B: im lặng      | C: tạm hoãn chưa xác định |
 | ----------- | ------------------- | --------------- | --------------- | ------------------------- |
-| Khẩn        | 1 ngày làm việc     | 6 giờ làm việc  | 1 ngày làm việc  | 5 ngày làm việc           |
-| Cao         | 1–2 ngày làm việc   | 1 ngày làm việc | 2 ngày làm việc  | 5 ngày làm việc           |
-| Bình thường | 2–5 ngày làm việc   | 2 ngày làm việc | 5 ngày làm việc  | 5 ngày làm việc           |
-| Thấp        | 5–10 ngày làm việc  | 5 ngày làm việc | 10 ngày làm việc | 5 ngày làm việc           |
+| Khẩn        | 1 ngày làm việc     | 1 giờ làm việc  | 1 ngày làm việc  | 5 ngày làm việc           |
+| Cao         | 2 ngày làm việc     | 4 giờ làm việc  | 2 ngày làm việc  | 5 ngày làm việc           |
+| Bình thường | 3 ngày làm việc     | 1 ngày làm việc | 3 ngày làm việc  | 5 ngày làm việc           |
+| Thấp        | 5 ngày làm việc     | 2 ngày làm việc | 5 ngày làm việc  | 5 ngày làm việc           |
 
 - Ngưỡng nhập theo **giờ hoặc ngày làm việc** trên màn Cấu hình (lưu bằng phút làm việc). Mức càng gấp ngưỡng càng
   ngắn: **Khẩn ≤ Cao ≤ Bình thường ≤ Thấp** — hệ thống từ chối lưu nếu sai thứ tự.
 - Không có ghi đè ngưỡng theo mẫu: muốn mẫu nào theo dõi sát hơn thì đặt mức khẩn mặc định của mẫu cao hơn.
-- Mẫu đặt mức mặc định, người tạo đổi được, nhóm xử lý điều chỉnh được (kèm ghi chú). Người tạo đổi mức không bắt
-  buộc ghi lý do; nhóm xử lý đổi mức bắt buộc ghi lý do.
+- Mẫu đặt mức khẩn cố định: khi tạo ticket từ mẫu, form khoá mức khẩn theo mẫu (chỉ khoá ở web, backend không chặn).
+  Ticket không dùng mẫu thì người tạo tự chọn. Sau khi tạo, người tạo và nhóm xử lý vẫn sửa được mức khẩn; người
+  tạo đổi không bắt buộc ghi lý do, nhóm xử lý đổi bắt buộc ghi lý do.
 - Ticket **chưa ai nhận** bị nâng lên Khẩn / Cao → báo lại người phụ trách (gồm danh sách mặc định), xem 7.1.
 - **Giá trị seed cho cài đặt tạo mới (30/10/2026)**, theo tài liệu "Hướng dẫn gửi ticket hỗ trợ trên CRM": ngưỡng A (chưa ai nhận) = thời hạn phản hồi đầu tiên — Khẩn **30 phút**, Cao **1 giờ**, Bình thường **4 giờ**, Thấp **1 ngày** (đơn vị phút làm việc). Cài đặt đã có trong DB **không bị ghi đè** — chỉnh ở màn Cấu hình → Cài đặt chung. Mốc "xử lý xong" của tài liệu (Khẩn 2 giờ … Thấp 3 ngày) không phải hạn cứng: chỉ là mốc tham khảo, ticket vẫn chỉ vàng khi bị bỏ quên (8.1).
 - Khi chuyển vàng: ticket được **bôi vàng trên giao diện cho mọi người thấy** (danh sách + chi tiết, kèm lý

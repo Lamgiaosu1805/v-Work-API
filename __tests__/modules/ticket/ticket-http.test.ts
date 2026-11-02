@@ -458,6 +458,23 @@ describe("cấu hình ticket (quyền ticket.config)", () => {
     expect(saved.body.data.calendar.workDays).toEqual([1, 2, 3, 4, 5]);
   });
 
+  it("/meta trả ngưỡng chưa ai nhận đang áp dụng cho gợi ý mức khẩn (người không có ticket.config vẫn đọc được)", async () => {
+    await as(admin, request(app).patch("/tickets/config/settings"))
+      .send({
+        workdayMinutes: 480,
+        unclaimedMinutes: { urgent: 30, high: 60, normal: 240, low: 480 }
+      })
+      .expect(200);
+
+    const meta = await get(requester, "/tickets/meta").expect(200);
+    expect(meta.body.data.policy).toMatchObject({
+      workdayMinutes: 480,
+      unclaimedMinutes: { urgent: 30, high: 60, normal: 240, low: 480 }
+    });
+    // Không lộ người phụ trách mặc định qua meta
+    expect(meta.body.data.policy.defaultHandlerIds).toBeUndefined();
+  });
+
   it("danh mục loại yêu cầu trả kèm tên người phụ trách", async () => {
     await as(admin, request(app).post("/tickets/config/categories"))
       .send({ code: "incident", name: "Sự cố", handlerIds: [itPerson.employeeId] })

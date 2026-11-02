@@ -19,6 +19,9 @@ const { shutdownHandbookAssistant } = require("./src/modules/handbook-assistant"
 const {
   createHandbookPersonalContext
 } = require("./src/workflows/handbook-personal-context.workflow");
+const {
+  createHandbookReferenceContext
+} = require("./src/workflows/handbook-reference-context.workflow");
 const { setIO } = require("./src/sockets/ioRegistry");
 const { startCronJobs } = require("./src/jobs");
 const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
@@ -46,8 +49,14 @@ io.on("connection", (socket) => {
 app.set("io", io);
 setIO(io);
 setupChatSocket(io);
-// Trợ lý Nội quy tra được số ngày phép còn lại của CHÍNH người hỏi (nối module leave qua workflows/).
-setupHandbookAssistantSocket(io, undefined, createHandbookPersonalContext());
+// Trợ lý Nội quy tra được số ngày phép còn lại của CHÍNH người hỏi (nối module leave qua workflows/) và cấu hình
+// ticket đang áp dụng (nối module ticket qua workflows/).
+setupHandbookAssistantSocket(
+  io,
+  undefined,
+  createHandbookPersonalContext(),
+  createHandbookReferenceContext()
+);
 
 app.set("trust proxy", 1);
 

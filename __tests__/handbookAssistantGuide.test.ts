@@ -6,6 +6,22 @@ import {
   LEAVE_MULTI_APPROVAL_MIN_DAYS,
   RequestEntity
 } from "../src/modules/request/domain/request.entity";
+import {
+  INFO_REQUEST_CATALOG,
+  RESOLUTION_LABELS,
+  URGENCY_LABELS
+} from "../src/modules/ticket/domain/ticket-catalog";
+import {
+  TicketApprovalRequiredError,
+  TicketForbiddenError,
+  TicketInvalidTransitionError,
+  TicketNotEligibleError,
+  TicketReopenNotAllowedError,
+  TicketVersionConflictError
+} from "../src/modules/ticket/domain/ticket.errors";
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { ALLOWED_EXTENSIONS } = require("../src/middlewares/uploadTicket");
 
 const OPTIONS = {
   documentCode: "HUONG_DAN_DON_TU",
@@ -134,5 +150,55 @@ describe("docs/HUONG-DAN-DON-TU.md", () => {
       "Làm việc từ xa"
     ].forEach((label) => expect(create).toContain(label));
     expect(create).toMatch(/tối đa 100 ký tự/);
+  });
+});
+
+// Hướng dẫn Ticket hỗ trợ: nhãn trạng thái / kết quả / checklist / giới hạn file phải khớp code, và KHÔNG ghi cứng
+// số cấu hình được (ngưỡng "Cần chú ý", số ngày tự đóng / mở lại) — các số đó trợ lý lấy từ khối cấu hình đang áp
+// dụng (ticket-guide-summary.service.ts).
+describe("docs/HUONG-DAN-TICKET.md", () => {
+  const markdown = fs.readFileSync(path.resolve(__dirname, "../docs/HUONG-DAN-TICKET.md"), "utf8");
+  const parsed = parseGuideMarkdown(markdown, {
+    ...OPTIONS,
+    documentCode: "HUONG_DAN_TICKET",
+    shortName: "Hướng dẫn ticket"
+  });
+  const { articles } = parsed.documents[0];
+  const text = (idx: number) => articles[idx - 1].blocks.join("\n");
+  const content = articles.flatMap((a) => a.blocks).join("\n");
+
+  it("qua bộ đọc manifest, mỗi khối đủ ngắn để trích dẫn gọn", () => {
+    expect(() => parseManifest({ note: null, ...parsed })).not.toThrow();
+    expect(articles).toHaveLength(16);
+    const longest = Math.max(...articles.flatMap((a) => a.blocks.map((b) => b.length)));
+    expect(longest).toBeLessThanOrEqual(700);
+    expect(parsed.suggestions.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("không ghi cứng số cấu hình được (thời lượng theo ngày / giờ làm việc)", () => {
+    expect(content).not.toMatch(/\d+\s*(ngày|giờ|phút)( làm việc)?/);
+  });
+
+  it("nhãn mức khẩn, kết quả đóng và mục bổ sung khớp danh mục của module ticket", () => {
+    Object.values(URGENCY_LABELS).forEach((label) => expect(text(5)).toContain(label));
+    Object.values(RESOLUTION_LABELS).forEach((label) => expect(text(7)).toContain(`"${label}"`));
+    INFO_REQUEST_CATALOG.forEach((item) => expect(text(9)).toContain(item.label));
+  });
+
+  it("giới hạn file khớp middleware upload", () => {
+    ALLOWED_EXTENSIONS.forEach((ext: string) => expect(text(6)).toContain(ext));
+    expect(text(6)).toMatch(/tối đa 25MB/);
+    expect(text(6)).toMatch(/tối đa 10 file/);
+  });
+
+  it("thông báo lỗi trích nguyên văn đúng câu của backend", () => {
+    [
+      TicketVersionConflictError.defaultMessage,
+      TicketApprovalRequiredError.defaultMessage,
+      TicketReopenNotAllowedError.defaultMessage,
+      TicketInvalidTransitionError.defaultMessage,
+      TicketNotEligibleError.defaultMessage,
+      TicketForbiddenError.defaultMessage
+    ].forEach((message) => expect(text(16)).toContain(message));
   });
 });

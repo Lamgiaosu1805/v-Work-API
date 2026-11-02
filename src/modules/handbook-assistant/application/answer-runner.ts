@@ -11,6 +11,7 @@ import {
 import type { HandbookAssistantDeps } from "./handbook-assistant.deps";
 import { HandbookAssistantConfig, getHandbookAssistantConfig } from "./handbook-assistant.config";
 import type { PersonalContext } from "./ports/personal-context.port";
+import type { ReferenceContext } from "./ports/reference-context.port";
 import { getPromptArticles } from "./prompt-articles.service";
 import {
   AnswerFailure,
@@ -39,8 +40,37 @@ export interface RunContext {
   releaseLock: ReleaseLock;
 }
 
-// Tra thông tin cá nhân quá lâu thì bỏ qua (coi như không tra được) thay vì làm chậm câu trả lời.
-const PERSONAL_CONTEXT_TIMEOUT_MS = 3000;
+// Tra dữ liệu (cá nhân / cấu hình) quá lâu thì bỏ qua (coi như không tra được) thay vì làm chậm câu trả lời.
+const CONTEXT_LOOKUP_TIMEOUT_MS = 3000;
+
+// Chạy một lần tra cứu có hạn giờ; quá hạn hoặc lỗi → `unavailable` (không bao giờ ném lỗi).
+async function lookupWithTimeout<T>(
+  lookup: () => Promise<T>,
+  unavailable: T,
+  what: string,
+  messageId: string
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      lookup(),
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => {
+          logger.warn(`Trợ lý Nội quy: tra ${what} quá hạn, bỏ qua`, { messageId });
+          resolve(unavailable);
+        }, CONTEXT_LOOKUP_TIMEOUT_MS);
+      })
+    ]);
+  } catch (error) {
+    logger.warn(`Trợ lý Nội quy: không tra được ${what}`, {
+      messageId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return unavailable;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 // Thông tin cá nhân của CHÍNH người hỏi, hoặc null nếu không cấu hình/không có danh tính. Không bao giờ ném lỗi:
 // tra thất bại hay quá hạn → `leaveBalanceDays: null` (prompt ghi "chưa tra được") để câu trả lời vẫn chạy.
@@ -49,32 +79,35 @@ async function loadPersonalContext(
   ctx: RunContext
 ): Promise<PersonalContext | null> {
   const provider = deps.personalContext;
-  if (!provider || !ctx.userInfoId) return null;
+  const { userInfoId } = ctx;
+  if (!provider || !userInfoId) return null;
   const unavailable: PersonalContext = { leaveBalanceDays: null };
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    const result = await Promise.race([
-      provider.getForAsker({ accountId: ctx.accountId, userInfoId: ctx.userInfoId }),
-      new Promise<PersonalContext>((resolve) => {
-        timer = setTimeout(() => {
-          logger.warn("Trợ lý Nội quy: tra thông tin cá nhân quá hạn, bỏ qua", {
-            messageId: ctx.messageId
-          });
-          resolve(unavailable);
-        }, PERSONAL_CONTEXT_TIMEOUT_MS);
-      })
-    ]);
-    const days = result?.leaveBalanceDays;
-    return { leaveBalanceDays: typeof days === "number" && Number.isFinite(days) ? days : null };
-  } catch (error) {
-    logger.warn("Trợ lý Nội quy: không tra được thông tin cá nhân của người hỏi", {
-      messageId: ctx.messageId,
-      error: error instanceof Error ? error.message : String(error)
-    });
-    return unavailable;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+  const result = await lookupWithTimeout(
+    () => provider.getForAsker({ accountId: ctx.accountId, userInfoId }),
+    unavailable,
+    "thông tin cá nhân của người hỏi",
+    ctx.messageId
+  );
+  const days = result?.leaveBalanceDays;
+  return { leaveBalanceDays: typeof days === "number" && Number.isFinite(days) ? days : null };
+}
+
+// Dữ liệu tra cứu dùng chung (cấu hình ticket đang áp dụng), hoặc null nếu không cấu hình. Lỗi / quá hạn →
+// `ticketConfig: null` (prompt ghi "chưa tra được") để câu trả lời vẫn chạy.
+async function loadReferenceContext(
+  deps: HandbookAssistantDeps,
+  ctx: RunContext
+): Promise<ReferenceContext | null> {
+  const provider = deps.referenceContext;
+  if (!provider) return null;
+  const result = await lookupWithTimeout(
+    () => provider.getCurrent(),
+    { ticketConfig: null },
+    "cấu hình ticket",
+    ctx.messageId
+  );
+  const text = result?.ticketConfig;
+  return { ticketConfig: typeof text === "string" && text.trim() ? text : null };
 }
 
 type Outcome =
@@ -336,10 +369,11 @@ export async function runAnswer(deps: HandbookAssistantDeps, ctx: RunContext): P
 
     // Hủy có thể tới ngay sau ack, trước cả khi gọi AI → kiểm tra trước mỗi bước tốn kém.
     if (!entry.controller.signal.aborted) {
-      const [loadedArticles, messages, personal] = await Promise.all([
+      const [loadedArticles, messages, personal, reference] = await Promise.all([
         getPromptArticles(ctx.versionId),
         chatRepo.listFinishedMessages(ctx.conversationId),
-        loadPersonalContext(deps, ctx)
+        loadPersonalContext(deps, ctx),
+        loadReferenceContext(deps, ctx)
       ]);
       articles = loadedArticles;
 
@@ -351,6 +385,7 @@ export async function runAnswer(deps: HandbookAssistantDeps, ctx: RunContext): P
             history: selectHistoryTurns(messages, ctx.userSeq),
             question: ctx.question,
             personal,
+            reference,
             signal: entry.controller.signal
           },
           {

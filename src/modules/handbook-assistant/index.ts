@@ -37,6 +37,10 @@ export type {
   PersonalContext,
   PersonalContextProvider
 } from "./application/ports/personal-context.port";
+export type {
+  ReferenceContext,
+  ReferenceContextProvider
+} from "./application/ports/reference-context.port";
 export { shutdownHandbookAssistant } from "./application/shutdown-handbook-assistant";
 export { recoverStaleAnswers as recoverStaleHandbookAnswers } from "./application/recover-stale-answers.service";
 export { purgeExpiredConversations as purgeExpiredHandbookConversations } from "./application/purge-expired-conversations.service";

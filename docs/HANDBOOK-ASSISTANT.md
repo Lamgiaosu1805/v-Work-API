@@ -18,6 +18,8 @@ Module: `src/modules/handbook-assistant/` (TypeScript, DDD/Hexagonal — xem `CL
 - **Chỉ gọi AI qua socket** (REST bị cắt ở 30s). REST chỉ để đọc/quản lý lịch sử.
 - **Ngày phép của chính người hỏi** (xem mục 4b): trợ lý trả lời được "tôi còn bao nhiêu ngày phép" nhờ số dư lấy từ sổ ngày
   phép của tài khoản đang hỏi, chèn vào tin nhắn hiện tại. Chỉ của chính họ, không bao giờ của người khác.
+- **Ticket hỗ trợ** (xem mục 4c và "Văn bản hướng dẫn ticket"): cách dùng lấy từ `docs/HUONG-DAN-TICKET.md`, còn các con số /
+  danh mục cấu hình được (ngưỡng "Cần chú ý", tự đóng, mẫu yêu cầu...) lấy từ cấu hình ticket đang áp dụng lúc hỏi.
 - Ngoài phạm vi (thơ, code, thời tiết…) → model chỉ trả `[NGOAI_PHAM_VI]` → server đổi thành lỗi `REFUSED`. Văn bản không
   có thông tin → model nói rõ "chưa quy định" và gợi ý liên hệ P.HCNS.
 
@@ -91,6 +93,23 @@ Hỏi "tôi còn bao nhiêu ngày phép?" thì trợ lý cần số liệu thậ
 - Muốn thêm số liệu cá nhân khác (vd. số lần đi muộn): thêm trường vào `PersonalContext`, `formatPersonalContext`
   (`infrastructure/ai/prompt-builder.ts`) và workflow; vẫn chỉ theo `asker`.
 
+## 4c. Cấu hình ticket đang áp dụng (dữ liệu dùng chung, lấy lúc hỏi)
+
+Ngưỡng "Cần chú ý", số ngày tự đóng / mở lại, lịch làm việc, sản phẩm, loại và mẫu yêu cầu của ticket **cấu hình được** và
+mỗi môi trường mỗi khác, nên trợ lý không đọc chúng từ văn bản mà lấy bản đang áp dụng.
+
+- **Nguồn:** `getTicketGuideText()` của module `ticket` (`application/ticket-guide-summary.service.ts`) đọc cài đặt chung + sản
+  phẩm / loại / mẫu đang bật, dựng thành văn bản (không có tên người phụ trách). Đi qua cổng `ReferenceContextProvider`
+  (`application/ports/reference-context.port.ts`); `workflows/handbook-reference-context.workflow.ts` cài đặt (giữ bản đã đọc
+  60 giây, nhiều câu cùng lúc chỉ đọc 1 lần), `index.js` nối vào `setupHandbookAssistantSocket(io, undefined, personal, reference)`.
+- **Chỗ chèn:** một khối chữ "Cấu hình Ticket hỗ trợ đang áp dụng trên vWork" ngay SAU document cuối, và **điểm cache 1 giờ
+  chuyển sang khối này** — dùng chung cả công ty, chỉ ghi cache lại khi cấu hình thật sự đổi (~0,01 USD). Không làm document vì
+  API bắt bật citations cho mọi document hoặc không document nào (nên không có trích dẫn tới khối này). Văn bản phải tất định
+  (không chứa giờ hiện tại). Cổng chưa nối → prompt giữ nguyên dạng cũ từng byte.
+- **Lỗi/quá hạn:** quá 3 giây hoặc lỗi → khối ghi "Chưa tra được lúc này"; quy tắc 9 của system prompt dặn không tự đoán số.
+- **Kích thước:** ~2,9 nghìn token trên cấu hình DB test (11/2026). `import-handbook --count-tokens` **không** tính khối này —
+  cộng thêm khi so với ngưỡng 100 nghìn token.
+
 ## 5. Cấu hình (env)
 
 | Biến | Mặc định | Ý nghĩa |
@@ -153,6 +172,25 @@ npx ts-node --transpile-only scripts/handbook/import-handbook.ts --manifest=guid
   `handbookAssistantGuide` so các ngưỡng 2 ngày / đơn thứ 4 / lần quên thứ 6 với `RequestEntity` để nhắc quên sửa.
 - Hướng dẫn mô tả cách vWork **đang** hoạt động, không thay nội quy: thời hạn báo trước khi nghỉ, mức xử lý... vẫn theo nội quy.
 - Câu hỏi gợi ý của manifest nạp vào *thay thế* danh sách của bản đang hiệu lực (tối đa 12 câu) nên phải gộp (`--with-suggestions-of`).
+
+### Văn bản hướng dẫn ticket (Ticket hỗ trợ — 11/2026)
+
+Trợ lý trả lời cách dùng chức năng Ticket hỗ trợ (tạo, theo dõi, bổ sung, tờ trình, xử lý, các lỗi thường gặp). Nguồn là
+`docs/HUONG-DAN-TICKET.md` (**được commit**), văn bản riêng `HUONG_DAN_TICKET` (16 mục, ~9–10 nghìn token), cùng quy ước với
+hướng dẫn đơn từ. File này **không ghi cứng số cấu hình được** (ngưỡng "Cần chú ý", số ngày tự đóng / mở lại, giờ làm việc,
+danh sách mẫu): các số đó đến từ khối cấu hình đang áp dụng (mục 4c).
+
+```bash
+# gộp gợi ý với manifest đã nạp gần nhất (manifest đơn từ đã gồm gợi ý nội quy); không đụng DB
+npx ts-node --transpile-only scripts/handbook/build-guide-manifest.ts --input=docs/HUONG-DAN-TICKET.md --code=HUONG_DAN_TICKET --short="Hướng dẫn ticket" --title="Hướng dẫn sử dụng chức năng Ticket hỗ trợ trên vWork" --note="Văn bản hướng dẫn sử dụng chức năng Ticket hỗ trợ trên vWork (từ docs/HUONG-DAN-TICKET.md)" --output=ticket-guide.manifest.json --with-suggestions-of=guide.manifest.json
+npx ts-node --transpile-only scripts/handbook/import-handbook.ts --manifest=ticket-guide.manifest.json --count-tokens --note="Thêm hướng dẫn ticket"
+npx ts-node --transpile-only scripts/handbook/publish-handbook.ts --version=<số bản nháp vừa tạo>
+```
+
+- Test `handbookAssistantGuide` ghim nhãn mức khẩn / kết quả đóng / mục bổ sung (`ticket-catalog.ts`), đuôi file cho phép
+  (`uploadTicket.js`), câu lỗi của backend (`ticket.errors.ts`), và chặn mọi thời lượng "N ngày/giờ/phút" ghi cứng trong file.
+- Đổi luồng ticket (nút, trạng thái, quyền...) thì sửa file `.md` rồi nạp lại; chỉ đổi cấu hình trên màn Cấu hình ticket thì
+  **không** cần nạp lại gì.
 
 ### Theo dõi
 
@@ -227,4 +265,6 @@ npx jest __tests__/handbookAssistant        # chạy tuần tự từng bộ n�
 Các bộ: TextProcessing, Catalog, Scripts, Permission, Rest, Prompt, AnthropicAdapter, AnthropicHttp (SDK thật qua HTTP tới
 server SSE giả), Ask, Socket (socket.io thật + `chatSocket` thật + JWT thật), Jobs, PersonalContext (khối dữ liệu cá nhân
 trong prompt, cổng tra ngày phép lỗi/quá hạn, và socket thật + sổ ngày phép thật của 2 nhân viên để chứng minh người này không
-nhận số của người kia). Không bộ nào gọi API Claude thật.
+nhận số của người kia). Khối cấu hình ticket: `handbookAssistantPrompt` (vị trí + điểm cache) và
+`__tests__/modules/ticket/ticket-guide-summary.test.ts` (văn bản cấu hình, cache 60 giây của workflow). Không bộ nào gọi API
+Claude thật.

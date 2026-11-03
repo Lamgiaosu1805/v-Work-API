@@ -27,6 +27,13 @@ router.get(
 );
 
 router.get(
+  "/view-scope",
+  authenticate,
+  requirePermission("request.view", "Request"),
+  asyncHandler(requestHttpController.getViewScope)
+);
+
+router.get(
   "/:id",
   authenticate,
   requirePermission("request.view", "Request"),

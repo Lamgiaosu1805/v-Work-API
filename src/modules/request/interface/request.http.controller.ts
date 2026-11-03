@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import { canOnSubject } from "../../permission";
 import { resolveRequestScopeFilter } from "../../../core/authorization/resolve-request-scope-filter";
+import { canViewOthersRequests } from "../../../core/authorization/can-view-others-requests";
+import { resolveEmployeeId } from "../../../core/authorization/resolve-employee-id";
 import { getEligibleReviewers } from "../application/get-eligible-reviewers.service";
 import { getMyRequests } from "../application/get-my-requests.service";
 import { getAllRequests } from "../application/get-all-requests.service";
@@ -18,6 +20,12 @@ export const requestHttpController = {
   async getMyRequests(req: Request, res: Response) {
     const result = await getMyRequests(req.account!._id, req.query);
     return res.status(200).json({ message: "OK", ...result });
+  },
+
+  async getViewScope(req: Request, res: Response) {
+    const employeeId = await resolveEmployeeId(req.account!._id);
+    const canViewOthers = canViewOthersRequests(req.permissionAbility!, employeeId);
+    return res.status(200).json({ message: "OK", data: { canViewOthers } });
   },
 
   async getAll(req: Request, res: Response) {

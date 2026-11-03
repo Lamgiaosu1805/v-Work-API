@@ -26,6 +26,9 @@ const { getEffectivePermissions, invalidateRbacCache } = require("../helpers/rba
 const { invalidatePermissionCache } = require("../core/authorization/invalidate-permission-cache");
 const AppModel = require("../models/AppModel");
 const {
+  assignEmployeeBaselineRole
+} = require("../workflows/assign-employee-baseline-role.workflow");
+const {
   resolveEmployeeScopeFilter
 } = require("../core/authorization/resolve-employee-scope-filter");
 const {
@@ -423,6 +426,7 @@ const UserController = {
       session.endSession();
 
       await invalidateBranchPermissionCache([branch_id]);
+      await assignEmployeeBaselineRole(String(userInfo._id));
 
       return res.status(201).json({
         message: "Tạo user, userInfo, documents, mapping và WorkSchedule thành công",

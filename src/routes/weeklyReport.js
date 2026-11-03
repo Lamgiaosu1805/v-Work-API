@@ -1,7 +1,7 @@
 const express = require("express");
 
 const router = express.Router();
-const { authenticate, canManage } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
 const { uploadWeeklyReport } = require("../middlewares/uploadWeeklyReport");
 const WeeklyReportController = require("../controllers/WeeklyReportController");
 
@@ -9,12 +9,8 @@ router.get("/my-departments", authenticate, WeeklyReportController.getMyDepartme
 
 router.get("/my-dept", authenticate, WeeklyReportController.getMyDeptStatus);
 
-router.get(
-  "/admin",
-  authenticate,
-  canManage("workplace"),
-  WeeklyReportController.getAdminDashboard
-);
+// Quyền (quản lý workplace hoặc weekly_report.view theo phạm vi) kiểm tra trong controller
+router.get("/admin", authenticate, WeeklyReportController.getAdminDashboard);
 
 router.get("/:deptId/history", authenticate, WeeklyReportController.getHistory);
 

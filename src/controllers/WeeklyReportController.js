@@ -9,8 +9,38 @@ const { LEAF_TYPES } = require("../models/DepartmentModel");
 const { getUserDeptIds, canViewDept, getFullNameMap } = require("./InternalFileController");
 const { getInternalFilePath } = require("../middlewares/uploadInternal");
 const { WEEKLY_REPORT_SUBFOLDER } = require("../middlewares/uploadWeeklyReport");
+const { buildAbility, canOnSubject } = require("../modules/permission");
+const { loadRules } = require("../core/authorization/require-permission.middleware");
+const { resolveEmployeeId } = require("../core/authorization/resolve-employee-id");
 
 const TZ = "Asia/Ho_Chi_Minh";
+
+const isWorkplaceManager = ({ role, module_access }) =>
+  role === "admin" || (role === "manager" && module_access?.includes("workplace"));
+
+// Quyền xem báo cáo tuần của phòng ban khác: quản lý workplace (hệ cũ) xem tất cả; còn lại theo
+// weekly_report.view (hệ quyền mới) kèm phạm vi dữ liệu. Trả hàm (deptId) => boolean, hoặc null nếu
+// không có quyền nào.
+async function resolveWeeklyReportViewer(account) {
+  if (isWorkplaceManager(account)) return () => true;
+
+  let ability;
+  try {
+    ability = buildAbility(await loadRules(await resolveEmployeeId(account._id)));
+  } catch {
+    return null;
+  }
+  if (!ability.can("weekly_report.view", "WeeklyReport")) return null;
+
+  return (deptId) =>
+    canOnSubject(ability, "weekly_report.view", "WeeklyReport", { department: String(deptId) });
+}
+
+async function canViewDeptReport(account, deptId) {
+  if (await canViewDept(account._id, deptId)) return true;
+  const canView = await resolveWeeklyReportViewer(account);
+  return Boolean(canView && canView(deptId));
+}
 
 function getWeekStart(date) {
   return moment(date).tz(TZ).startOf("isoWeek").toDate();
@@ -85,11 +115,16 @@ const WeeklyReportController = {
   // GET /weekly-reports/admin?week=2025-05-12
   getAdminDashboard: async (req, res) => {
     try {
+      const canView = await resolveWeeklyReportViewer(req.account);
+      if (!canView) {
+        return res.status(403).json({ message: "Bạn không có quyền xem báo cáo tuần" });
+      }
+
       const weekDate = req.query.week ? new Date(req.query.week) : new Date();
       const weekStart = getWeekStart(weekDate);
       const deadline = getDeadlineOfWeek(weekStart);
 
-      const [departments, reports] = await Promise.all([
+      const [allDepartments, reports] = await Promise.all([
         DepartmentModel.find({ isDeleted: false, type: { $in: LEAF_TYPES } }).select(
           "_id department_name department_code type"
         ),
@@ -98,6 +133,7 @@ const WeeklyReportController = {
           .populate("file", "originalName mimeType size")
           .populate("submittedBy", "username")
       ]);
+      const departments = allDepartments.filter((dept) => canView(dept._id));
 
       const reportMap = new Map(reports.map((r) => [r.department._id.toString(), r]));
 
@@ -142,11 +178,10 @@ const WeeklyReportController = {
   getHistory: async (req, res) => {
     try {
       const { deptId } = req.params;
-      const accountId = req.account._id;
       const page = Math.max(1, parseInt(req.query.page) || 1);
       const limit = Math.min(50, parseInt(req.query.limit) || 10);
 
-      if (!(await canViewDept(accountId, deptId))) {
+      if (!(await canViewDeptReport(req.account, deptId))) {
         return res.status(403).json({ message: "Bạn không có quyền xem phòng ban này" });
       }
 
@@ -278,7 +313,6 @@ const WeeklyReportController = {
   viewReportFile: async (req, res) => {
     try {
       const { reportId } = req.params;
-      const accountId = req.account._id;
 
       const report = await WeeklyReportModel.findOne({ _id: reportId, isDeleted: false }).populate(
         "file"
@@ -286,7 +320,7 @@ const WeeklyReportController = {
       if (!report) return res.status(404).json({ message: "Không tìm thấy báo cáo" });
       if (!report.file) return res.status(404).json({ message: "Báo cáo này chưa có file" });
 
-      if (!(await canViewDept(accountId, report.department))) {
+      if (!(await canViewDeptReport(req.account, report.department))) {
         return res.status(403).json({ message: "Bạn không có quyền xem báo cáo này" });
       }
 
@@ -310,8 +344,6 @@ const WeeklyReportController = {
   downloadReportFile: async (req, res) => {
     try {
       const { reportId } = req.params;
-      const accountId = req.account._id;
-      const { role, module_access } = req.account;
 
       const report = await WeeklyReportModel.findOne({ _id: reportId, isDeleted: false }).populate(
         "file"
@@ -319,9 +351,7 @@ const WeeklyReportController = {
       if (!report) return res.status(404).json({ message: "Không tìm thấy báo cáo" });
       if (!report.file) return res.status(404).json({ message: "Báo cáo này chưa có file" });
 
-      const isWorkplaceManager =
-        role === "admin" || (role === "manager" && module_access?.includes("workplace"));
-      if (!isWorkplaceManager && !(await canViewDept(accountId, report.department))) {
+      if (!(await canViewDeptReport(req.account, report.department))) {
         return res.status(403).json({ message: "Bạn không có quyền tải báo cáo này" });
       }
 

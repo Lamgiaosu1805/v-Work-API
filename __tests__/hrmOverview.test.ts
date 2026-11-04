@@ -172,4 +172,35 @@ describe("getHrmOverview", () => {
       ["Kỹ thuật", 1]
     ]);
   });
+
+  test("nhân viên đã nghỉ việc không được tính ở KPI, biểu đồ chấm công và tuyển mới", async () => {
+    const today = moment.tz(TZ);
+    const resignedAt = today.clone().subtract(1, "day").endOf("day").toDate();
+    const stayer = await makeUser({
+      start_date: today.clone().startOf("month").add(1, "hour").toDate()
+    });
+    const leaver = await makeUser({
+      start_date: today.clone().startOf("month").add(2, "hour").toDate(),
+      resignation_date: resignedAt
+    });
+    await markDay(stayer, today, "present");
+    await markDay(leaver, today, "present");
+    await markDay(leaver, today, "leave_paid", "morning");
+
+    const data = await getHrmOverview();
+
+    expect(data.total_employees.count).toBe(1);
+    expect(data.active_today.count).toBe(1);
+    expect(data.on_leave.count).toBe(0);
+    expect(data.new_hires.count).toBe(1);
+    expect(data.attendance_chart.present[5]).toBe(1);
+  });
+
+  test("ngày làm việc cuối cùng (nghỉ việc cuối ngày hôm nay) vẫn được tính là đang làm", async () => {
+    await makeUser({ resignation_date: moment.tz(TZ).endOf("day").toDate() });
+
+    const data = await getHrmOverview();
+
+    expect(data.total_employees.count).toBe(1);
+  });
 });

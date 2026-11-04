@@ -6,6 +6,7 @@ const WeeklyReportModel = require("../models/WeeklyReportModel");
 const UserDepartmentPositionModel = require("../models/UserDepartmentPositionModel");
 const UserInfoModel = require("../models/UserInfoModel");
 const pushNotification = require("../helpers/pushNotification");
+const { stillEmployedAtFilter } = require("../shared-kernel/resignation");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -28,9 +29,12 @@ async function getAccountIdsInDept(deptId) {
     isDeleted: false
   }).select("user");
   const userIds = memberships.map((m) => m.user);
-  const users = await UserInfoModel.find({ _id: { $in: userIds }, isDeleted: false }).select(
-    "id_account"
-  );
+  // Không gửi push cho nhân viên đã nghỉ việc.
+  const users = await UserInfoModel.find({
+    _id: { $in: userIds },
+    isDeleted: false,
+    ...stillEmployedAtFilter(new Date())
+  }).select("id_account");
   return users.map((u) => u.id_account);
 }
 

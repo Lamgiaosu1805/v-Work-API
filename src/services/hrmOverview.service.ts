@@ -3,6 +3,7 @@ import UserInfoModel from "../models/UserInfoModel";
 import UserDepartmentPositionModel from "../models/UserDepartmentPositionModel";
 import DepartmentModel from "../models/DepartmentModel";
 import WorkDayStatusModel from "../models/WorkDayStatusModel";
+import { stillEmployedAtFilter } from "../shared-kernel/resignation";
 
 const TZ = "Asia/Ho_Chi_Minh";
 const CHART_MONTH_COUNT = 6;
@@ -14,35 +15,34 @@ const LEAVE_STATUSES = ["leave_paid", "leave_unpaid"];
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-// Nhân viên còn làm việc tại thời điểm `at`: chưa nghỉ việc hoặc ngày nghỉ việc sau `at`.
-const activeAt = (at: Date) => ({
-  isDeleted: false,
-  $or: [{ resignation_date: null }, { resignation_date: { $gt: at } }]
-});
+// Nhân viên còn làm việc tại thời điểm `at`: không bị xóa và chưa qua ngày làm việc cuối cùng (quy ước
+// resignation_date ở shared-kernel/resignation — ngày nghỉ việc vẫn còn tính là đang làm).
+const activeAt = (at: Date) => ({ isDeleted: false, ...stillEmployedAtFilter(at) });
 
 const countDistinctUsersOnDay = async (day: moment.Moment, statuses: string[]) => {
-  const users = await WorkDayStatusModel.distinct("user_id", {
+  const userIds = await WorkDayStatusModel.distinct("user_id", {
     isDeleted: false,
     date: { $gte: day.clone().startOf("day").toDate(), $lt: day.clone().endOf("day").toDate() },
     status: { $in: statuses }
   });
-  return users.length;
+  // Bỏ nhân viên đã nghỉ việc / đã xóa khỏi số liệu.
+  return UserInfoModel.countDocuments({
+    _id: { $in: userIds },
+    ...activeAt(day.clone().endOf("day").toDate())
+  });
 };
 
-const countHiredBetween = (from: moment.Moment, to: moment.Moment) =>
+const countHiredBetween = (from: moment.Moment, to: moment.Moment, now: Date) =>
   UserInfoModel.countDocuments({
-    isDeleted: false,
+    ...activeAt(now),
     start_date: { $gte: from.toDate(), $lt: to.toDate() }
   });
 
-// Số nhân viên còn làm việc vào đầu `at` (tính theo ngày vào/nghỉ việc).
+// Số nhân viên còn làm việc vào đầu `at` (đã vào làm trước đó và chưa nghỉ việc).
 const countHeadcountAt = (at: moment.Moment) =>
   UserInfoModel.countDocuments({
-    isDeleted: false,
-    $and: [
-      { $or: [{ start_date: null }, { start_date: { $lt: at.toDate() } }] },
-      { $or: [{ resignation_date: null }, { resignation_date: { $gte: at.toDate() } }] }
-    ]
+    ...activeAt(at.toDate()),
+    $and: [{ $or: [{ start_date: null }, { start_date: { $lt: at.toDate() } }] }]
   });
 
 const buildAttendanceChart = async (now: moment.Moment) => {
@@ -59,6 +59,25 @@ const buildAttendanceChart = async (now: moment.Moment) => {
   const rows: { _id: { y: number; m: number }; present: number; absent: number }[] =
     await WorkDayStatusModel.aggregate([
       { $match: { isDeleted: false, date: { $gte: since } } },
+      // Chỉ tính nhân viên còn làm việc, bỏ người đã nghỉ việc.
+      {
+        $lookup: {
+          from: UserInfoModel.collection.name,
+          localField: "user_id",
+          foreignField: "_id",
+          as: "employee"
+        }
+      },
+      { $unwind: "$employee" },
+      {
+        $match: {
+          "employee.isDeleted": false,
+          $or: [
+            { "employee.resignation_date": null },
+            { "employee.resignation_date": { $gte: now.toDate() } }
+          ]
+        }
+      },
       {
         $group: {
           _id: {
@@ -98,7 +117,7 @@ const buildDepartmentHeadcount = async (now: Date) => {
           "employee.isDeleted": false,
           $or: [
             { "employee.resignation_date": null },
-            { "employee.resignation_date": { $gt: now } }
+            { "employee.resignation_date": { $gte: now } }
           ]
         }
       },
@@ -146,8 +165,8 @@ export async function getHrmOverview() {
     countDistinctUsersOnDay(now, WORKING_STATUSES),
     countDistinctUsersOnDay(now, LEAVE_STATUSES),
     countDistinctUsersOnDay(yesterday, LEAVE_STATUSES),
-    countHiredBetween(monthStart, nextMonthStart),
-    countHiredBetween(prevMonthStart, monthStart),
+    countHiredBetween(monthStart, nextMonthStart, now.toDate()),
+    countHiredBetween(prevMonthStart, monthStart, now.toDate()),
     buildAttendanceChart(now),
     buildDepartmentHeadcount(now.toDate())
   ]);

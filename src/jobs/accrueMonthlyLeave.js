@@ -5,6 +5,7 @@ const EmploymentStatusModel = require("../models/EmploymentStatusModel");
 const LeaveBalanceModel = require("../models/LeaveBalanceModel");
 const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
 const { LEAVE_BALANCE_REASON } = require("../constants");
+const { stillEmployedAtFilter } = require("../shared-kernel/resignation");
 
 const TZ = "Asia/Ho_Chi_Minh";
 
@@ -23,8 +24,13 @@ async function accrueMonthlyLeave() {
     );
     const accrueIds = accrueStatuses.map((s) => s._id);
 
+    // Bỏ nhân viên đã nghỉ việc: không cộng phép cho người đã qua ngày làm việc cuối cùng.
     const eligibleUsers = await UserInfoModel.find(
-      { isDeleted: false, employment_status: { $in: accrueIds } },
+      {
+        isDeleted: false,
+        employment_status: { $in: accrueIds },
+        ...stillEmployedAtFilter(new Date())
+      },
       { _id: 1 }
     );
 

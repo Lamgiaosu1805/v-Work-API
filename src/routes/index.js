@@ -30,6 +30,7 @@ const transactionManagementRouter = require("./transactionManagement");
 const rbacRouter = require("./rbac");
 const kpiMetricRouter = require("./kpiMetric");
 const dashboardRouter = require("./dashboard");
+const hrmDashboardRouter = require("./hrmDashboard");
 const sharedFolderRouter = require("./sharedFolder");
 const customerCallRouter = require("../modules/customer-call/interface/customer-call.routes");
 const crmSaleAdminRouter = require("../modules/customer-call/interface/crm-sale-admin.routes");
@@ -71,6 +72,7 @@ const route = (app) => {
   app.use(`/rbac`, rbacRouter);
   app.use(`/kpi/metrics`, kpiMetricRouter);
   app.use(`/dashboard`, dashboardRouter);
+  app.use(`/hrm-dashboard`, hrmDashboardRouter);
   app.use("/shared-folders", sharedFolderRouter);
   app.use("/customer-call", customerCallRouter);
   app.use("/customer-call", crmSaleAdminRouter);

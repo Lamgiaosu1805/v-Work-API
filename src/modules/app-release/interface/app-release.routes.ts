@@ -7,6 +7,6 @@ const router = express.Router();
 
 router.get("/", asyncHandler(appReleaseHttpController.get));
 router.post("/notify", authenticate, isAdmin, asyncHandler(appReleaseHttpController.notify));
-router.put("/:platform", authenticate, isAdmin, asyncHandler(appReleaseHttpController.update));
+router.put("/", authenticate, isAdmin, asyncHandler(appReleaseHttpController.update));
 
 export = router;

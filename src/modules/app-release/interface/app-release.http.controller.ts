@@ -11,10 +11,11 @@ export const appReleaseHttpController = {
     return res.status(200).json({ data });
   },
 
-  // Admin: PUT /app-release/:platform { minVersion, latestVersion, storeUrl, message }
+  // Admin: PUT /app-release { minVersion?, latestVersion?, message?, platform?, storeUrl? } — bỏ trống platform =
+  // cập nhật cả iOS lẫn Android
   async update(req: Request, res: Response) {
     const accountId = (req as any).account?._id ? String((req as any).account._id) : null;
-    const data = await updateAppRelease(req.params.platform, req.body ?? {}, accountId);
+    const data = await updateAppRelease(req.body ?? {}, accountId);
     return res.status(200).json({ message: "Đã cập nhật cấu hình phiên bản", data });
   },
 

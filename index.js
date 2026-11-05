@@ -110,6 +110,7 @@ app.use((req, res, next) => {
 });
 
 app.use(require("./src/middlewares/loggingMiddleware"));
+app.use(require("./src/modules/app-release").appVersionGate);
 
 app.get("/refer", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "refer.html"));

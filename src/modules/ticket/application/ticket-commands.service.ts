@@ -40,7 +40,8 @@ import { MongooseTicketDirectory } from "../infrastructure/ticket-directory";
 import { NotificationServiceTicketNotifier } from "../infrastructure/ticket-notifier";
 import { MongooseSchedulerLoader } from "../infrastructure/ticket-scheduler.loader";
 import { TicketConfigReader } from "./ticket-config.types";
-import { TicketDirectory, TicketNotifier } from "./ports";
+import { MongooseTicketCustomerResolver } from "../infrastructure/ticket-customer-resolver";
+import { TicketCustomerResolver, TicketDirectory, TicketNotifier } from "./ports";
 import { assertCanHandle, authorizeAssignment } from "./ticket-assignment-authorization";
 import { recipientsWithTicketAccess } from "./ticket-recipient-access";
 import { planMessageNotifications } from "./ticket-notification.policy";
@@ -89,6 +90,7 @@ export interface TicketCommandDeps {
   config: TicketConfigReader;
   scheduler: SchedulerLoader;
   notifier: TicketNotifier;
+  customers: TicketCustomerResolver;
   nextCode: (now: Date) => Promise<string>;
   now: () => Date;
 }
@@ -103,6 +105,7 @@ export function createDefaultTicketDeps(): TicketCommandDeps {
     config: new MongooseTicketConfigReader(),
     scheduler: new MongooseSchedulerLoader(),
     notifier: new NotificationServiceTicketNotifier(),
+    customers: new MongooseTicketCustomerResolver(),
     nextCode: nextTicketCode,
     now: () => new Date()
   };
@@ -233,7 +236,7 @@ export class TicketCommandService {
         templateId: template?.id ?? null,
         customFields,
         urgency: cmd.urgency ?? template?.defaultUrgency ?? "normal",
-        customer: cmd.customer,
+        customer: await this.linkCustomer(actor, cmd.customer, product.appCode),
         relatedEmployeeId,
         createdBy: actor.employeeId,
         approvalRequired,
@@ -829,6 +832,28 @@ export class TicketCommandService {
   }
 
   // ---- nội bộ --------------------------------------------------------------------------------
+
+  // Khách người tạo chỉ nhập tay (SĐT) trên sản phẩm app: gắn vào hồ sơ CRM nếu khớp đúng một khách. Người có quyền xem
+  // khách hàng tự tra được ở form (theo phạm vi dữ liệu của họ) nên server KHÔNG tra thay — nếu không họ nhận được mã khách
+  // ngoài phạm vi của mình. Chỉ người không có quyền đó mới cần server tra hộ; họ không bao giờ nhận lại mã hay kết quả
+  // tra (xem customerVisibility), nên việc gắn chỉ có lợi cho người xử lý.
+  private async linkCustomer(
+    actor: TicketActor,
+    customer: CreateTicketCommand["customer"],
+    appCode: string | null
+  ): Promise<CreateTicketCommand["customer"]> {
+    if (!customer || actor.canViewCustomer || !appCode) return customer;
+    if (customer.customerId || customer.externalId || !customer.phone?.trim()) return customer;
+    const found = await this.deps.customers.findByPhone(customer.phone, appCode);
+    return found
+      ? {
+          ...customer,
+          customerId: found.customerId,
+          externalId: found.externalId,
+          appCode: found.appCode
+        }
+      : customer;
+  }
 
   // File nhạy cảm do SERVER quyết định, không tin hoàn toàn loại giấy tờ client khai: nhạy cảm khi loại
   // thuộc danh mục mặc định hoặc được mẫu của ticket đánh dấu; và khi ticket đang chờ người tạo bổ sung

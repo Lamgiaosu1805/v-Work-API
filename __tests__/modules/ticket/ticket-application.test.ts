@@ -1,6 +1,8 @@
 /* eslint-disable class-methods-use-this, max-classes-per-file */
 import mongoose from "mongoose";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
+import AppModel from "../../../src/models/AppModel";
+import CustomerModel from "../../../src/models/CustomerModel";
 import TicketActivityModel from "../../../src/models/TicketActivityModel";
 import TicketAttachmentModel from "../../../src/models/TicketAttachmentModel";
 import TicketCategoryModel from "../../../src/models/TicketCategoryModel";
@@ -1470,8 +1472,9 @@ describe("mã khách (externalId) chỉ trả cho người cần dùng", () => {
     const asRequester: any = await queries.getById(requester(), created.id);
     expect(asRequester.customer.externalId).toBeNull();
     expect(asRequester.customer.phone).toBe("0912345678");
+    // Không biết khách có trong CRM hay không (null): nếu không, nhân viên nào cũng dò được SĐT nào là khách
     expect(asRequester.customerAccess).toEqual({
-      linkedToCrm: true,
+      linkedToCrm: null,
       showExternalId: false,
       canOpenProfile: false
     });
@@ -1523,6 +1526,166 @@ describe("mã khách (externalId) chỉ trả cho người cần dùng", () => {
       showExternalId: false,
       canOpenProfile: false
     });
+  });
+});
+
+describe("server tự gắn khách CRM khi người tạo không có quyền xem khách hàng", () => {
+  let appId: unknown;
+  const crmCustomer = (phone: string, externalId: string, app: unknown = appId) =>
+    CustomerModel.create({ app_id: app, phone_number: phone, external_id: externalId });
+  const rawCustomer = async (ticketId: string) =>
+    ((await TicketModel.findById(ticketId).lean()) as any).customer;
+
+  beforeEach(async () => {
+    await Promise.all([AppModel.deleteMany({}), CustomerModel.deleteMany({})]);
+    appId = (await AppModel.create({ name: "TikLuy", code: "tikluy" }))._id;
+  });
+
+  it("gắn đúng hồ sơ theo SĐT, giữ tên người tạo gõ; người tạo không nhận lại mã hay kết quả tra", async () => {
+    const crm = await crmCustomer("0912345678", "user-777");
+    const created = await createPlain({
+      customer: { phone: "0912345678", name: "Tên người tạo gõ", appCode: "tikluy" }
+    });
+
+    expect(await rawCustomer(created.id)).toMatchObject({
+      customer_id: crm._id,
+      external_id: "user-777",
+      app_code: "tikluy",
+      phone: "0912345678",
+      name: "Tên người tạo gõ"
+    });
+
+    const asRequester: any = await queries.getById(requester(), created.id);
+    expect(asRequester.customer.externalId).toBeNull();
+    expect(asRequester.customerAccess.linkedToCrm).toBeNull();
+    // Người xử lý thì thấy khách đã gắn với CRM
+    const asIt: any = await queries.getById(itB(), created.id);
+    expect(asIt.customer.externalId).toBe("user-777");
+    expect(asIt.customerAccess).toMatchObject({ linkedToCrm: true, showExternalId: true });
+  });
+
+  it("nhận SĐT gõ có +84 / khoảng trắng và SĐT CRM lưu dạng 84...", async () => {
+    await crmCustomer("84912345678", "user-84");
+    const created = await createPlain({ customer: { phone: "+84 912 345 678", name: "A" } });
+    expect(await rawCustomer(created.id)).toMatchObject({ external_id: "user-84" });
+  });
+
+  it("không có trong CRM, khác app hoặc nhiều hồ sơ khớp → để nhập tay; người xử lý thấy cảnh báo", async () => {
+    // Không có trong CRM
+    const none = await createPlain({ customer: { phone: "0900000009", name: "B" } });
+    expect((await rawCustomer(none.id)).customer_id ?? null).toBeNull();
+    const detail: any = await queries.getById(itB(), none.id);
+    expect(detail.customerAccess.linkedToCrm).toBe(false);
+
+    // Chỉ có ở app khác
+    const otherApp = (await AppModel.create({ name: "VNFITE", code: "vnfite" }))._id;
+    await crmCustomer("0911111111", "other-app", otherApp);
+    const wrongApp = await createPlain({ customer: { phone: "0911111111", name: "C" } });
+    expect((await rawCustomer(wrongApp.id)).customer_id ?? null).toBeNull();
+
+    // Hai hồ sơ cùng SĐT (hai dạng lưu) → mơ hồ, không đoán
+    await crmCustomer("0922222222", "dup-1");
+    await crmCustomer("84922222222", "dup-2");
+    const dup = await createPlain({ customer: { phone: "0922222222", name: "D" } });
+    expect((await rawCustomer(dup.id)).customer_id ?? null).toBeNull();
+  });
+
+  it("người có quyền xem khách tự tra ở form: server không tra thay (tránh lộ mã khách ngoài phạm vi); đã chọn từ CRM thì giữ nguyên", async () => {
+    await crmCustomer("0933333333", "out-of-scope");
+    const sale = actor(REQUESTER, { canViewCustomer: true });
+    const typed = await createPlain({ customer: { phone: "0933333333", name: "E" } }, sale);
+    expect((await rawCustomer(typed.id)).customer_id ?? null).toBeNull();
+
+    const picked = await createPlain(
+      { customer: { phone: "0933333333", name: "E", externalId: "picked-1" } },
+      sale
+    );
+    expect(await rawCustomer(picked.id)).toMatchObject({ external_id: "picked-1" });
+  });
+
+  it("sản phẩm nội bộ (không có app) hoặc không nhập SĐT thì không tra", async () => {
+    await crmCustomer("0944444444", "internal");
+    const noPhone = await createPlain({ customer: { name: "Chỉ có tên" } });
+    expect((await rawCustomer(noPhone.id)).customer_id ?? null).toBeNull();
+
+    const internal = await TicketProductModel.create({
+      code: "crm_internal",
+      name: "CRM",
+      group: "CRM"
+    });
+    const created = await createPlain({
+      productId: String(internal._id),
+      customer: { phone: "0944444444", name: "F" }
+    });
+    expect((await rawCustomer(created.id)).customer_id ?? null).toBeNull();
+  });
+});
+
+describe("đổi cài đặt chung tính lại mốc của ticket đang mở", () => {
+  const config = () => new TicketConfigService(directory);
+  const docOf = async (ticketId: string) => (await TicketModel.findById(ticketId).lean()) as any;
+
+  it("ngưỡng 'chưa ai nhận' đổi → alert_at của ticket đang mở đổi theo, không tăng version, ticket đã đóng không bị đụng", async () => {
+    const open = await createPlain();
+    const closed = await createPlain({ title: "Sẽ đóng" });
+    await commands.claim(itA(), closed.id);
+    await commands.close(itA(), closed.id, { code: "wont_fix", note: "x" });
+
+    const before = await docOf(open.id);
+    const closedBefore = await docOf(closed.id);
+    expect(before.alert_reason).toBe("unclaimed");
+
+    // Mặc định Bình thường = 2 ngày làm việc (1080'); hạ còn 600' (vẫn ≥ ngưỡng Cao 540')
+    await config().updateSettings({ unclaimedMinutes: { normal: 600 } });
+
+    const after = await docOf(open.id);
+    expect(after.alert_at.getTime()).toBeLessThan(before.alert_at.getTime());
+    expect(after.version).toBe(before.version);
+    expect(after.alert_reason).toBe("unclaimed");
+    expect((await docOf(closed.id)).updatedAt).toEqual(closedBefore.updatedAt);
+  });
+
+  it("số ngày tự đóng của ticket chờ bổ sung đổi → auto_close_at và mốc nhắc dời theo", async () => {
+    const waiting = await commands.create(requester(), {
+      title: "Đổi SĐT",
+      productId: ids.product,
+      templateId: ids.templatePhone,
+      customFields: { new_phone: "0987654321" }
+    });
+    const before = await docOf(waiting.id);
+    expect(before.status).toBe("waiting_info");
+
+    await config().updateSettings({ autoCloseWaitingInfoDays: 6 });
+
+    const after = await docOf(waiting.id);
+    expect(after.auto_close_at.getTime()).toBeGreaterThan(before.auto_close_at.getTime());
+    expect(after.remind_at.getTime()).toBeGreaterThan(before.remind_at.getTime());
+    expect(after.version).toBe(before.version);
+  });
+
+  it("chỉ đổi người phụ trách mặc định thì không đụng tới mốc ticket", async () => {
+    const open = await createPlain();
+    const before = await docOf(open.id);
+    await config().updateSettings({ defaultHandlerIds: [IT_A] });
+    const after = await docOf(open.id);
+    expect(after.alert_at).toEqual(before.alert_at);
+    expect(after.updatedAt).toEqual(before.updatedAt);
+  });
+
+  it("ticket đang xử lý: mốc 'im lặng' đổi theo ngưỡng mới", async () => {
+    const open = await createPlain();
+    await commands.claim(itA(), open.id); // in_progress → mốc "im lặng"
+    const before = await docOf(open.id);
+    expect(before.alert_reason).toBe("silent");
+
+    await config().updateSettings({
+      silentMinutes: { urgent: 100, high: 200, normal: 300, low: 400 }
+    });
+
+    const after = await docOf(open.id);
+    expect(after.alert_reason).toBe("silent");
+    expect(after.alert_at.getTime()).toBeLessThan(before.alert_at.getTime());
+    expect(after.version).toBe(before.version);
   });
 });
 

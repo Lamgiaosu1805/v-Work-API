@@ -84,11 +84,10 @@ const TICKET_ACCESS_KEYS: Array<keyof TicketAccess> = [
   "canManage",
   "canViewRestricted",
   "canViewSensitive",
-  "canConfig",
-  "hasCrmAccess"
+  "canConfig"
 ];
 
-// Chỉ nhận đúng 10 cờ boolean; thiếu / sai kiểu → null (chưa tra được), không đoán có quyền. undefined (cổng không
+// Chỉ nhận đúng 9 cờ boolean; thiếu / sai kiểu → null (chưa tra được), không đoán có quyền. undefined (cổng không
 // tra quyền ticket) giữ nguyên để prompt không nhắc tới.
 function sanitizeTicketAccess(
   value: TicketAccess | null | undefined

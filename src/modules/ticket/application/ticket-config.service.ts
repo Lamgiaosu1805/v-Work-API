@@ -25,7 +25,24 @@ import { WorkingCalendar } from "../../../shared-kernel/working-calendar";
 import { URGENCY_LABELS } from "../domain/ticket-catalog";
 import { TICKET_URGENCIES, TicketUrgency } from "../domain/types";
 import { MongooseTicketDirectory } from "../infrastructure/ticket-directory";
+import { MongooseSchedulerLoader } from "../infrastructure/ticket-scheduler.loader";
+import { logger } from "../../../config/logger";
 import { EmployeeSummary, TicketDirectory } from "./ports";
+import { refreshActiveTicketSchedules } from "./ticket-schedule-refresh.service";
+
+// Cài đặt làm đổi mốc thời gian của ticket đang mở (người phụ trách mặc định và số ngày mở lại sau khi đóng thì không).
+const SCHEDULE_SETTING_KEYS = [
+  "workday_minutes",
+  "unclaimed_minutes",
+  "silent_minutes",
+  "hold_unknown_days",
+  "auto_close_resolved_days",
+  "auto_close_waiting_info_days",
+  "work_start_minute",
+  "work_end_minute",
+  "work_days",
+  "day_windows"
+];
 
 // Quản trị cấu hình ticket (quyền ticket.config): sản phẩm, loại yêu cầu, mẫu yêu cầu, cài đặt chung.
 // Toàn bộ là dữ liệu — thêm sản phẩm/mẫu mới không cần sửa code.
@@ -373,6 +390,17 @@ export class TicketConfigService {
       { $set, $setOnInsert: { key: TICKET_SETTING_KEY } },
       { upsert: true, new: true }
     ).lean();
+
+    // Ticket đang mở lưu sẵn mốc vàng / tự đóng / nhắc theo cấu hình cũ: đổi cấu hình thì tính lại ngay. Lỗi ở bước
+    // này chỉ log — cài đặt đã lưu xong, mốc của ticket sẽ tự đúng ở thao tác kế tiếp trên ticket đó.
+    if (SCHEDULE_SETTING_KEYS.some((key) => key in $set)) {
+      try {
+        const scheduler = await new MongooseSchedulerLoader().load(new Date());
+        await refreshActiveTicketSchedules(scheduler);
+      } catch (error) {
+        logger.error("Không tính lại mốc ticket sau khi đổi cài đặt chung", { error });
+      }
+    }
     return settingsFromDoc(doc);
   }
 }

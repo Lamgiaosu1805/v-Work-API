@@ -309,8 +309,7 @@ describe("hỏi với cổng thông tin cá nhân (service)", () => {
       canManage: false,
       canViewRestricted: false,
       canViewSensitive: false,
-      canConfig: false,
-      hasCrmAccess: true
+      canConfig: false
     };
     const idents = () => ({ accountId: oid(), userInfoId: oid() });
 
@@ -320,7 +319,7 @@ describe("hỏi với cổng thông tin cá nhân (service)", () => {
       expect(answerer.calls[0].personal).toEqual({ leaveBalanceDays: 1, ticketAccess: FLAGS });
     });
 
-    it("chỉ giữ đúng 10 cờ: trường lạ bị bỏ, không lọt vào prompt", async () => {
+    it("chỉ giữ đúng 9 cờ: trường lạ bị bỏ, không lọt vào prompt", async () => {
       const getForAsker = jest.fn().mockResolvedValue({
         leaveBalanceDays: 1,
         ticketAccess: { ...FLAGS, role: "ADMIN", secret: "x" }

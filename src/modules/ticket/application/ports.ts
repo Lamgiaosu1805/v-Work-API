@@ -37,6 +37,20 @@ export interface TicketDirectory {
   listDepartments(): Promise<DepartmentSummary[]>;
 }
 
+// Hồ sơ khách CRM mà ticket gắn vào (chỉ định danh, không kèm dữ liệu khách).
+export interface CrmCustomerRef {
+  customerId: string;
+  externalId: string | null;
+  appCode: string;
+}
+
+// Tra hồ sơ khách CRM theo SĐT trong một app — chạy phía server cho người tạo không có quyền xem khách (không tự tra
+// được qua API khách hàng). Kết quả chỉ dùng để gắn ticket, không bao giờ trả cho người tạo.
+export interface TicketCustomerResolver {
+  // Chỉ trả khi khớp ĐÚNG MỘT hồ sơ; không khớp / mơ hồ → null.
+  findByPhone(phone: string, appCode: string): Promise<CrmCustomerRef | null>;
+}
+
 export interface TicketNotification {
   employeeIds: string[];
   title: string;

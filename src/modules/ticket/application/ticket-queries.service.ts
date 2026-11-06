@@ -295,8 +295,12 @@ export class TicketQueryService {
           }
         : null,
       customerAccess: {
-        // Khách đã gắn với hồ sơ CRM (chọn từ CRM) hay do người tạo nhập tay — mọi người xem đều biết
-        linkedToCrm: Boolean(ticket.customer?.externalId || ticket.customer?.customerId),
+        // Khách đã gắn với hồ sơ CRM hay do người tạo nhập tay. Chỉ trả cho người cần biết (xử lý, IT, quản lý, người có
+        // quyền xem khách); người khác nhận null. Server tự gắn khách theo SĐT khi người tạo không có quyền xem khách,
+        // nên nếu trả cho mọi người thì bất kỳ nhân viên nào cũng dò được SĐT nào là khách của công ty qua việc tạo ticket.
+        linkedToCrm: customerRule.includeExternalId
+          ? Boolean(ticket.customer?.externalId || ticket.customer?.customerId)
+          : null,
         showExternalId: customerRule.showExternalId && Boolean(ticket.customer?.externalId),
         canOpenProfile:
           customerRule.includeExternalId &&

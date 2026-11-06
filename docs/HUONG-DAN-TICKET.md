@@ -19,7 +19,7 @@ Ticket hỗ trợ là kênh chính thức trên vWork để cán bộ nhân viê
 Ví dụ: lỗi app VNFITE, TIKLUY, lỗi CRM, hồ sơ vay bị vướng, khách quên mật khẩu hoặc cần reset thiết bị, giao dịch bị treo, đổi số điện thoại của khách.
 Ticket khác Đơn từ: Đơn từ chỉ được duyệt hoặc từ chối, còn ticket có người nhận xử lý, trao đổi, yêu cầu bổ sung, tạm hoãn và kết quả xử lý.
 Mọi nhân viên đều tạo được ticket (quyền có sẵn ở role Nhân viên cơ bản). Khách hàng không tự tạo ticket: khách báo qua fanpage, Sale hoặc CSKH, rồi Sale / CSKH tạo giúp.
-Người có quyền vào CRM mở ticket ở CRM, menu "CSKH & Call Center", mục "Ticket hỗ trợ". Người không có quyền CRM mở ở Workplace, menu "Công việc", mục "Ticket hỗ trợ".
+Ticket hỗ trợ mở ở Workplace, menu "Công việc", mục "Ticket hỗ trợ" (không có ở CRM, kể cả với người làm CRM).
 Số nhỏ cạnh mục "Ticket hỗ trợ" trên menu là số ticket cần bạn để ý (một ticket có thể nằm ở nhiều tab).
 Hỏi Trợ lý về một ticket cụ thể: gõ mã ticket (dạng TK-...) kèm câu hỏi; trợ lý cho biết trạng thái, ai đang xử lý, đang chờ ai và bước tiếp theo, nhưng chỉ tra được ticket do chính bạn tạo, không tra ticket của người khác.
 

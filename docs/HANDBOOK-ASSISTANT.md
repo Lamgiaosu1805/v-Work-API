@@ -117,9 +117,9 @@ hỏi** làm được, nó nhận thêm một dòng quyền của chính họ �
 để hỏi quyền người khác.
 
 - **Nguồn:** `workflows/handbook-personal-context.workflow.ts` đọc bộ quyền hiệu lực của `userInfoId` từ socket đã xác thực (cache
-  Redis dùng chung với `requirePermission`, không thêm truy vấn) và dựng `TicketAccess` (10 cờ boolean: tạo, xem, nhận / xử lý,
-  giao phòng ban, giao trong phòng, quản lý, xem ticket hạn chế, xem file nhạy cảm, cấu hình, **có quyền CRM** — danh sách quyền CRM
-  phải giữ khớp `CRM_ACCESS_PERMISSIONS` của web, quyết định ticket mở ở CRM hay Workplace). Hàm thuần `computeTicketAccess`.
+  Redis dùng chung với `requirePermission`, không thêm truy vấn) và dựng `TicketAccess` (9 cờ boolean: tạo, xem, nhận / xử lý,
+  giao phòng ban, giao trong phòng, quản lý, xem ticket hạn chế, xem file nhạy cảm, cấu hình). Hàm thuần `computeTicketAccess`.
+  (Trước đây có thêm cờ "có quyền CRM" để chỉ đường vào CRM hay Workplace; đã bỏ khi ticket chỉ còn ở Workplace.)
 - **Chỗ chèn:** một dòng "Quyền Ticket hỗ trợ của người hỏi: tạo ticket: có; xem ticket: có; nhận và xử lý ticket: không; ..." trong
   khối dữ liệu cá nhân của tin user HIỆN TẠI (sau điểm cache, ~100 token), không bao giờ trong phần cache dùng chung. Quy tắc 10 của
   system prompt: việc làm được thì hướng dẫn từng bước; việc chưa có quyền thì nói thẳng một câu, nói ai làm bước đó, gợi ý liên hệ

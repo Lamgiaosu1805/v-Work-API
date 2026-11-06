@@ -33,8 +33,7 @@ const NONE: TicketAccess = {
   canManage: false,
   canViewRestricted: false,
   canViewSensitive: false,
-  canConfig: false,
-  hasCrmAccess: false
+  canConfig: false
 };
 
 describe("computeTicketAccess (hàm thuần)", () => {
@@ -57,16 +56,14 @@ describe("computeTicketAccess (hàm thuần)", () => {
     });
   });
 
-  it("có MỘT trong 10 quyền CRM là có quyền CRM; quyền ngoài danh sách thì không", () => {
-    expect(computeTicketAccess(can("customer.view")).hasCrmAccess).toBe(true);
-    expect(computeTicketAccess(can("customer_claim_request.create")).hasCrmAccess).toBe(true);
-    expect(computeTicketAccess(can("customer.assign")).hasCrmAccess).toBe(false);
-    expect(computeTicketAccess(can("employee.view")).hasCrmAccess).toBe(false);
+  it("quyền CRM không làm đổi quyền ticket (ticket chỉ ở Workplace, không còn cờ riêng cho CRM)", () => {
+    expect(computeTicketAccess(can("customer.view"))).toEqual(NONE);
+    expect(computeTicketAccess(can("customer_claim_request.create"))).toEqual(NONE);
   });
 });
 
 describe("dòng quyền Ticket trong khối dữ liệu cá nhân", () => {
-  const FULL: TicketAccess = { ...NONE, canCreate: true, canView: true, hasCrmAccess: true };
+  const FULL: TicketAccess = { ...NONE, canCreate: true, canView: true };
 
   it("không có ticketAccess (cổng không tra) → khối giữ nguyên như cũ, không nhắc tới ticket", () => {
     const block = formatPersonalContext({ leaveBalanceDays: 8 }) as string;
@@ -74,12 +71,12 @@ describe("dòng quyền Ticket trong khối dữ liệu cá nhân", () => {
     expect(block).toBe(formatPersonalContext({ leaveBalanceDays: 8, ticketAccess: undefined }));
   });
 
-  it("có quyền → một dòng đủ 10 mục, có/không rõ ràng, không lộ mã quyền", () => {
+  it("có quyền → một dòng đủ 9 mục, có/không rõ ràng, không lộ mã quyền", () => {
     const block = formatPersonalContext({ leaveBalanceDays: 8, ticketAccess: FULL }) as string;
     expect(block).toContain(`- ${TICKET_ACCESS_LABEL}: `);
     expect(block).toContain("tạo ticket: có");
     expect(block).toContain("nhận và xử lý ticket: không");
-    expect(block).toContain("quyền vào phân hệ CRM: có");
+    expect(block).not.toContain("CRM");
     expect(block.split("\n")).toHaveLength(3);
     expect(block).not.toMatch(/ticket\.(handle|create|manage)/);
   });
@@ -212,17 +209,12 @@ describe("createHandbookPersonalContext với role seed thật", () => {
     await replset.stop();
   });
 
-  it("nhân viên thường: tạo + xem; không nhận / xử lý / giao / cấu hình; không có CRM", async () => {
+  it("nhân viên thường: tạo + xem; không nhận / xử lý / giao / cấu hình", async () => {
     expect(await accessOf("employee")).toEqual({ ...NONE, canCreate: true, canView: true });
   });
 
-  it("sale có role CRM: như nhân viên thường nhưng có quyền CRM (mở ticket ở CRM)", async () => {
-    expect(await accessOf("sale")).toEqual({
-      ...NONE,
-      canCreate: true,
-      canView: true,
-      hasCrmAccess: true
-    });
+  it("sale có role CRM: quyền ticket vẫn như nhân viên thường (CRM không thêm quyền ticket)", async () => {
+    expect(await accessOf("sale")).toEqual({ ...NONE, canCreate: true, canView: true });
   });
 
   it("nhân viên hỗ trợ ticket (IT): nhận / xử lý, giao phòng, xem ticket hạn chế và file nhạy cảm; không cấu hình", async () => {

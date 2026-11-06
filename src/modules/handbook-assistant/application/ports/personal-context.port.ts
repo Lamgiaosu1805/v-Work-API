@@ -22,8 +22,6 @@ export interface TicketAccess {
   canViewRestricted: boolean;
   canViewSensitive: boolean;
   canConfig: boolean;
-  // Có quyền vào phân hệ CRM → mở ticket ở CRM (CSKH & Call Center); không → mở ở Workplace.
-  hasCrmAccess: boolean;
 }
 
 export interface PersonalContext {

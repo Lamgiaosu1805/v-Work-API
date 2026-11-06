@@ -17,21 +17,6 @@ import { buildAbility } from "../modules/permission";
 
 const TICKET_SUBJECT = "Ticket";
 
-// Cùng danh sách với `CRM_ACCESS_PERMISSIONS` của web (vWork-website/src/features/permission/constants.js): có MỘT trong
-// các quyền này là "có quyền CRM" — quyết định ticket mở ở CRM hay Workplace. Phải giữ khớp với web.
-const CRM_ACCESS_ACTIONS: ReadonlyArray<readonly [action: string, subject: string]> = [
-  ["customer.view", "Customer"],
-  ["customer.claim", "Customer"],
-  ["customer.ai_insight", "Customer"],
-  ["investment.view", "Investment"],
-  ["investment.leaderboard", "Investment"],
-  ["commission.view", "Commission"],
-  ["transaction.view", "Transaction"],
-  ["ai_chat.use", "AiChat"],
-  ["claim_period.view", "ClaimPeriod"],
-  ["customer_claim_request.create", "CustomerClaimRequest"]
-];
-
 // Hàm thuần: từ hàm "có quyền không" dựng các cờ quyền Ticket của người hỏi.
 export function computeTicketAccess(
   can: (action: string, subject: string) => boolean
@@ -46,8 +31,7 @@ export function computeTicketAccess(
     canManage: ticket("ticket.manage"),
     canViewRestricted: ticket("ticket.view_restricted"),
     canViewSensitive: ticket("ticket.view_sensitive"),
-    canConfig: ticket("ticket.config"),
-    hasCrmAccess: CRM_ACCESS_ACTIONS.some(([action, subject]) => can(action, subject))
+    canConfig: ticket("ticket.config")
   };
 }
 

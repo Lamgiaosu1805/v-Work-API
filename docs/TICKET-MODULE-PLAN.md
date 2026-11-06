@@ -641,7 +641,7 @@ cấu hình). Chạy: `npx jest __tests__/modules/ticket`.
 
 Repo `vWork-website`, nhánh `feat/ticket`, thư mục `src/features/ticket/` + 3 trang
 `src/pages/workplace/Ticket{s,Detail,Config}Screen.jsx`. Menu "Ticket hỗ trợ" nằm trong Workplace (chỉ hiện với
-người có quyền ngoài role nhân viên mặc định: `ticket.handle`, `assign_*`, `view_restricted`, `view_sensitive`, `manage`, `config`; thêm lối vào ở CRM → CSKH & Call Center cho người có `ticket.view`); thông báo ticket mở thẳng `/workplace/tickets/:id`.
+người có quyền ngoài role nhân viên mặc định: `ticket.handle`, `assign_*`, `view_restricted`, `view_sensitive`, `manage`, `config`); thông báo ticket mở thẳng `/workplace/tickets/:id`.
 
 | Route | Nội dung |
 |---|---|
@@ -796,7 +796,7 @@ Nguồn: bản đề xuất 19/10/2026 (đơn vị kinh doanh, QTRR, Kế toán,
 | --- | --- | --- |
 | Người nhận: IT và quản trị CRM | Chỉ người có `ticket.handle` nhận / xử lý, không để mọi nhân viên | Bỏ `ticket.handle` khỏi `EMPLOYEE_BASELINE`; thêm vào `WORKPLACE_TICKET_STAFF` (`seedPermissionTicketRoles.ts`) |
 | Việc thuần nghiệp vụ → IT chuyển về đơn vị chủ trì | IT giao được cho phòng ban | `WORKPLACE_TICKET_STAFF` có `ticket.assign_department` |
-| Menu CSKH & Call Center | Giữ ticket ở Workplace, thêm lối vào ở CRM; Workplace chỉ hiện cho người có quyền không phải mặc định | `WorkplaceMenuItems.js` (`permissionAny` các quyền ticket ngoài view/create), `CrmMenuItems.js` (mục "Ticket hỗ trợ" trỏ `/workplace/tickets`) |
+| Menu CSKH & Call Center | (Đã đổi) Ticket chỉ ở Workplace, không có lối vào ở CRM; link cũ `/ticket-ho-tro...` chuyển sang Workplace. Bản đầu: giữ ticket ở Workplace, thêm lối vào ở CRM | `WorkplaceMenuItems.js` (`permissionAny` các quyền ticket ngoài view/create), `CrmMenuItems.js` (mục "Ticket hỗ trợ" trỏ `/workplace/tickets`) |
 | Sản phẩm "CRM VNFITE" | Chính là **VNFITE APP**, không thêm sản phẩm | — |
 | Loại ticket (Lỗi hệ thống / Hồ sơ vay) | Bỏ qua, không thêm loại; dùng loại "Lỗi / sự cố" | Hai mẫu mới `system_error`, `loan_file_stuck` thuộc loại này (`seedTicketConfig.ts`) |
 | Mã hồ sơ | Không bắt buộc, hiện **theo sản phẩm**: TIKLUY → mã khoản đầu tư, VNFITE → mã khoản vay. Chưa tra cứu bước / đơn vị / cờ SLA của hồ sơ (giai đoạn sau, cần API từ hệ thống hồ sơ vay) | Trường mẫu có `app_codes` (model `TicketTemplateModel`, `ticket-commands.service.ts`, `TicketDynamicFields`, màn cấu hình mẫu) |
@@ -808,7 +808,7 @@ Nguồn: bản đề xuất 19/10/2026 (đơn vị kinh doanh, QTRR, Kế toán,
 | Ticket Khẩn không ai nhận | Nhắc người phụ trách khi bị vàng | Bước 3 của `ticket-sweep.service.ts` (+ `alert_notified_for` ở `TicketModel`) |
 | Báo người tạo mỗi lần đổi trạng thái | Thêm tạm hoãn / tiếp tục / quay về hàng chờ nhận | `ticket-notification.policy.ts` (`planStatusChange`) |
 | Giờ làm việc 08–12, 13–17, T2–T6 | Bỏ thứ 7, ngày làm việc 480 phút; chưa trừ nghỉ trưa | Seed cài đặt tạo mới (8.4) |
-| (Phát sinh) Ai xem được ticket thường | Nhân viên thường chỉ xem ticket của mình và người cùng phòng; người xử lý / quản lý xem hết (không thêm cờ theo ticket hay theo mẫu) | `TicketActor.canViewAll` + `colleagueIds` (`ticket-actor.ts`), `accessLevel`, `visibilityFilter`; `meta.me.canViewAll`; web ẩn tab "Chưa ai nhận" với nhân viên thường; ticket chỉ hiện ở CRM (người có quyền CRM) hoặc Workplace (còn lại) |
+| (Phát sinh) Ai xem được ticket thường | Nhân viên thường chỉ xem ticket của mình và người cùng phòng; người xử lý / quản lý xem hết (không thêm cờ theo ticket hay theo mẫu) | `TicketActor.canViewAll` + `colleagueIds` (`ticket-actor.ts`), `accessLevel`, `visibilityFilter`; `meta.me.canViewAll`; web ẩn tab "Chưa ai nhận" với nhân viên thường; ticket chỉ hiện ở Workplace |
 
 **Không làm (đã chốt bỏ qua):** thêm loại "Hồ sơ vay", mẫu "Mở lại hồ sơ đóng nhầm" (ticket đã có nút "Mở lại" riêng), trường "Kênh liên hệ nhanh", cảnh báo khi ghi CCCD / SĐT khách vào tiêu đề và mô tả.
 
@@ -818,8 +818,8 @@ Nguồn: bản đề xuất 19/10/2026 (đơn vị kinh doanh, QTRR, Kế toán,
 2. Gán `WORKPLACE_TICKET_STAFF` cho IT; gán `WORKPLACE_TICKET_HANDLER` (chỉ có `ticket.handle`, không xem file nhạy cảm, không giao phòng ban) cho người của đơn vị khác được giao việc (vd Kế toán). Người chưa có quyền nào vẫn tạo và xem ticket được, nhưng nhận / xử lý thì bị từ chối (403).
 3. `npx ts-node --transpile-only scripts/seedTicketConfig.ts` để tạo 2 mẫu mới. Cài đặt chung đã có trong DB không bị ghi đè: vào Cấu hình → Cài đặt chung để đặt ngưỡng "chưa ai nhận" (30 phút / 1 giờ / 4 giờ / 1 ngày), ngày làm việc 480 phút, bỏ thứ 7.
 4. Gán người phụ trách cho mẫu / sản phẩm VNFITE APP trên màn Cấu hình (người nhận thông báo, kể cả nhắc ticket Khẩn / Cao chưa ai nhận).
-5. Ticket hỗ trợ chỉ hiện ở **một** nơi, theo quyền CRM (`CRM_ACCESS_PERMISSIONS` — cũng là điều kiện vào layout CRM): người **có** quyền CRM thấy mục "Ticket hỗ trợ" ở CRM → CSKH & Call Center (`/ticket-ho-tro`, kèm huy hiệu số ticket cần để ý); người **không có** thấy mục "Ticket hỗ trợ" ở Workplace (`/workplace/tickets`). Mục Workplace có cờ `hiddenWhenCrmAccess` (`WorkplaceMenuItems.js`, đọc ở `WorkplaceLayout.jsx`). Role nhân viên cơ bản không có quyền CRM nào nên nhân viên thường thấy ở Workplace. Phạm vi dữ liệu do backend quyết định (6.1).
-6. Link `/workplace/tickets`, `/workplace/tickets/config`, `/workplace/tickets/:id` (thông báo đẩy, link gửi nhau, gõ tay) tự chuyển sang `/ticket-ho-tro...` nếu người mở có quyền CRM (`WorkplaceTicketRoute.jsx`); thông báo trong web cũng mở thẳng bản CRM với người có quyền CRM (`Header.jsx`). Test phân quyền thật: `__tests__/modules/ticket/ticket-real-permissions.test.ts`.
+5. Ticket hỗ trợ chỉ hiện ở **Workplace** (`/workplace/tickets`, menu "Công việc", kèm huy hiệu số ticket cần để ý) cho mọi người có `ticket.view`, kể cả người làm CRM — không còn mục ở CRM → CSKH & Call Center. (Giai đoạn trước ticket nằm ở CRM với người có quyền CRM; đã gỡ.) Phạm vi dữ liệu do backend quyết định (6.1).
+6. Link cũ `/ticket-ho-tro...` (bookmark, thông báo đã gửi) tự chuyển sang `/workplace/tickets...` (`LegacyTicketRedirect.jsx` cho người có quyền CRM, `ProtectedRoute.jsx` cho người không có). Test phân quyền thật: `__tests__/modules/ticket/ticket-real-permissions.test.ts`.
 7. Nhân viên thường dùng chính mục "Ticket hỗ trợ" để gửi và theo dõi (tab "Ticket của tôi", "Ticket phòng ban"). Trưởng bộ phận muốn điều phối ticket phải được giao ticket cho phòng (hoặc gán `WORKPLACE_TICKET_STAFF`).
 8. Hộp thoại "Bổ sung thông tin" của người tạo có ô **Nội dung bổ sung**: lưu thành tin nhắn của người tạo trong phần trao đổi (`submit-info` nhận `note`). Bắt buộc nhập khi người xử lý hỏi mục chỉ trả lời được bằng chữ (`input: "text"` ở `INFO_REQUEST_CATALOG`: mô tả, các bước tái hiện, SĐT / CCCD khách, mã khoản đầu tư / vay, số tiền và thời điểm, căn cứ); mục `file` / `either` thì ô này không bắt buộc. Lời nhắc trong hộp thoại hiện từng mục kèm ghi chú của người xử lý.
 

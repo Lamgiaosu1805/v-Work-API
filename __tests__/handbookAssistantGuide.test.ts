@@ -243,8 +243,8 @@ describe("docs/HUONG-DAN-TICKET.md", () => {
     expect(baseline).not.toMatch(/permissionCode: "ticket\.handle"/);
   });
 
-  it("nêu cách mở theo quyền CRM, hai mẫu của nhóm tình huống hồ sơ vay và hai ví dụ ticket", () => {
-    expect(text(1)).toContain("CSKH & Call Center");
+  it("nêu cách mở ở Workplace (không còn ở CRM), hai mẫu của nhóm tình huống hồ sơ vay và hai ví dụ ticket", () => {
+    expect(text(1)).not.toContain("CSKH & Call Center");
     expect(text(1)).toContain("Workplace");
     expect(text(3)).toContain("Lỗi hệ thống");
     expect(text(3)).toContain("Hồ sơ vay đang xử lý bị vướng");

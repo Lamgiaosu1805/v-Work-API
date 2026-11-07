@@ -452,14 +452,30 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
       return { direct, indirect, entity };
     }
 
-    it("nghỉ dưới 2 ngày: quản lý gián tiếp không duyệt được (403)", async () => {
+    it("nghỉ dưới 2 ngày: quản lý gián tiếp cũng duyệt được, 1 lượt là xong", async () => {
       const { indirect, entity } = await setupChain(1.5);
 
+      const result = await reviewRequest(indirect, ALL, entity.id, { action: "approve" });
+
+      expect(result.isFinal).toBe(true);
+      expect(result.entity.status).toBe("approved");
+    });
+
+    it("người có quyền + đơn trong phạm vi nhưng không nằm trong chuỗi gợi ý vẫn duyệt được", async () => {
+      const { entity } = await setupChain(1);
+      const { account: outsider } = await createUserInfo(9);
+
+      const result = await reviewRequest(outsider, ALL, entity.id, { action: "approve" });
+
+      expect(result.isFinal).toBe(true);
+      expect(result.entity.status).toBe("approved");
+    });
+
+    it("đơn ngoài phạm vi quyền thì vẫn bị chặn 403", async () => {
+      const { direct, entity } = await setupChain(1);
+
       await expect(
-        reviewRequest(indirect, ALL, entity.id, { action: "approve" })
-      ).rejects.toMatchObject({ statusCode: 403 });
-      await expect(
-        reviewRequest(indirect, ALL, entity.id, { action: "reject" })
+        reviewRequest(direct, { _id: null }, entity.id, { action: "approve" })
       ).rejects.toMatchObject({ statusCode: 403 });
     });
 
@@ -472,15 +488,15 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
       expect(result.entity.status).toBe("approved");
     });
 
-    it("nghỉ từ 2 ngày: cấp 2 không duyệt trước cấp 1 được (403)", async () => {
-      const { indirect, entity } = await setupChain(2);
+    it("nghỉ từ 2 ngày: không theo thứ tự — cấp 2 duyệt trước, cấp 1 duyệt sau -> approved", async () => {
+      const { direct, indirect, entity } = await setupChain(2);
 
-      await expect(
-        reviewRequest(indirect, ALL, entity.id, { action: "approve" })
-      ).rejects.toMatchObject({
-        statusCode: 403,
-        message: "Đơn đang chờ quản lý trực tiếp duyệt trước"
-      });
+      const step1 = await reviewRequest(indirect, ALL, entity.id, { action: "approve" });
+      expect(step1.isFinal).toBe(false);
+
+      const step2 = await reviewRequest(direct, ALL, entity.id, { action: "approve" });
+      expect(step2.isFinal).toBe(true);
+      expect(step2.entity.status).toBe("approved");
     });
 
     it("nghỉ từ 2 ngày: cấp 1 duyệt -> chờ cấp 2; cấp 2 duyệt -> approved", async () => {
@@ -496,15 +512,12 @@ describe("reviewRequest() (workflows/review-request.workflow)", () => {
       expect(step2.entity.approvals).toHaveLength(2);
     });
 
-    it("nghỉ từ 2 ngày: cấp 1 đã duyệt thì không tự từ chối được nữa, chỉ cấp 2 quyết", async () => {
+    it("nghỉ từ 2 ngày: sau 1 lượt duyệt, người còn lại từ chối thì đơn bị từ chối", async () => {
       const { direct, indirect, entity } = await setupChain(3);
 
       await reviewRequest(direct, ALL, entity.id, { action: "approve" });
-      await expect(
-        reviewRequest(direct, ALL, entity.id, { action: "reject" })
-      ).rejects.toMatchObject({ statusCode: 403 });
-
       const result = await reviewRequest(indirect, ALL, entity.id, { action: "reject" });
+
       expect(result.entity.status).toBe("rejected");
     });
 

@@ -10,6 +10,9 @@ import { RequestPartiallyApprovedDomainEvent } from "../domain/events/request-pa
 import { RequestApprovedDomainEvent } from "../domain/events/request-approved.domain-event";
 import { RequestRejectedDomainEvent } from "../domain/events/request-rejected.domain-event";
 
+// Số người đầu chuỗi gợi ý được báo khi đơn có lượt duyệt / có kết quả (tương ứng cấp 1 + cấp 2).
+const NOTIFIED_REVIEWER_COUNT = 2;
+
 async function onRequestCreated(event: RequestCreatedDomainEvent): Promise<void> {
   const [userInfo, chain] = await Promise.all([
     UserInfoModel.findById(event.userId).select("full_name"),
@@ -50,14 +53,13 @@ async function onRequestPartiallyApproved(
     })
   ];
 
-  // Báo người duyệt tiếp theo — trước đây cấp 2 không nhận được thông báo nào cho tới khi đơn có kết
-  // quả. Đơn nghỉ phép duyệt tuần tự nên chỉ còn cấp 2; loại đơn khác (không theo thứ tự) thì báo mọi
-  // người còn lại trong chuỗi. Tra chuỗi sau khi đã gửi thông báo cho chủ đơn.
+  // Báo người duyệt tiếp theo: những người đứng đầu chuỗi gợi ý (trừ người vừa duyệt) — duyệt không
+  // theo thứ tự nên ai trong số họ cũng có thể duyệt lượt còn lại.
   const chain = await getApprovalChain(event.userId);
-  const nextReviewers = event.requestType === "leave" ? chain.slice(1) : chain;
   const excluded = new Set([String(reviewerInfo.id_account), String(employeeInfo.id_account)]);
-  nextReviewers
+  chain
     .filter((c) => !excluded.has(String(c.accountId)))
+    .slice(0, NOTIFIED_REVIEWER_COUNT)
     .forEach((c) => {
       notifications.push(
         notify(c.accountId, {
@@ -122,11 +124,11 @@ async function notifyFinalDecision(
     );
   }
 
-  // HCNS (người có hrm.request.view_all) + cả chuỗi duyệt — quản lý gián tiếp "nắm thông tin" theo
-  // luồng phân quyền chấm công, kể cả khi đơn chỉ cần quản lý trực tiếp duyệt.
+  // HCNS (người có hrm.request.view_all) + những người đứng đầu chuỗi gợi ý (quản lý trực tiếp + gián
+  // tiếp "nắm thông tin"). Không báo cả chuỗi vì chuỗi có thể gồm mọi người có quyền duyệt toàn công ty.
   const chain = await getApprovalChain(event.userId);
   const broadcastIds = new Set(hrAccountIds.map((accId: unknown) => String(accId)));
-  chain.forEach((c) => broadcastIds.add(String(c.accountId)));
+  chain.slice(0, NOTIFIED_REVIEWER_COUNT).forEach((c) => broadcastIds.add(String(c.accountId)));
   broadcastIds.delete(reviewerAccountId);
   broadcastIds.delete(employeeAccountId);
 

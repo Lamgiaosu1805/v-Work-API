@@ -15,9 +15,8 @@ import { RequestType, RequestProps, RequestStatus } from "./types";
 
 const VALID_STATUSES: RequestStatus[] = ["pending", "approved", "rejected", "cancelled"];
 
-// LUỒNG PHÂN QUYỀN CHẤM CÔNG V-WORK (HCNS, 10/2026): "Nghỉ phép dưới 2 ngày: Quản lý trực tiếp phê
-// duyệt" — từ 2 ngày trở lên là vượt thẩm quyền, phải chuyển Quản lý gián tiếp duyệt (thay ngưỡng
-// "> 2 ngày" của SRS v2.0 trước đây).
+// LUỒNG PHÂN QUYỀN CHẤM CÔNG V-WORK (HCNS, 10/2026): nghỉ phép từ 2 ngày trở lên cần 2 người duyệt
+// (thay ngưỡng "> 2 ngày" của SRS v2.0 trước đây). 2 lượt duyệt không theo thứ tự cấp.
 export const LEAVE_MULTI_APPROVAL_MIN_DAYS = 2;
 
 const MULTI_APPROVAL_RULES: Partial<Record<RequestType, (props: RequestProps) => boolean>> = {
@@ -25,19 +24,6 @@ const MULTI_APPROVAL_RULES: Partial<Record<RequestType, (props: RequestProps) =>
   forgot_checkin: (props) => (props.occurrence ?? 0) >= 6,
   late_early: (props) => (props.occurrence ?? 0) >= 4
 };
-
-// Ai trong chuỗi duyệt (cấp 1 = trực tiếp, cấp 2 = gián tiếp) được duyệt/từ chối đơn:
-// - direct_only: chỉ cấp 1; cấp 2 chỉ nhận thông tin (nghỉ phép dưới 2 ngày)
-// - sequential: cấp 1 duyệt trước rồi mới chuyển cấp 2 (nghỉ phép từ 2 ngày)
-// - any: ai trong chuỗi cũng được, không theo thứ tự (các loại đơn khác — giữ nguyên như cũ)
-export type ApprovalMode = "direct_only" | "sequential" | "any";
-
-export function approvalModeOf(
-  props: Pick<RequestProps, "request_type" | "total_days">
-): ApprovalMode {
-  if (props.request_type !== "leave") return "any";
-  return (props.total_days ?? 0) >= LEAVE_MULTI_APPROVAL_MIN_DAYS ? "sequential" : "direct_only";
-}
 
 export const REQUEST_TYPE_FIELDS: Record<RequestType, string[]> = {
   leave: [
@@ -117,16 +103,13 @@ export class RequestEntity extends AggregateRoot<RequestProps> {
     return rule ? rule(this.props) : false;
   }
 
-  approvalMode(): ApprovalMode {
-    return approvalModeOf(this.props);
-  }
-
-  // Số lượt duyệt cần để đơn được duyệt xong, khi chuỗi duyệt có `chainLength` người. Đơn nghỉ phép
-  // nhiều cấp mà chuỗi chỉ có 1 cấp (vd Phó TGĐ xin nghỉ, chỉ TGĐ ở trên) thì 1 lượt là đủ — các loại
-  // đơn khác, hoặc chưa biết chuỗi (không truyền / chuỗi rỗng), giữ nguyên cách cũ: đa cấp cần 2 lượt.
+  // Số lượt duyệt cần để đơn được duyệt xong, khi có `chainLength` người duyệt được đơn này. Đơn đa
+  // duyệt mà chỉ có 1 người duyệt được (vd Phó TGĐ xin nghỉ, chỉ TGĐ ở trên) thì 1 lượt là đủ — không
+  // thì đơn treo mãi vì 1 người không được duyệt 2 lần. Chưa biết chuỗi (không truyền / chuỗi rỗng):
+  // đa duyệt cần 2 lượt.
   requiredApprovals(chainLength?: number): number {
     if (!this.needsMultiApproval()) return 1;
-    if (this.approvalMode() === "sequential" && chainLength) return Math.min(2, chainLength);
+    if (chainLength) return Math.min(2, chainLength);
     return 2;
   }
 

@@ -62,7 +62,7 @@ describe("RequestEntity.reject() — veto-1-người, giữ nguyên hành vi g�
 
 // LUỒNG PHÂN QUYỀN CHẤM CÔNG V-WORK (HCNS, 10/2026): "Nghỉ phép dưới 2 ngày: Quản lý trực tiếp phê
 // duyệt" — từ 2 ngày trở lên cần 2 cấp (thay ngưỡng "> 2 ngày" của SRS v2.0). Khoá đúng ngưỡng biên.
-describe("RequestEntity — ngưỡng đa duyệt nghỉ phép (từ 2 ngày) và approvalMode()", () => {
+describe("RequestEntity — ngưỡng đa duyệt nghỉ phép (từ 2 ngày) và số lượt duyệt", () => {
   function newLeaveEntity(totalDays) {
     return RequestEntity.create({
       userId: "employee-1",
@@ -79,17 +79,15 @@ describe("RequestEntity — ngưỡng đa duyệt nghỉ phép (từ 2 ngày) v�
     });
   }
 
-  it("total_days = 1.5: chỉ quản lý trực tiếp duyệt (direct_only, 1 lượt)", () => {
+  it("total_days = 1.5: 1 lượt duyệt", () => {
     const entity = newLeaveEntity(1.5);
     expect(entity.needsMultiApproval()).toBe(false);
-    expect(entity.approvalMode()).toBe("direct_only");
     expect(entity.requiredApprovals(2)).toBe(1);
   });
 
-  it("total_days = 2: cần 2 cấp, duyệt tuần tự (sequential)", () => {
+  it("total_days = 2: cần 2 người duyệt", () => {
     const entity = newLeaveEntity(2);
     expect(entity.needsMultiApproval()).toBe(true);
-    expect(entity.approvalMode()).toBe("sequential");
     expect(entity.requiredApprovals(2)).toBe(2);
   });
 
@@ -98,5 +96,20 @@ describe("RequestEntity — ngưỡng đa duyệt nghỉ phép (từ 2 ngày) v�
     expect(entity.requiredApprovals(1)).toBe(1);
     expect(entity.requiredApprovals(0)).toBe(2);
     expect(entity.requiredApprovals()).toBe(2);
+  });
+
+  it("quên chấm công lần thứ 6 mà chỉ 1 người duyệt được: 1 lượt là đủ (không treo đơn)", () => {
+    const entity = RequestEntity.create({
+      userId: "employee-1",
+      requestType: "forgot_checkin",
+      reason: "test",
+      date: new Date("2026-01-05"),
+      type: "check_in",
+      expected_check_in: new Date("2026-01-05T08:00:00+07:00"),
+      occurrence: 6
+    });
+    expect(entity.needsMultiApproval()).toBe(true);
+    expect(entity.requiredApprovals(1)).toBe(1);
+    expect(entity.requiredApprovals(3)).toBe(2);
   });
 });

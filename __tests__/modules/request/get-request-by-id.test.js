@@ -160,7 +160,7 @@ describe("getRequestById()", () => {
     expect(String(data.pending_reviewer.accountId)).toBe(String(reviewerB));
   });
 
-  it("approval_chain: nghỉ dưới 2 ngày — cấp 2 chỉ nhận thông tin (role informed), pending là cấp 1", async () => {
+  it("approval_chain: ai trong chuỗi cũng là người duyệt (approval_mode any, role approver), pending là người đầu", async () => {
     const { account, userInfo } = await createUserInfo(1);
     const reviewerA = new mongoose.Types.ObjectId();
     const reviewerB = new mongoose.Types.ObjectId();
@@ -170,9 +170,9 @@ describe("getRequestById()", () => {
     getApprovalChain.mockResolvedValue([{ accountId: reviewerA }, { accountId: reviewerB }]);
 
     const data = await getRequestById(account, ALL, String(doc._id));
-    expect(data.approval_mode).toBe("direct_only");
+    expect(data.approval_mode).toBe("any");
     expect(data.approval_chain[0]).toMatchObject({ accountId: reviewerA, role: "approver" });
-    expect(data.approval_chain[1]).toMatchObject({ accountId: reviewerB, role: "informed" });
+    expect(data.approval_chain[1]).toMatchObject({ accountId: reviewerB, role: "approver" });
     expect(String(data.pending_reviewer.accountId)).toBe(String(reviewerA));
   });
 
@@ -193,7 +193,6 @@ describe("getRequestById()", () => {
     ]);
 
     const data = await getRequestById(account, ALL, String(doc._id));
-    expect(data.approval_mode).toBe("sequential");
     expect(data.approval_chain[0].approved).toBe(true);
     expect(data.approval_chain[1].approved).toBe(false);
   });

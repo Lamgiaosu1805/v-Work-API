@@ -23,24 +23,27 @@ Bước 1: vào Chấm công, Đơn từ, tab "Đơn của tôi", bấm nút "T�
 Bước 2: ở ô "Loại đơn*" chọn một trong các loại: Quên chấm công, Nghỉ phép, Nghỉ không lương, Nghỉ dài hạn, Đi muộn, Về sớm, Đi công tác, Đi gặp gỡ khách hàng, Làm việc từ xa.
 Bước 3: điền các trường của loại đơn đó (xem từng mục riêng bên dưới); các trường có dấu * là bắt buộc.
 Bước 4: nhập "Lí do*". Lý do là bắt buộc với mọi loại đơn và tối đa 100 ký tự.
-Bước 5: xem phần "Luồng duyệt áp dụng" ở cuối form: hệ thống hiển thị người duyệt cấp 1 (quản lý trực tiếp) và cấp 2 (quản lý gián tiếp) của bạn.
-Bước 6: bấm "Tạo đơn". Đơn chuyển sang trạng thái "Chờ duyệt" và người duyệt cấp 1 nhận thông báo trên vWork.
+Bước 5: xem phần "Luồng duyệt áp dụng" ở cuối form: hệ thống hiển thị những người duyệt được đơn của bạn, quản lý trực tiếp và quản lý gián tiếp đứng đầu.
+Bước 6: bấm "Tạo đơn". Đơn chuyển sang trạng thái "Chờ duyệt" và người đứng đầu danh sách duyệt (thường là quản lý trực tiếp) nhận thông báo trên vWork.
 Hệ thống kiểm tra đơn ngay khi gửi; nếu vi phạm một quy tắc (trùng đơn, hết phép, sai giờ...) sẽ hiện thông báo lỗi và đơn không được tạo (xem Mục 11).
 
 ## Mục 3. Ai duyệt đơn và cần mấy cấp duyệt
 
-Người duyệt cấp 1 là quản lý trực tiếp của bạn, do Phòng Hành chính - Nhân sự cài trên hồ sơ nhân viên. Nếu chưa cài thì người duyệt cấp 1 là trưởng bộ phận (người quản lý phòng ban của bạn, tính lên phòng ban cấp trên nếu phòng ban của bạn chưa có người quản lý).
-Người duyệt cấp 2 là quản lý gián tiếp, thường là cấp trên của người duyệt cấp 1 (hoặc trưởng bộ phận của bạn nếu khác người cấp 1). Nếu không xác định được người cấp 2 thì đơn chỉ có 1 cấp duyệt.
-Nghỉ phép dưới 2 ngày: chỉ quản lý trực tiếp (cấp 1) duyệt; quản lý gián tiếp (cấp 2) chỉ nhận thông tin, không duyệt.
-Nghỉ phép từ 2 ngày trở lên: duyệt tuần tự 2 cấp, cấp 1 duyệt trước rồi đơn mới chuyển sang cấp 2; đơn chỉ được duyệt xong khi đủ cả hai cấp. Nếu chuỗi duyệt chỉ có 1 cấp thì 1 lượt duyệt là đủ.
-Đi muộn / về sớm: trong mỗi kỳ lương, các đơn thứ 1 đến thứ 3 chỉ cần 1 người trong chuỗi duyệt; từ đơn thứ 4 trở đi trong cùng kỳ lương cần 2 người duyệt.
-Quên chấm công: trong mỗi kỳ lương, các lần quên đầu chỉ cần 1 người trong chuỗi duyệt; từ lần quên thứ 6 trở đi trong cùng kỳ lương cần 2 người duyệt.
-Làm việc từ xa, đi công tác, đi gặp gỡ khách hàng: chỉ cần 1 người trong chuỗi duyệt (cấp 1 hoặc cấp 2) duyệt là xong.
+Người duyệt được đơn của bạn gồm:
+- Quản lý trực tiếp của bạn, do Phòng Hành chính - Nhân sự cài trên hồ sơ nhân viên. Nếu chưa cài thì là trưởng bộ phận (người quản lý phòng ban của bạn, tính lên phòng ban cấp trên nếu phòng ban của bạn chưa có người quản lý).
+- Quản lý gián tiếp, thường là cấp trên của quản lý trực tiếp (hoặc trưởng bộ phận của bạn nếu khác người trên).
+- Những người được cấp quyền duyệt đơn có phạm vi bao gồm bạn (ví dụ trưởng phòng được cấp quyền duyệt đơn trong phòng, hoặc người được cấp quyền duyệt đơn toàn công ty).
+Bất kỳ ai trong số này cũng duyệt hoặc từ chối được đơn, không phải chờ theo thứ tự cấp.
+Nghỉ phép dưới 2 ngày: cần 1 người duyệt.
+Nghỉ phép từ 2 ngày trở lên: cần 2 người khác nhau duyệt, không theo thứ tự. Nếu chỉ có 1 người duyệt được đơn của bạn thì 1 lượt duyệt là đủ.
+Đi muộn / về sớm: trong mỗi kỳ lương, các đơn thứ 1 đến thứ 3 chỉ cần 1 người duyệt; từ đơn thứ 4 trở đi trong cùng kỳ lương cần 2 người duyệt.
+Quên chấm công: trong mỗi kỳ lương, các lần quên đầu chỉ cần 1 người duyệt; từ lần quên thứ 6 trở đi trong cùng kỳ lương cần 2 người duyệt.
+Làm việc từ xa, đi công tác, đi gặp gỡ khách hàng: chỉ cần 1 người duyệt là xong.
 Kỳ lương tính từ ngày 26 của tháng này đến hết ngày 25 của tháng sau. Số lần đi muộn / về sớm và quên chấm công được hệ thống tự đếm trong kỳ lương, tính cả đơn đang chờ duyệt và đơn đã duyệt.
 Nếu một người duyệt từ chối thì đơn bị từ chối ngay, kể cả khi người duyệt trước đã duyệt.
-Người có quyền duyệt mọi đơn toàn công ty (thường là lãnh đạo) duyệt xong thì đơn được chốt ngay, không phải chờ các cấp khác.
+Người có quyền "duyệt mọi đơn toàn công ty" (thường là lãnh đạo) duyệt xong thì đơn được chốt ngay, không phải chờ lượt duyệt thứ hai.
 Không ai duyệt được đơn của chính mình.
-Thông báo: khi bạn tạo đơn, người duyệt cấp 1 nhận thông báo "Đơn xin phép mới". Với đơn cần 2 người duyệt, sau khi người duyệt đầu tiên duyệt, bạn nhận thông báo "Đơn đã được duyệt bước 1/2" và người duyệt tiếp theo nhận thông báo chờ duyệt. Khi có kết quả cuối cùng bạn nhận thông báo "Đơn được duyệt" hoặc "Đơn bị từ chối"; Phòng Hành chính - Nhân sự và những người trong chuỗi duyệt cũng nhận thông báo kết quả.
+Thông báo: khi bạn tạo đơn, người đứng đầu danh sách duyệt nhận thông báo "Đơn xin phép mới". Với đơn cần 2 người duyệt, sau khi người duyệt đầu tiên duyệt, bạn nhận thông báo "Đơn đã được duyệt bước 1/2" và quản lý trực tiếp / gián tiếp còn lại nhận thông báo chờ duyệt. Khi có kết quả cuối cùng bạn nhận thông báo "Đơn được duyệt" hoặc "Đơn bị từ chối"; Phòng Hành chính - Nhân sự và quản lý trực tiếp, gián tiếp của bạn cũng nhận thông báo kết quả.
 
 ## Mục 4. Đơn nghỉ phép (Nghỉ phép, Nghỉ không lương, Nghỉ dài hạn)
 
@@ -82,7 +85,7 @@ Số lần quên chấm công được đếm theo kỳ lương (26 tháng này 
 
 Chọn "Loại đơn*" là "Làm việc từ xa". Nhập "Ngày diễn ra sự kiện*" (ngày làm việc từ xa) và "Lí do*". Mỗi đơn áp dụng cho 1 ngày.
 Không tạo được đơn nếu ngày đó đã có đơn làm việc từ xa đang "Chờ duyệt" hoặc "Đã duyệt".
-Chỉ cần 1 người trong chuỗi duyệt duyệt đơn.
+Chỉ cần 1 người duyệt.
 Khi đơn được duyệt, ngày đó được ghi nhận là ngày làm việc từ xa và tính công như ngày làm việc bình thường (thứ Bảy tính 0,5 công).
 
 ## Mục 8. Đơn đi công tác
@@ -90,7 +93,7 @@ Khi đơn được duyệt, ngày đó được ghi nhận là ngày làm việc
 Chọn "Loại đơn*" là "Đi công tác". Nhập "Từ ngày*", "Đến ngày*", "Địa điểm*" (địa điểm công tác, bắt buộc) và "Lí do*".
 Ngày bắt đầu không được sau ngày kết thúc.
 Không tạo được đơn nếu khoảng thời gian trùng với một đơn đi công tác khác đang "Chờ duyệt" hoặc "Đã duyệt".
-Chỉ cần 1 người trong chuỗi duyệt duyệt đơn.
+Chỉ cần 1 người duyệt.
 Khi đơn được duyệt, các ngày trong khoảng công tác (trừ Chủ nhật) được ghi nhận là ngày đi công tác và tính công như ngày làm việc bình thường (thứ Bảy tính 0,5 công).
 
 ## Mục 9. Đơn đi gặp gỡ khách hàng
@@ -98,7 +101,7 @@ Khi đơn được duyệt, các ngày trong khoảng công tác (trừ Chủ nh
 Chọn "Loại đơn*" là "Đi gặp gỡ khách hàng". Nhập "Ngày diễn ra sự kiện*", "Giờ bắt đầu*", "Giờ kết thúc*" và "Lí do*". Mỗi đơn áp dụng cho 1 ngày.
 Giờ kết thúc phải sau giờ bắt đầu.
 Không tạo được đơn nếu khung giờ trùng với một đơn gặp khách hàng khác của bạn trong cùng ngày đang "Chờ duyệt" hoặc "Đã duyệt".
-Chỉ cần 1 người trong chuỗi duyệt duyệt đơn.
+Chỉ cần 1 người duyệt.
 Khi đơn được duyệt, ngày đó được ghi nhận là ngày đi gặp khách hàng và tính công như ngày làm việc bình thường (thứ Bảy tính 0,5 công).
 
 ## Mục 10. Theo dõi, thu hồi và tạo lại đơn
@@ -115,9 +118,8 @@ Thông báo kết quả duyệt hiện ở biểu tượng chuông trên vWork; 
 Mở tab "Xử lý yêu cầu" trong Đơn từ (số trong ngoặc là số đơn đang chờ bạn) hoặc bấm vào thông báo để mở thẳng đơn cần duyệt.
 Bấm "Xem chi tiết" để xem người gửi, loại đơn, ngày, lý do và tiến trình duyệt, rồi bấm "Duyệt đơn" hoặc "Từ chối". Hệ thống hỏi xác nhận ("Xác nhận phê duyệt đơn?" hoặc "Xác nhận từ chối yêu cầu?").
 Khi từ chối, nên nhập lý do vào ô "Nhập lí do từ chối cụ thể..." để nhân viên biết và chỉnh sửa.
-Bạn chỉ duyệt được đơn của nhân viên mà bạn nằm trong chuỗi duyệt (quản lý trực tiếp hoặc quản lý gián tiếp của nhân viên đó). Nếu không, hệ thống báo "Bạn không được chỉ định duyệt đơn này".
-Đơn nghỉ phép dưới 2 ngày: chỉ cấp 1 duyệt được; cấp 2 sẽ thấy thông báo "Đơn nghỉ dưới 2 ngày do quản lý trực tiếp duyệt, quản lý gián tiếp chỉ nhận thông tin".
-Đơn nghỉ phép từ 2 ngày: cấp 2 chỉ duyệt được sau khi cấp 1 đã duyệt; trước đó hệ thống báo "Đơn đang chờ quản lý trực tiếp duyệt trước".
+Bạn duyệt được đơn của nhân viên mà bạn quản lý (quản lý trực tiếp hoặc quản lý gián tiếp) hoặc nằm trong phạm vi quyền duyệt đơn được cấp cho bạn (ví dụ quyền duyệt đơn trong phòng ban). Nếu không, hệ thống báo "Bạn không được chỉ định duyệt đơn này".
+Duyệt không theo thứ tự cấp: với đơn cần 2 người duyệt, bất kỳ 2 người duyệt được nào cũng có thể duyệt, ai trước cũng được.
 Với đơn cần 2 người duyệt, một người không duyệt được 2 lần; hệ thống báo "Bạn đã duyệt đơn này rồi".
 Bạn không duyệt được đơn của chính mình ("Không thể tự duyệt đơn của mình").
 Khi đơn đủ số lượt duyệt, hệ thống tự cập nhật bảng công của nhân viên; khi bạn từ chối đơn nghỉ có phép, ngày phép được hoàn lại cho nhân viên.

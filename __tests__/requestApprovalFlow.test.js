@@ -591,7 +591,7 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
     expect(updated.approvals.length).toBe(1);
   });
 
-  test("admin khác không nằm trong chuỗi không được duyệt lượt thứ 2", async () => {
+  test("admin khác (có quyền, đơn trong phạm vi) duyệt lượt thứ 2 dù không nằm trong chuỗi gợi ý -> approved", async () => {
     const branchId = new mongoose.Types.ObjectId();
     const dept = await createDept("Phòng Kế toán", "department");
     const { userInfo: employee } = await createEmployee({ branchId });
@@ -624,13 +624,13 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
       res2
     );
 
-    expect(res2.status).toHaveBeenCalledWith(403);
+    expect(res2.status).toHaveBeenCalledWith(200);
     const updated = await LeaveRequest.findById(request._id);
-    expect(updated.status).toBe("pending");
-    expect(updated.approvals.length).toBe(1);
+    expect(updated.status).toBe("approved");
+    expect(updated.approvals.length).toBe(2);
   });
 
-  test("cấp 2 không thể vượt bước cấp 1 khi duyệt đơn nghỉ dài ngày", async () => {
+  test("không theo thứ tự: cấp 2 duyệt trước, cấp 1 duyệt sau -> approved", async () => {
     const branchId = new mongoose.Types.ObjectId();
     const dept = await createDept("Phòng Kế toán", "department");
     const { userInfo: employee } = await createEmployee({ branchId });
@@ -655,13 +655,16 @@ describe("review — duyệt 2 người cho đơn nghỉ dài ngày (total_days 
 
     const resB = makeRes();
     await callController(requestHttpController.review, reqB, resB);
-    expect(resB.status).toHaveBeenCalledWith(403);
+    expect(resB.status).toHaveBeenCalledWith(200);
+    expect((await LeaveRequest.findById(request._id)).status).toBe("pending");
 
-    await callController(requestHttpController.review, reqA, makeRes());
+    const resA = makeRes();
+    await callController(requestHttpController.review, reqA, resA);
+    expect(resA.status).toHaveBeenCalledWith(200);
     const updated = await LeaveRequest.findById(request._id);
-    expect(updated.status).toBe("pending");
-    expect(updated.approvals.length).toBe(1);
-    expect(onApproveSpy).not.toHaveBeenCalled();
+    expect(updated.status).toBe("approved");
+    expect(updated.approvals.length).toBe(2);
+    expect(onApproveSpy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -683,7 +686,7 @@ describe("review — lãnh đạo có quyền request.approve_all duyệt mọi 
     return { employee, leader, chainManager: r1 };
   }
 
-  test("không có approve_all: người ngoài chuỗi vẫn bị chặn 403 như cũ", async () => {
+  test("không có approve_all: người ngoài chuỗi gợi ý có quyền + đơn trong phạm vi vẫn duyệt được", async () => {
     const { employee, leader } = await setupRequestOutsideChain();
     const request = await createLeaveRequest(employee._id);
     const res = makeRes();
@@ -697,8 +700,8 @@ describe("review — lãnh đạo có quyền request.approve_all duyệt mọi 
       },
       res
     );
-    expect(res.status).toHaveBeenCalledWith(403);
-    expect((await LeaveRequest.findById(request._id)).status).toBe("pending");
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect((await LeaveRequest.findById(request._id)).status).toBe("approved");
   });
 
   test("có approve_all: duyệt được đơn phòng khác và chốt ngay cả đơn cần 2 cấp", async () => {

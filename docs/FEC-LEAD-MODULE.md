@@ -14,6 +14,24 @@ x-api-key: <dùng chung client "vnfite" đã có sẵn trong verifyInternalReque
 - Thiếu field bắt buộc → `400`.
 - Không tìm thấy customer theo `external_id` → `404`.
 
+### API đọc cho người dùng CRM (menu "Khách FE Credit")
+
+Lead thuộc về khách nên quyền xem theo **`customer.view` + phạm vi dữ liệu** (Sale chỉ thấy lead của khách mình
+phụ trách, quản lý toàn công ty thấy tất cả). Mọi route cần `Authorization: Bearer`.
+
+| Method | Path | Quyền | Mô tả |
+|---|---|---|---|
+| GET | `/fec-lead/leads?app_code=&bucket=&q=&page=&limit=` | `customer.view` | Danh sách theo nhóm (`FOLLOW_UP`, `IN_PROGRESS`, `COMPLETED`, `STOPPED`, `REJECTED_AT_START`), tìm theo tên/SĐT/mã hồ sơ; trả kèm `counts` theo nhóm |
+| GET | `/fec-lead/leads/:leadGenId/history` | `customer.view` | Lịch sử các bước (callback) của một hồ sơ; ngoài phạm vi → 403 |
+| GET | `/fec-lead/leads/export?app_code=&bucket=&q=` | `customer.export` + `customer.view` | Xuất Excel đúng nhóm/từ khoá đang xem (tối đa 5.000 dòng), có ghi `data_export_log` (resource `fec_lead`) |
+
+`app_code` mặc định `vnfite`. Nhãn bước (`step_label`, `status_label`) và gợi ý cho Sale (`advice`) do server dựng
+một chỗ ở `domain/fec-lead-presentation.ts` để màn hình và file Excel luôn khớp nhau. vWork **không có** họ tên/SĐT/CCCD
+trong lead (VNFITE chủ động không gửi) nên tên và SĐT lấy từ `customer`; cũng không có đường dẫn FE Credit của khách.
+
+Luồng đọc đi qua `workflows/list-fec-leads.workflow.ts` (dựng phạm vi từ module permission) và
+`workflows/export-fec-leads.workflow.ts`; module chỉ nhận bộ lọc phạm vi dạng Mongo, không tự import module khác.
+
 ## Models (`src/models/`)
 
 | Model | Collection | Vai trò |
@@ -81,5 +99,6 @@ trước khi công thức hoa hồng thật được triển khai** (vì handler
   để tìm sale phụ trách (qua `ref_code` và/hoặc `fec_referral_code`), rồi gọi
   `fecLeadRepository.markCommissionCalculated(leadGenId)` sau khi tính xong để job rà soát không xử
   lý lại.
-- Chưa có màn hình/API cho sale xem danh sách `FecLead` đang phụ trách (chỉ mới có chiều ghi từ
-  VNFITE vào).
+- Chưa có ghi chú / bước nội bộ của Sale trên từng lead (bên CMS VNFITE có, lưu ở VNFITE) — cần thiết kế lưu phía vWork
+  nếu muốn Sale ghi chú ngay trên màn "Khách FE Credit".
+- Chưa có mã quyền riêng cho màn "Khách FE Credit" (đang dùng chung `customer.view` / `customer.export`).

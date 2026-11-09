@@ -1,3 +1,4 @@
+const axios = require("axios");
 const mongoose = require("mongoose");
 const dayjs = require("dayjs");
 const XLSX = require("xlsx");
@@ -9,6 +10,7 @@ const AgentModel = require("../models/AgentModel");
 const CustomerClaimRequestModel = require("../models/CustomerClaimRequestModel");
 const InvestmentModel = require("../models/InvestmentModel");
 const DataExportLogModel = require("../models/DataExportLogModel");
+const FecLeadModel = require("../models/FecLeadModel").default;
 const {
   createCifCommission,
   createEkycCommission,
@@ -46,6 +48,30 @@ const respondUpstreamError = (res, error, context) => {
   return res.status(502).json({ message: "Không kết nối được hệ thống khách hàng" });
 };
 
+// Xem ảnh eKYC của app nguồn không có API CRM riêng (như VNFITE): loại ảnh → field mã ảnh trong hồ sơ khách,
+// và kho file của từng app. VNFITE lưu ảnh ở file-manager, đọc bằng GET {base}/file/{fileId} (không cần xác thực).
+const LOCAL_IMAGE_FIELDS = {
+  front: "id_front_url",
+  back: "id_back_url",
+  selfie: "selfie_url"
+};
+const FILE_MANAGER_URL_BY_APP = {
+  vnfite: (
+    process.env.VNFITE_FILE_MANAGER_URL || "https://service.vnfite.com.vn/file-manager/v2"
+  ).replace(/\/+$/, "")
+};
+const SAFE_FILE_ID = /^[A-Za-z0-9._-]{1,128}$/;
+const MAX_LOCAL_IMAGE_BYTES = 10 * 1024 * 1024;
+
+// App mà khách có mã external_id này đang thuộc về (null nếu không có khách nào) — dùng khi tra sai app
+const findCustomerAppByExternalId = async (externalId) => {
+  const found = await CustomerModel.findOne({ external_id: externalId, isDeleted: false })
+    .select("app_id")
+    .populate("app_id", "name code")
+    .lean();
+  return found?.app_id ?? null;
+};
+
 const ensureCustomerAccessByExternalId = async (req, res, externalId) => {
   // external_id đi thẳng vào truy vấn Mongo → chỉ nhận chuỗi (chặn ?external_id[$ne]=...)
   if (typeof externalId !== "string") {
@@ -63,14 +89,13 @@ const ensureCustomerAccessByExternalId = async (req, res, externalId) => {
       })
     : null;
   if (!customer) {
-    const otherApp = await CustomerModel.findOne({ external_id: externalId, isDeleted: false })
-      .select("app_id")
-      .populate("app_id", "name")
-      .lean();
+    const otherApp = await findCustomerAppByExternalId(externalId);
     res.status(404).json({
       message: otherApp
-        ? `Chi tiết khách hàng chỉ hỗ trợ app TIKLUY (khách này thuộc ${otherApp.app_id?.name ?? "app khác"})`
-        : "Không tìm thấy khách hàng"
+        ? `Chi tiết khách hàng chỉ hỗ trợ app TIKLUY (khách này thuộc ${otherApp.name ?? "app khác"})`
+        : "Không tìm thấy khách hàng",
+      // Để màn hình gợi ý chuyển đúng công ty thay vì chỉ báo lỗi
+      app_code: otherApp?.code ?? null
     });
     return false;
   }
@@ -741,6 +766,188 @@ const CustomerController = {
         message: "Internal server error",
         error: error.message
       });
+    }
+  },
+
+  // Chi tiết khách chỉ dùng dữ liệu vWork đang lưu (đồng bộ từ app nguồn qua customer/upsert + fec-lead/upsert).
+  // Dành cho app chưa có API CRM riêng như TIKLUY (vd VNFITE). Ví, giao dịch, khoản vay, đầu tư chưa có ở vWork
+  // nên chưa trả — màn hình hiển thị "chờ đồng bộ"; có dữ liệu thì bổ sung vào đây.
+  getLocalDetail: async (req, res) => {
+    try {
+      const { external_id, app_code } = req.query;
+
+      if (typeof external_id !== "string" || !external_id || typeof app_code !== "string") {
+        return res.status(400).json({ message: "Thiếu hoặc sai external_id / app_code" });
+      }
+
+      const app = await AppModel.findOne({ code: app_code, is_active: true }).lean();
+      if (!app) return res.status(404).json({ message: "Không tìm thấy app" });
+
+      const customer = await CustomerModel.findOne({
+        app_id: app._id,
+        external_id,
+        isDeleted: false
+      }).lean();
+      if (!customer) {
+        const otherApp = await findCustomerAppByExternalId(external_id);
+        return res.status(404).json({
+          message: otherApp
+            ? `Khách hàng này thuộc app ${otherApp.name ?? "khác"}`
+            : "Không tìm thấy khách hàng",
+          app_code: otherApp?.code ?? null
+        });
+      }
+
+      if (!(await canAccessCustomer(req.permissionAbility, customer, "customer.view"))) {
+        return res.status(403).json({ message: "Bạn không có quyền xem khách hàng này" });
+      }
+
+      const [sale, agent, fecLeadCount, interactionCount] = await Promise.all([
+        customer.referred_by
+          ? UserInfoModel.findOne({ _id: customer.referred_by, isDeleted: false })
+              .select("full_name ma_nv phone_number email")
+              .lean()
+          : null,
+        customer.agent_id
+          ? AgentModel.findOne({ _id: customer.agent_id, isDeleted: false })
+              .select("agent_code full_name phone_number email")
+              .lean()
+          : null,
+        // Danh sách chi tiết xem ở menu "Khách FE Credit"; màn khách chỉ cần số lượng
+        FecLeadModel.countDocuments({ customer_id: customer._id, isDeleted: false }),
+        CustomerInteractionModel.countDocuments({ customer_id: customer._id, isDeleted: false })
+      ]);
+
+      const identity = customer.identity || {};
+      return res.status(200).json({
+        message: "Lấy chi tiết khách hàng thành công",
+        data: {
+          customer_id: customer._id,
+          app_code: app.code,
+          external_id: customer.external_id,
+          phone_number: customer.phone_number,
+          status: customer.status,
+          source_type: customer.source_type,
+          ref_code: customer.ref_code,
+          registeredAt: customer.registeredAt,
+          identity: {
+            full_name: identity.full_name ?? null,
+            date_of_birth: identity.date_of_birth ?? null,
+            gender: identity.gender ?? null,
+            id_number: identity.id_number ?? null,
+            id_type: identity.id_type ?? null,
+            id_issued_date: identity.id_issued_date ?? null,
+            id_issued_place: identity.id_issued_place ?? null,
+            address: identity.address ?? null,
+            verified_at: identity.verified_at ?? null,
+            // Chỉ báo có ảnh hay chưa: vWork lưu mã ảnh của app nguồn, chưa có đường xem ảnh
+            has_id_front: Boolean(identity.id_front_url),
+            has_id_back: Boolean(identity.id_back_url),
+            has_selfie: Boolean(identity.selfie_url)
+          },
+          sale: sale
+            ? {
+                _id: sale._id,
+                full_name: sale.full_name,
+                ma_nv: sale.ma_nv,
+                phone_number: sale.phone_number,
+                email: sale.email
+              }
+            : null,
+          agent: agent
+            ? {
+                agent_code: agent.agent_code,
+                full_name: agent.full_name,
+                phone_number: agent.phone_number,
+                email: agent.email
+              }
+            : null,
+          stats: {
+            interaction_count: interactionCount,
+            fec_lead_count: fecLeadCount
+          }
+        }
+      });
+    } catch (error) {
+      console.error("Error in getLocalDetail:", error);
+      return res.status(500).json({ message: "Lỗi lấy chi tiết khách hàng" });
+    }
+  },
+
+  // Xem ảnh eKYC (chân dung, CCCD) của khách app nguồn. vWork chỉ lưu MÃ ảnh do app nguồn gửi sang; ảnh nằm ở
+  // kho file của app đó. Client chỉ chọn loại ảnh (front/back/selfie), server tự tra mã ảnh từ hồ sơ khách (đã kiểm
+  // quyền) rồi mới gọi kho file — không nhận mã/đường dẫn tuỳ ý từ client để tránh đọc file không thuộc khách.
+  getLocalImage: async (req, res) => {
+    try {
+      const { external_id, app_code, kind } = req.query;
+
+      if (typeof external_id !== "string" || !external_id || typeof app_code !== "string") {
+        return res.status(400).json({ message: "Thiếu hoặc sai external_id / app_code" });
+      }
+      const field = LOCAL_IMAGE_FIELDS[kind];
+      if (!field) return res.status(400).json({ message: "Loại ảnh không hợp lệ" });
+
+      const fileBaseUrl = FILE_MANAGER_URL_BY_APP[app_code];
+      if (!fileBaseUrl) {
+        return res.status(400).json({ message: "App này chưa hỗ trợ xem ảnh định danh" });
+      }
+
+      const app = await AppModel.findOne({ code: app_code, is_active: true }).lean();
+      if (!app) return res.status(404).json({ message: "Không tìm thấy app" });
+
+      const customer = await CustomerModel.findOne({
+        app_id: app._id,
+        external_id,
+        isDeleted: false
+      }).lean();
+      if (!customer) return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+
+      if (!(await canAccessCustomer(req.permissionAbility, customer, "customer.view"))) {
+        return res.status(403).json({ message: "Bạn không có quyền xem khách hàng này" });
+      }
+
+      const fileId = customer.identity?.[field];
+      if (!fileId) return res.status(404).json({ message: "Khách chưa có ảnh này" });
+      // Mã ảnh đi vào đường dẫn gọi kho file: chỉ nhận ký tự an toàn (chặn ../, dấu / và tham số lạ)
+      if (!SAFE_FILE_ID.test(fileId)) {
+        return res.status(404).json({ message: "Mã ảnh không hợp lệ" });
+      }
+
+      let upstream;
+      try {
+        upstream = await axios.get(`${fileBaseUrl}/file/${fileId}`, {
+          responseType: "arraybuffer",
+          timeout: 10000,
+          maxContentLength: MAX_LOCAL_IMAGE_BYTES,
+          maxBodyLength: MAX_LOCAL_IMAGE_BYTES
+        });
+      } catch (error) {
+        // Chỉ log phía server, không trả chi tiết lỗi kho file cho client
+        console.error("Error fetching local customer image:", {
+          code: error?.code,
+          status: error?.response?.status,
+          message: error?.message
+        });
+        if (error?.response?.status === 404) {
+          return res.status(404).json({ message: "Không tìm thấy ảnh trong kho file" });
+        }
+        return res.status(502).json({ message: "Không lấy được ảnh từ hệ thống lưu trữ" });
+      }
+
+      const contentType = String(upstream.headers?.["content-type"] ?? "")
+        .split(";")[0]
+        .trim();
+      if (!contentType.startsWith("image/")) {
+        return res.status(404).json({ message: "Tệp không phải ảnh" });
+      }
+
+      res.setHeader("Content-Type", contentType);
+      // Ảnh giấy tờ tuỳ thân: không để trình duyệt/proxy lưu lại
+      res.setHeader("Cache-Control", "private, no-store");
+      return res.send(Buffer.from(upstream.data));
+    } catch (error) {
+      console.error("Error in getLocalImage:", error);
+      return res.status(500).json({ message: "Lỗi lấy ảnh" });
     }
   },
 

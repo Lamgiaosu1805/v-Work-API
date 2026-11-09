@@ -23,12 +23,9 @@ router.get(
   viewCustomer,
   CustomerController.exportExcel
 );
-router.get(
-  "/detail-info-customer",
-  authenticate,
-  viewCustomer,
-  CustomerController.getDetailInfo
-);
+router.get("/detail-info-customer", authenticate, viewCustomer, CustomerController.getDetailInfo);
+router.get("/local-detail", authenticate, viewCustomer, CustomerController.getLocalDetail);
+router.get("/local-image", authenticate, viewCustomer, CustomerController.getLocalImage);
 router.get("/fluctuation", authenticate, viewCustomer, CustomerController.getFluctuation);
 router.get("/view-image", authenticate, viewCustomer, CustomerController.getViewImage);
 router.get(
@@ -37,12 +34,7 @@ router.get(
   viewCustomer,
   CustomerController.getCustomerInvestmentHolding
 );
-router.get(
-  "/staff-info",
-  authenticate,
-  viewCustomer,
-  CustomerController.getCustomerStaffInfo
-);
+router.get("/staff-info", authenticate, viewCustomer, CustomerController.getCustomerStaffInfo);
 router.get(
   "/interactions/:externalId",
   authenticate,
@@ -61,19 +53,9 @@ router.post(
   requirePermission("customer_interaction.create", "CustomerInteraction"),
   CustomerInteractionController.create
 );
-router.post(
-  "/bulk-assign",
-  authenticate,
-  canAssignCustomer,
-  CustomerController.bulkAssignCustomer
-);
+router.post("/bulk-assign", authenticate, canAssignCustomer, CustomerController.bulkAssignCustomer);
 router.post("/:id/assign", authenticate, canAssignCustomer, CustomerController.assignCustomer);
-router.patch(
-  "/:id/reassign",
-  authenticate,
-  canAssignCustomer,
-  CustomerController.reassignCustomer
-);
+router.patch("/:id/reassign", authenticate, canAssignCustomer, CustomerController.reassignCustomer);
 router.patch(
   "/:id/unassign-sale",
   authenticate,

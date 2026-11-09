@@ -331,4 +331,24 @@ describe("Xuất Excel khách FE Credit", () => {
     );
     expect(await DataExportLogModel.countDocuments({ resource: "fec_lead" })).toBe(before);
   });
+
+  it("không giới hạn số dòng: xuất đủ hơn 2.000 hồ sơ (qua nhiều lô), STT liên tục và không trùng", async () => {
+    const customer = await CustomerModel.findOne({ external_id: "u-a" });
+    const bulk = Array.from({ length: 2500 }, (_, i) =>
+      lead(`BULK-${String(i).padStart(4, "0")}`, customer._id, "FOLLOW_UP")
+    );
+    await FecLeadModel.insertMany(bulk);
+    try {
+      const { buffer } = await exportAs(abilityManager);
+      const rows = readRows(buffer);
+      expect(rows).toHaveLength(2503);
+      expect(new Set(rows.map((row) => row["Mã hồ sơ"])).size).toBe(2503);
+      expect(rows.map((row) => row.STT)).toEqual(Array.from({ length: 2503 }, (_, i) => i + 1));
+      expect(
+        rows.every((row) => row["Họ tên"] === "Nguyen Van An" || row["Họ tên"] === "Tran Thi Binh")
+      ).toBe(true);
+    } finally {
+      await FecLeadModel.deleteMany({ lead_gen_id: /^BULK-/ });
+    }
+  });
 });

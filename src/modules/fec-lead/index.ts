@@ -13,5 +13,5 @@ export type {
   FecLeadListItem,
   FecLeadHistoryEntry
 } from "./application/list-fec-leads.service";
-export { exportFecLeadRows, MAX_EXPORT_ROWS } from "./application/list-fec-leads.service";
+export { exportFecLeadRows } from "./application/list-fec-leads.service";
 export type { FecLeadExportRow } from "./application/list-fec-leads.service";

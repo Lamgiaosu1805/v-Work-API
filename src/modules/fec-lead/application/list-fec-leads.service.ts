@@ -263,7 +263,8 @@ export async function getFecLeadHistory(input: {
   return { lead: item, history };
 }
 
-export const MAX_EXPORT_ROWS = 5000;
+// Xuất không giới hạn số dòng; đọc và tra khách/sale theo từng lô để không dồn cả nghìn id vào một truy vấn
+const EXPORT_BATCH_SIZE = 1000;
 
 export type FecLeadExportRow = Record<string, string | number>;
 
@@ -279,35 +280,44 @@ export async function exportFecLeadRows(
   const base = await buildLeadBaseFilter(input);
   const bucket = toStage(input.bucket);
 
-  const leads = await FecLeadModel.find(bucket ? { ...base, stage: bucket } : base)
+  const cursor = FecLeadModel.find(bucket ? { ...base, stage: bucket } : base)
     .select("-history -last_event_id")
     .sort({ last_event_at: -1, _id: -1 })
-    .limit(MAX_EXPORT_ROWS + 1)
-    .lean();
+    .lean()
+    .cursor({ batchSize: EXPORT_BATCH_SIZE });
 
-  if (leads.length === 0)
-    throw new ArgumentInvalidException("Không có dữ liệu khớp bộ lọc để xuất");
-  if (leads.length > MAX_EXPORT_ROWS) {
-    throw new ArgumentInvalidException(
-      `Có hơn ${MAX_EXPORT_ROWS} hồ sơ khớp bộ lọc, vui lòng lọc bớt rồi xuất lại`
-    );
+  const rows: FecLeadExportRow[] = [];
+  let batch: any[] = [];
+  const flush = async () => {
+    if (batch.length === 0) return;
+    const items = await toListItems(batch);
+    for (const item of items) {
+      rows.push({
+        STT: rows.length + 1,
+        "Họ tên": item.customer?.full_name ?? "",
+        "Số điện thoại": item.customer?.phone_number ?? "",
+        "Mã hồ sơ": item.lead_gen_id,
+        "Giai đoạn": FEC_STAGE_LABELS[item.bucket] ?? item.bucket,
+        "Đang ở bước": item.step_label,
+        "Gợi ý cho Sale": item.advice,
+        "Sale phụ trách": item.sale?.full_name ?? "",
+        "Mã NV": item.sale?.ma_nv ?? "",
+        "Gửi lúc": formatVietnamDateTime(item.created_at),
+        "Cập nhật cuối": formatVietnamDateTime(item.last_event_at),
+        "Số callback": item.callback_count,
+        "Hạn mức đề nghị": item.offer_amt ?? "",
+        "Giải ngân": item.cash_amt ?? ""
+      });
+    }
+    batch = [];
+  };
+
+  for await (const lead of cursor) {
+    batch.push(lead);
+    if (batch.length >= EXPORT_BATCH_SIZE) await flush();
   }
+  await flush();
 
-  const items = await toListItems(leads);
-  return items.map((item, index) => ({
-    STT: index + 1,
-    "Họ tên": item.customer?.full_name ?? "",
-    "Số điện thoại": item.customer?.phone_number ?? "",
-    "Mã hồ sơ": item.lead_gen_id,
-    "Giai đoạn": FEC_STAGE_LABELS[item.bucket] ?? item.bucket,
-    "Đang ở bước": item.step_label,
-    "Gợi ý cho Sale": item.advice,
-    "Sale phụ trách": item.sale?.full_name ?? "",
-    "Mã NV": item.sale?.ma_nv ?? "",
-    "Gửi lúc": formatVietnamDateTime(item.created_at),
-    "Cập nhật cuối": formatVietnamDateTime(item.last_event_at),
-    "Số callback": item.callback_count,
-    "Hạn mức đề nghị": item.offer_amt ?? "",
-    "Giải ngân": item.cash_amt ?? ""
-  }));
+  if (rows.length === 0) throw new ArgumentInvalidException("Không có dữ liệu khớp bộ lọc để xuất");
+  return rows;
 }

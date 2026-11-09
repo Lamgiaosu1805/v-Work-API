@@ -38,8 +38,10 @@ const hotlineAdminRouter = require("../modules/customer-call/interface/hotline-a
 const customerCareRouter = require("../modules/customer-care/interface/customer-care.routes");
 const handbookAssistantRouter = require("../modules/handbook-assistant/interface/handbook-assistant.routes");
 const ticketRouter = require("../modules/ticket/interface/ticket.routes");
+const appReleaseRouter = require("../modules/app-release/interface/app-release.routes");
 
 const route = (app) => {
+  app.use("/app-release", appReleaseRouter);
   app.use(`/posts`, postRouter);
   app.use(`/user`, userRouter);
   app.use(`/document`, documentRouter);

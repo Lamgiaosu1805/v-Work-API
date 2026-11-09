@@ -1,5 +1,10 @@
 import { Request, Response } from "express";
 import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
+import { exportFecLeadsForViewer } from "../../../workflows/export-fec-leads.workflow";
+import {
+  getFecLeadHistoryForViewer,
+  listFecLeadsForViewer
+} from "../../../workflows/list-fec-leads.workflow";
 import {
   UpsertFecLeadHistoryInput,
   UpsertFecLeadInput,
@@ -53,5 +58,48 @@ export const fecLeadHttpController = {
       outcome: result.outcome,
       lead_gen_id: result.leadGenId
     });
+  },
+
+  // Danh sách khách FE Credit cho Sale/quản lý (theo phạm vi quyền customer.view)
+  async list(req: Request, res: Response) {
+    const { app_code, bucket, q, page, limit } = req.query;
+    if ([app_code, bucket, q].some((v) => v !== undefined && typeof v !== "string")) {
+      throw new ArgumentInvalidException("Tham số không hợp lệ");
+    }
+    const result = await listFecLeadsForViewer(req.permissionAbility!, {
+      appCode: (app_code as string | undefined) || "vnfite",
+      bucket: bucket as string | undefined,
+      q: q as string | undefined,
+      page,
+      limit
+    });
+    return res.status(200).json({ message: "OK", ...result });
+  },
+
+  // Xuất Excel theo nhóm/từ khoá đang xem — cần quyền customer.export, có ghi nhật ký xuất dữ liệu
+  async export(req: Request, res: Response) {
+    const { app_code, bucket, q } = req.query;
+    if ([app_code, bucket, q].some((v) => v !== undefined && typeof v !== "string")) {
+      throw new ArgumentInvalidException("Tham số không hợp lệ");
+    }
+    const { buffer, filename } = await exportFecLeadsForViewer(req.permissionAbility!, {
+      appCode: (app_code as string | undefined) || "vnfite",
+      bucket: bucket as string | undefined,
+      q: q as string | undefined,
+      accountId: req.account!._id,
+      ip: req.ip ?? null,
+      userAgent: req.get("user-agent") ?? null
+    });
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.status(200).send(buffer);
+  },
+
+  async history(req: Request, res: Response) {
+    const result = await getFecLeadHistoryForViewer(req.permissionAbility!, req.params.leadGenId);
+    return res.status(200).json({ message: "OK", data: result });
   }
 };

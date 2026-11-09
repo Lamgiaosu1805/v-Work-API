@@ -167,6 +167,7 @@ BÊN TRONG `src/modules/`.
 | `TIKLUY_API_KEY`, `TIKLUY_ALLOWED_IPS` | Xác thực app nội bộ Tikluy |
 | `DISABLE_CRON` | `1`/`true` → `startCronJobs()` không đăng ký cron nào. Dùng khi chạy local trỏ vào DB dùng chung (test) để job không ghi vào dữ liệu đó |
 | `HANDBOOK_ANTHROPIC_API_KEY` | Key Claude cho Trợ lý Nội quy (rơi về `ANTHROPIC_API_KEY`). Còn `HANDBOOK_AI_MODEL`, `HANDBOOK_AI_EFFORT` (mặc định `low`), `HANDBOOK_DAILY_QUOTA` (30), `HANDBOOK_MAX_TURNS` (20), `HANDBOOK_RETENTION_DAYS` (180)… — bảng đầy đủ ở `docs/HANDBOOK-ASSISTANT.md` |
+| `VNFITE_FILE_MANAGER_URL` | Tuỳ chọn. Gốc kho file VNFITE để xem ảnh eKYC (CCCD, chân dung) của khách VNFITE ở `GET /customer/local-image`; ảnh đọc bằng `GET {url}/file/{fileId}` (không cần xác thực). Mặc định `https://service.vnfite.com.vn/file-manager/v2`. Server vWork phải gọi được URL này |
 | `TICKET_DIR_DEV` / `TICKET_DIR_PROD` | Tuỳ chọn. Thư mục file đính kèm ticket (CCCD, tờ trình...); bỏ trống = `UPLOAD_DIR_*/ticket` (dùng chung volume upload). `/document/getFile` chặn thư mục này — file ticket chỉ tải qua `/tickets` |
 
 Mọi path resolve dùng `path.resolve(dir)` — tương thích cả relative (dev) và absolute (prod).

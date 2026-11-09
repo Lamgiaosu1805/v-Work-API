@@ -23,7 +23,7 @@ phụ trách, quản lý toàn công ty thấy tất cả). Mọi route cần `A
 |---|---|---|---|
 | GET | `/fec-lead/leads?app_code=&bucket=&q=&page=&limit=` | `customer.view` | Danh sách theo nhóm (`FOLLOW_UP`, `IN_PROGRESS`, `COMPLETED`, `STOPPED`, `REJECTED_AT_START`), tìm theo tên/SĐT/mã hồ sơ; trả kèm `counts` theo nhóm |
 | GET | `/fec-lead/leads/:leadGenId/history` | `customer.view` | Lịch sử các bước (callback) của một hồ sơ; ngoài phạm vi → 403 |
-| GET | `/fec-lead/leads/export?app_code=&bucket=&q=` | `customer.export` + `customer.view` | Xuất Excel đúng nhóm/từ khoá đang xem (tối đa 5.000 dòng), có ghi `data_export_log` (resource `fec_lead`) |
+| GET | `/fec-lead/leads/export?app_code=&bucket=&q=` | `customer.export` + `customer.view` | Xuất Excel đúng nhóm/từ khoá đang xem (không giới hạn số dòng, đọc theo lô 1.000), có ghi `data_export_log` (resource `fec_lead`) |
 
 `app_code` mặc định `vnfite`. Nhãn bước (`step_label`, `status_label`) và gợi ý cho Sale (`advice`) do server dựng
 một chỗ ở `domain/fec-lead-presentation.ts` để màn hình và file Excel luôn khớp nhau. vWork **không có** họ tên/SĐT/CCCD

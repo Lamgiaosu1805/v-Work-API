@@ -16,7 +16,8 @@ export type TicketTab = (typeof TICKET_TABS)[number];
 
 // Tab con (chip) của từng tab — chỉ "my" và "department" có. Giá trị lạ → "all".
 export const TICKET_SCOPES: Record<string, readonly string[]> = {
-  my: ["all", "open", "created", "handling", "assigned"],
+  // "action" không có chip: chỉ để tính badge của tab (ticket đang chờ CHÍNH tôi hành động)
+  my: ["all", "open", "created", "handling", "assigned", "action"],
   department: ["all", "waiting", "handling", "created"]
 };
 
@@ -49,6 +50,9 @@ const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$
 // Đang còn xử lý dở (chưa đóng/huỷ)
 const ACTIVE_STATUSES = ["open", "in_progress", "waiting_info", "on_hold", "resolved"];
 const OPEN_STATUSES = ["open", "in_progress", "on_hold"];
+// Ticket người tạo cần để ý: đang được xử lý, cần bổ sung thông tin, hoặc chờ xác nhận đã xong
+// (ticket mới chưa ai nhận thì không đếm: đã có tab "Chưa ai nhận")
+const CREATOR_ACTION_STATUSES = ["in_progress", "waiting_info", "resolved"];
 const WORKING_STATUSES = ["in_progress", "waiting_info", "on_hold", "resolved"];
 
 export function visibilityFilter(actor: TicketActor): Filter {
@@ -101,6 +105,15 @@ function myFilter(scope: string, actor: TicketActor): Filter {
   switch (scope) {
     case "open":
       return { $and: [everything, { status: { $in: ACTIVE_STATUSES } }] };
+    case "action":
+      // Ticket cần tôi để ý: người xử lý / người được giao riêng khi ticket mở, đang làm, tạm hoãn; người tạo
+      // khi đang xử lý, cần bổ sung hoặc chờ xác nhận. Người xử lý đã "đã xử lý" / "chờ bổ sung" xong thì không còn việc.
+      return {
+        $or: [
+          { created_by: me, status: { $in: CREATOR_ACTION_STATUSES } },
+          { $and: [{ $or: [handling, assignedPending] }, { status: { $in: OPEN_STATUSES } }] }
+        ]
+      };
     case "created":
       return { created_by: me };
     case "handling":

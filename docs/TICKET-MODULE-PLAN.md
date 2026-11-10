@@ -685,11 +685,11 @@ Tab dạng viên thuốc (cùng kiểu màn Đơn từ). Backend nhận `GET /ti
 | **Ticket của tôi** (`my`) | Tôi tạo + tôi xử lý (chủ trì/phối hợp) + giao đích danh cho tôi, **gồm cả ticket đã đóng** | Tất cả · Đang mở (`open`) · Tôi tạo (`created`) · Tôi đang xử lý (`handling`) · Giao cho tôi (`assigned`) |
 | **Cần tôi phản hồi** (`needs_reply`) | Ticket tôi tạo đang `waiting_info` hoặc `resolved` | — |
 | **Chưa ai nhận** (`unclaimed`) | Ticket `open`, chưa giao ai (`mode = none`) — cả công ty nhận được | — |
-| **Ticket phòng ban** (`department`) | Giao cho phòng tôi (gồm phòng cha) + việc của người trong phòng tôi (gồm phòng con) | Tất cả của phòng · Giao cho phòng, chờ nhận (`waiting`) · Phòng đang xử lý (`handling`) · Do phòng tạo (`created`) |
+| **Ticket phòng ban** (`department`) | Giao cho phòng tôi (gồm phòng cha) + việc của người trong phòng tôi (gồm phòng con) | Tất cả của phòng · Giao cho phòng, chờ nhận (`waiting`) · Phòng/nhân viên phòng đang xử lý (`handling`) · Do phòng tạo (`created`) |
 | **Cần chú ý** (`yellow`, trước đây tên "Cảnh báo vàng") | Như mục 8 (sắp theo `alert_at`) | — |
 | **Tất cả** (`all`) | Mọi ticket được xem (kể cả đã đóng / huỷ) | — (lọc trạng thái bằng ô "Trạng thái" ở thanh bộ lọc, gửi `status`) |
 
-- Số đếm (`GET /tickets/counts`) chỉ đếm phần cần hành động: `my` = ticket đang mở, `department` = chờ phòng nhận, kèm
+- Số đếm (`GET /tickets/counts`) chỉ đếm phần cần hành động: `my` = ticket đang chờ chính tôi (scope `action`, không có chip: người xử lý / được giao riêng khi `open`, `in_progress`, `on_hold`; người tạo khi `in_progress`, `waiting_info`, `resolved`), `department` = chờ phòng nhận, kèm
   `needs_reply`, `unclaimed`, `yellow`.
 - Các tab hàng đợi (Của tôi / Chưa ai nhận / Phòng ban) loại trừ nhau; `needs_reply` và `yellow` là "góc nhìn" nên chồng lấn.
 - Thay cho 8 tab cũ (`mine`, `created`, `assigned_to_me`, `my_department`, `closed`...); các khoá cũ không còn.

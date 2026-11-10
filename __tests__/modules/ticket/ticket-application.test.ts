@@ -857,9 +857,26 @@ describe("danh sách", () => {
     expect(await listIds("my")).toEqual([open.id, waiting.id, done.id].sort());
     expect(await listIds("my", "open")).toEqual([open.id, waiting.id].sort());
     expect(await listIds("needs_reply")).toEqual([waiting.id]);
-    // Badge của "Ticket của tôi" chỉ đếm ticket đang mở
-    expect((await queries.counts(requester())).my).toBe(2);
+    // Badge của "Ticket của tôi": ticket mới chưa ai nhận của người tạo không đếm (đã có tab "Chưa ai nhận"),
+    // ticket chờ bổ sung thì đếm
+    expect((await queries.counts(requester())).my).toBe(1);
     expect((await queries.counts(requester())).needs_reply).toBe(1);
+  });
+
+  it("badge 'Ticket của tôi': người xử lý đã 'đã xử lý' / 'chờ bổ sung' xong thì không còn đếm, người tạo thì đếm", async () => {
+    const working = await createPlain({ title: "Đang làm" });
+    const resolved = await createPlain({ title: "Đã xử lý" });
+    const waiting = await createPlain({ title: "Chờ bổ sung" });
+    for (const ticket of [working, resolved, waiting]) await commands.claim(itA(), ticket.id);
+    await commands.resolve(itA(), resolved.id, { note: "Đã xử lý", actionTaken: "Reset OTP" });
+    await commands.requestInfo(itA(), waiting.id, { items: [{ key: "description" }] });
+    expect((await TicketModel.findById(resolved.id).lean())?.status).toBe("resolved");
+
+    const handler = await queries.counts(itA());
+    expect(handler.my).toBe(1); // chỉ ticket đang làm; 2 ticket kia đang chờ người tạo
+
+    const creator = await queries.counts(requester());
+    expect(creator.my).toBe(3); // đang xử lý + đã xử lý (chờ xác nhận) + chờ bổ sung
   });
 
   it("total: đếm ticket khác nhau, ticket nằm ở nhiều tab chỉ tính một lần", async () => {
@@ -869,9 +886,10 @@ describe("danh sách", () => {
     await commands.requestInfo(itA(), waiting.id, { items: [{ key: "description" }] });
 
     const counts = await queries.counts(requester());
-    // Ticket "unclaimed" nằm ở "Ticket của tôi" + "Chưa ai nhận"; ticket "waiting" ở "Ticket của tôi" + "Cần tôi phản hồi"
-    expect(counts).toMatchObject({ my: 2, needs_reply: 1, unclaimed: 1 });
-    expect(counts.my + counts.needs_reply + counts.unclaimed).toBe(4);
+    // Ticket "unclaimed" chỉ chờ người xử lý nên người tạo không đếm ở "Ticket của tôi" (nằm ở "Chưa ai nhận");
+    // ticket "waiting" ở "Ticket của tôi" + "Cần tôi phản hồi"
+    expect(counts).toMatchObject({ my: 1, needs_reply: 1, unclaimed: 1 });
+    expect(counts.my + counts.needs_reply + counts.unclaimed).toBe(3);
     expect(counts.total).toBe(2);
     expect(unclaimed.id).not.toBe(waiting.id);
 

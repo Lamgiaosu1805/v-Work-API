@@ -706,6 +706,13 @@ describe("buildListFilter", () => {
       status: { $in: ["open", "in_progress", "waiting_info", "on_hold", "resolved"] }
     });
     expect(JSON.stringify(all)).not.toContain('"status":{"$in"');
+    // "action" (badge): người tạo khi đang xử lý / cần bổ sung / xác nhận; người xử lý + người được giao riêng khi mở / đang làm / tạm hoãn
+    const action = tabFilter({ tab: "my", scope: "action" }, actor(), now) as { $or: unknown[] };
+    expect(action.$or).toContainEqual({
+      created_by: ME,
+      status: { $in: ["in_progress", "waiting_info", "resolved"] }
+    });
+    expect(JSON.stringify(action.$or[1])).toContain('"status":{"$in":["open","in_progress","on_hold"]}');
     // scope lạ rơi về "all"
     expect(tabFilter({ tab: "my", scope: "hack" }, actor(), now)).toEqual(all);
   });

@@ -152,13 +152,14 @@ export class TicketQueryService {
     };
   }
 
-  // Số ticket của từng tab để hiện badge — chỉ đếm phần CẦN HÀNH ĐỘNG: "my" đếm ticket đang mở,
-  // "department" đếm ticket đã giao cho phòng và đang chờ nhận.
+  // Số ticket của từng tab để hiện badge — chỉ đếm phần CẦN HÀNH ĐỘNG: "my" đếm ticket đang chờ chính người
+  // dùng (xử lý khi mở / đang làm / tạm hoãn; người tạo khi đang xử lý / cần bổ sung / chờ xác nhận), "department" đếm
+  // ticket đã giao cho phòng và đang chờ nhận.
   async counts(actor: TicketActor): Promise<Record<string, number>> {
     const now = this.deps.now();
     // Hàng chờ nhận của cả công ty chỉ dành cho người xử lý — nhân viên thường không có tab này nên không cộng vào tổng.
     const badges: Array<{ key: string; tab: string; scope?: string }> = [
-      { key: "my", tab: "my", scope: "open" },
+      { key: "my", tab: "my", scope: "action" },
       { key: "needs_reply", tab: "needs_reply" },
       ...(actor.canViewAll ? [{ key: "unclaimed", tab: "unclaimed" }] : []),
       { key: "department", tab: "department", scope: "waiting" },

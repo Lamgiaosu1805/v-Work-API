@@ -17,6 +17,7 @@ export interface ListCallHistoryFilters extends PaginationQuery {
   search?: string;
   fromDate?: string;
   toDate?: string;
+  isCallbot?: string;
 }
 
 export interface ListCallHistoryResult {
@@ -31,6 +32,13 @@ export async function listCallHistory(
   filters: ListCallHistoryFilters
 ): Promise<ListCallHistoryResult> {
   const { page, limit, skip } = parsePagination(filters);
+  let isCallbot: boolean | undefined;
+  if (filters.isCallbot === "true") {
+    isCallbot = true;
+  } else if (filters.isCallbot === "false") {
+    isCallbot = false;
+  }
+
   const scopeFilter = castObjectIdFields(toMongoQuery(ability, "call_log.view", "CallLog"), [
     "sale_id",
     "customer_id"
@@ -45,6 +53,11 @@ export async function listCallHistory(
   }
   if (filters.direction) {
     andConditions.push({ direction: filters.direction });
+  }
+  if (isCallbot !== undefined) {
+    andConditions.push({
+      "raw_payload.is_callbot": isCallbot
+    });
   }
   if (filters.fromDate || filters.toDate) {
     andConditions.push({

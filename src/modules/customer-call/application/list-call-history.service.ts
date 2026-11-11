@@ -18,7 +18,13 @@ export interface ListCallHistoryFilters extends PaginationQuery {
   fromDate?: string;
   toDate?: string;
   isCallbot?: string;
+  botScenario?: string; // "tikluy" | "vnfite" — chỉ có nghĩa khi xem lịch sử callbot
 }
+
+const BOT_SCENARIO_ENV_KEY: Record<string, string> = {
+  tikluy: "CALLBOT_SCRIPT_TIKLUY",
+  vnfite: "CALLBOT_SCRIPT_VNFITE"
+};
 
 export interface ListCallHistoryResult {
   data: unknown[];
@@ -59,6 +65,12 @@ export async function listCallHistory(
       "raw_payload.is_callbot": isCallbot
     });
   }
+  const botScriptId = filters.botScenario
+    ? process.env[BOT_SCENARIO_ENV_KEY[filters.botScenario] ?? ""]
+    : undefined;
+  if (botScriptId) {
+    andConditions.push({ "raw_payload.callbot_script_id": botScriptId });
+  }
   if (filters.fromDate || filters.toDate) {
     andConditions.push({
       time_start_call: {
@@ -95,7 +107,26 @@ export async function listCallHistory(
     {
       $addFields: {
         customerName: { $ifNull: ["$customer.identity.full_name", null] },
-        saleName: { $ifNull: ["$saleInfo.full_name", null] }
+        saleName: { $ifNull: ["$saleInfo.full_name", null] },
+        // Cuộc gọi callbot không có nhân viên: lấy tên kịch bản và nhãn bot đánh dấu từ payload OmiCall.
+        botScriptName: {
+          $ifNull: ["$raw_payload.call_bot_script_detail.call_bot_script_name", null]
+        },
+        botClassifies: {
+          $filter: {
+            input: {
+              $map: {
+                input: {
+                  $cond: [{ $isArray: "$raw_payload.classifies" }, "$raw_payload.classifies", []]
+                },
+                as: "item",
+                in: { $trim: { input: { $ifNull: ["$$item.name", ""] } } }
+              }
+            },
+            as: "label",
+            cond: { $ne: ["$$label", ""] }
+          }
+        }
       }
     }
   ];
@@ -135,6 +166,8 @@ export async function listCallHistory(
             phone_number: 1,
             customerName: 1,
             saleName: 1,
+            botScriptName: 1,
+            botClassifies: 1,
             sale_id: 1,
             customer_id: 1,
             duration: 1,

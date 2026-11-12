@@ -431,6 +431,7 @@ Các trường hợp **bắt buộc** dùng transaction:
 | `/internal-files` | internalFile.js | `authenticate` | Ổ file nội bộ theo phòng ban |
 | `/weekly-reports` | weeklyReport.js | `authenticate` | Báo cáo tuần |
 | `/handbook-assistant` | modules/handbook-assistant | `authenticate` + `handbook_assistant.use` | Trợ lý Nội quy (lịch sử, trích dẫn, hạn mức; hỏi AI qua socket `handbook:*`) |
+| `/leave` | modules/leave/interface | `authenticate` (chỉ trả dữ liệu của chính người gọi) | Màn "Phép của tôi": `GET /leave/my-overview?year=` (số dư hiện tại, đã dùng/đã cộng theo năm, phép đang chờ duyệt, điều kiện hợp đồng, ngày cộng kế tiếp), `GET /leave/my-ledger?year=&type=all\|in\|out&page=&limit=` (lịch sử sổ phép mới → cũ, số dư luỹ kế tính từ toàn bộ lịch sử, kèm đơn liên quan; tổ hợp ở `workflows/get-my-leave.workflow.ts`) |
 | `/tickets` | modules/ticket/interface | `authenticate` + `requirePermission(ticket.*)` | Ticket hỗ trợ nội bộ (+ `/tickets/config/*` quyền `ticket.config`) |
 
 ---

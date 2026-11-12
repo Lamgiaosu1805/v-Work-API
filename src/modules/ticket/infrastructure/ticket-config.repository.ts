@@ -1,6 +1,7 @@
 import TicketCategoryModel from "../../../models/TicketCategoryModel";
 import TicketProductModel from "../../../models/TicketProductModel";
 import TicketTemplateModel from "../../../models/TicketTemplateModel";
+import { cacheTtl, TtlCache } from "../../../core/cache/ttl-cache";
 import {
   CategoryDef,
   ProductDef,
@@ -114,6 +115,16 @@ export function sortTemplates(templates: TemplateDef[], categories: CategoryDef[
   });
 }
 
+// Danh sách sản phẩm / loại yêu cầu được đọc ở mọi request danh sách, chi tiết, meta nhưng chỉ đổi khi quản trị sửa cấu
+// hình: giữ 30 giây trong bộ nhớ và xoá ngay khi cấu hình được ghi (TicketConfigService gọi invalidateTicketConfigCache).
+const productsCache = new TtlCache<ProductDef[]>(cacheTtl(30_000));
+const categoriesCache = new TtlCache<CategoryDef[]>(cacheTtl(30_000));
+
+export function invalidateTicketConfigCache(): void {
+  productsCache.clear();
+  categoriesCache.clear();
+}
+
 export class MongooseTicketConfigReader implements TicketConfigReader {
   // eslint-disable-next-line class-methods-use-this
   async findProduct(id: string) {
@@ -135,16 +146,20 @@ export class MongooseTicketConfigReader implements TicketConfigReader {
 
   // eslint-disable-next-line class-methods-use-this
   async listProducts(activeOnly: boolean) {
-    const filter: Record<string, unknown> = { isDeleted: false };
-    if (activeOnly) filter.is_active = true;
-    return sortProducts((await TicketProductModel.find(filter).lean()).map(toProductDef));
+    return productsCache.getOrLoad(String(activeOnly), async () => {
+      const filter: Record<string, unknown> = { isDeleted: false };
+      if (activeOnly) filter.is_active = true;
+      return sortProducts((await TicketProductModel.find(filter).lean()).map(toProductDef));
+    });
   }
 
   // eslint-disable-next-line class-methods-use-this
   async listCategories(activeOnly: boolean) {
-    const filter: Record<string, unknown> = { isDeleted: false };
-    if (activeOnly) filter.is_active = true;
-    return sortCategories((await TicketCategoryModel.find(filter).lean()).map(toCategoryDef));
+    return categoriesCache.getOrLoad(String(activeOnly), async () => {
+      const filter: Record<string, unknown> = { isDeleted: false };
+      if (activeOnly) filter.is_active = true;
+      return sortCategories((await TicketCategoryModel.find(filter).lean()).map(toCategoryDef));
+    });
   }
 
   // eslint-disable-next-line class-methods-use-this

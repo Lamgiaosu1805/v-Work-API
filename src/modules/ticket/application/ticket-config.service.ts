@@ -9,6 +9,7 @@ import {
   NotFoundException
 } from "../../../core/exceptions/exceptions";
 import {
+  invalidateTicketConfigCache,
   sortCategories,
   sortProducts,
   sortTemplates,
@@ -308,6 +309,7 @@ export class TicketConfigService {
       const data = definition.toDoc(input);
       if (kind === "products") data.sort_order = await nextProductSortOrder();
       const doc = await definition.model.create(data);
+      invalidateTicketConfigCache();
       return definition.toDef(doc.toObject());
     } catch (error) {
       if (isDuplicateKey(error)) {
@@ -337,6 +339,7 @@ export class TicketConfigService {
         .findOneAndUpdate({ _id: id, isDeleted: false }, { $set: data }, { new: true })
         .lean();
       if (!doc) throw new NotFoundException(`${definition.label} không tồn tại`);
+      invalidateTicketConfigCache();
       return definition.toDef(doc);
     } catch (error) {
       if (isDuplicateKey(error)) {
@@ -387,6 +390,7 @@ export class TicketConfigService {
         }
       }))
     );
+    invalidateTicketConfigCache();
     return this.list("products");
   }
 
@@ -401,6 +405,7 @@ export class TicketConfigService {
       { $set: { isDeleted: true, is_active: false } }
     );
     if (!result.matchedCount) throw new NotFoundException(`${definition.label} không tồn tại`);
+    invalidateTicketConfigCache();
   }
 
   async getSettings() {

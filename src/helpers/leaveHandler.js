@@ -3,14 +3,14 @@ const { RequestModel } = require("../models/RequestModel");
 const HolidayModel = require("../models/HolidayModel");
 const EmploymentStatusModel = require("../models/EmploymentStatusModel");
 const { calcTotalDays } = require("./requestUtils");
-const { MONTHLY_ACCRUAL } = require("../config/common/leaveConfig");
+const {
+  MONTHLY_ACCRUAL,
+  RETROACTIVE_LIMIT_DAYS,
+  ADVANCE_BORROW_MAX_DAYS
+} = require("../config/common/leaveConfig");
 const { getLeaveBalance } = require("../modules/leave");
 
 const TZ = "Asia/Ho_Chi_Minh";
-const RETROACTIVE_LIMIT_DAYS = 3;
-// SRS (update 3/8/2026): chỉ được ứng trước tối đa 1 ngày phép của tháng liền kề sau — không còn
-// cộng dồn không giới hạn theo số tháng (monthDiff * MONTHLY_ACCRUAL cũ cho phép ứng trước cả năm).
-const ADVANCE_BORROW_MAX_DAYS = 1;
 
 async function validate(body, userInfo) {
   const { from_date, from_period, to_date, to_period, leave_type } = body;

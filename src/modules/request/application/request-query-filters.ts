@@ -40,6 +40,29 @@ export function applyDateRangeFilter(filter: RequestFilter, from?: string, to?: 
   }
 }
 
+function parseDayKey(value: string, label: string) {
+  const parsed = moment.tz(value, "YYYY-MM-DD", true, TZ);
+  if (!parsed.isValid()) {
+    throw new ArgumentInvalidException(`Giá trị "${label}" không hợp lệ: ${value}`);
+  }
+  return parsed;
+}
+
+// Lọc đơn có khoảng ngày nghỉ [from_date, to_date] GIAO với [eventFrom, eventTo] (YYYY-MM-DD, tính theo giờ VN).
+// Chỉ đơn có from_date/to_date (nghỉ phép, từ xa, công tác, gặp khách) mới khớp; khác với applyDateRangeFilter lọc theo ngày tạo.
+export function applyEventDateRangeFilter(
+  filter: RequestFilter,
+  eventFrom?: string,
+  eventTo?: string
+): void {
+  if (eventFrom) {
+    filter.to_date = { $gte: parseDayKey(eventFrom, "event_from").startOf("day").toDate() };
+  }
+  if (eventTo) {
+    filter.from_date = { $lte: parseDayKey(eventTo, "event_to").endOf("day").toDate() };
+  }
+}
+
 export function buildUserNameSearchFilter(search: string) {
   const pattern = escapeRegExp(search);
   return {

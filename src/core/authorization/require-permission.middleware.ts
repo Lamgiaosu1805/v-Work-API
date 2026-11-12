@@ -10,6 +10,8 @@ declare global {
   namespace Express {
     interface Request {
       permissionAbility?: Ability;
+      // Nhân viên (user_info._id) ứng với tài khoản đang gọi — requirePermission tra sẵn để handler khỏi tra lại
+      employeeId?: string;
     }
   }
 }
@@ -51,6 +53,7 @@ export function requireAnyPermission(actions: string[], subject: string) {
     }
 
     req.permissionAbility = ability;
+    req.employeeId = employeeId;
     next();
   });
 }

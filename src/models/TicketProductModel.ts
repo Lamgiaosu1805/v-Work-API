@@ -16,6 +16,8 @@ const TicketProductSchema = new Schema(
     // Người nhận thông báo ticket thuộc sản phẩm này (cộng dồn với người của mẫu, loại yêu cầu và mặc định)
     handler_ids: [{ type: Schema.Types.ObjectId, ref: "user_info" }],
     is_active: { type: Boolean, default: true },
+    // Thứ tự hiển thị do người quản trị kéo thả (0, 1, 2...). null = chưa sắp xếp tay → xếp theo ngày tạo.
+    sort_order: { type: Number, default: null },
 
     ...BaseSchema.obj
   },

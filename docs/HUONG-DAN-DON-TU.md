@@ -52,7 +52,7 @@ Nghỉ không lương: nghỉ không lương trong 1 ngày hoặc 1 buổi, nh�
 Nghỉ dài hạn: nghỉ nhiều ngày liên tiếp. Nhập "Từ ngày*" và "Ca bắt đầu*" (buổi sáng hoặc buổi chiều), "Đến ngày*" và "Ca kết thúc*" (buổi sáng hoặc buổi chiều), rồi chọn "Hình thức nghỉ*": "Nghỉ có phép" hoặc "Nghỉ không lương".
 Cách tính số ngày nghỉ: Chủ nhật không tính; thứ Bảy tính 0,5 ngày (chỉ có buổi sáng); thứ Hai đến thứ Sáu tính 1 ngày nếu nghỉ cả ngày và 0,5 ngày nếu nghỉ một buổi. Hệ thống tự tính, bạn không phải nhập số ngày.
 Ngày phép được trừ ngay khi bạn gửi đơn và được hoàn lại nếu đơn bị từ chối hoặc bạn thu hồi đơn.
-Mỗi tháng hệ thống tự cộng 1 ngày phép cho nhân viên thuộc diện được tích luỹ phép năm. Số ngày phép còn lại hiển thị ở "Quỹ ngày nghỉ phép" trên Bảng công của tôi.
+Mỗi tháng hệ thống tự cộng 1 ngày phép cho nhân viên thuộc diện được tích luỹ phép năm. Số ngày phép còn lại hiển thị ở "Quỹ ngày nghỉ phép" trên Bảng công của tôi. Mục "Cá nhân" > "Phép của tôi" hiển thị thêm số ngày đã dùng và đã cộng trong năm, lịch sử cộng/trừ/hoàn phép (bấm một dòng có đơn để xem chi tiết đơn), danh sách đơn nghỉ của bạn (lọc được theo khoảng ngày nghỉ và trạng thái) và nút tạo đơn nghỉ.
 Nếu số ngày xin nghỉ có phép nhiều hơn số ngày phép còn lại thì phần vượt tự động được tính là nghỉ không lương. Ví dụ còn 1,5 ngày phép mà xin nghỉ có phép 3 ngày thì 1,5 ngày là nghỉ có phép và 1,5 ngày là nghỉ không lương.
 Nếu bạn không còn ngày phép nào thì không tạo được đơn nghỉ có phép; hãy chọn Nghỉ không lương.
 Nếu ngày nghỉ bắt đầu trong tháng liền kề sau, được ứng trước tối đa 1 ngày phép của tháng đó.

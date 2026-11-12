@@ -565,6 +565,8 @@ export async function getDailyReportSummary(input: {
     deadlines: REPORT_DEADLINES,
     calendar: calendarInfo(input.dateKey, board.holidays),
     metrics: metricDefs([...metricCodes]),
+    // Bộ KPI (trọng số) để web dựng mẫu 13 cột cho từng Sale theo template_code
+    templates: KPI_TEMPLATES,
     totals: { submission: totalSubmission, metrics: serializeCells(totals) },
     units,
     employees

@@ -262,8 +262,19 @@ Trạng thái nộp: `on_time`, `late`, `overdue` (chưa nộp, quá hạn, còn
 - Trên `main` có sẵn test lỗi không liên quan: 6 file `__tests__/kpi*.test.js` import code KPI cũ không còn trên `main`
   (từng nằm ở nhánh `feat/kpi-rollover`…), `approvalChain.test.js` và `requestControllerCreate.test.js` (15 test lỗi cả trên `main` gốc).
 
+### Web — 13/11/2026, nhánh `feat/crm-daily-report` (vWork-website)
+
+| Màn | Route / vị trí | Quyền |
+|---|---|---|
+| Báo cáo ngày của tôi: bảng KPI mẫu 13 cột (kỳ ngày/tháng) + cột "Cần đạt hôm nay", form kế hoạch, form kết quả (số tự động chỉ xem, số nhập tay, giải trình) | `/bao-cao-ngay` — CRM › Báo cáo & Phân tích | `showDailyReport` |
+| Tổng hợp báo cáo ngày: thẻ tóm tắt, cây Khối → Chi nhánh → TTKD → Sale theo kỳ ngày / lũy kế tháng / lũy kế năm, % HT tô màu theo tiến độ thời gian, bấm tên mở bảng mẫu 13 cột + nội dung báo cáo, xuất Excel (sheet "Tổng hợp" + "Báo cáo Sale") | `/tong-hop-bao-cao-ngay` | `showDailyReportMgmt` |
+| Cột + nút gán "Sale phụ trách" | Màn Đại lý `/dai-ly` | `agent.assign_sale` |
+| Nhãn loại phòng ban "Trung tâm kinh doanh (TTKD)" | HRM › Phòng ban (web + app) | — |
+
+Menu 2 màn báo cáo ngày bị mờ khi chọn công ty VNFITE (chỉ áp dụng TIKLUY). App: mới thêm flag `showDailyReport` / `showDailyReportMgmt`
+trong `getPermissions()` (nhánh `feat/crm-daily-report` của vWork, tách từ `feat/crm-customer-care` vì cần `effectivePermissions`).
+
 ### Chưa làm
 
-- Web: màn Báo cáo ngày của tôi, Tổng hợp báo cáo ngày, gán Sale phụ trách ở màn Đại lý, đổi nhãn loại phòng ban; named flag
-  `showDailyReport` / `showDailyReportMgmt` (thêm đồng thời `usePermissions.js` và `getPermissions()`), cập nhật ma trận tính năng `CLAUDE.md` gốc.
-- App, AI, GPS + ảnh, KH quan tâm theo SĐT, QL duyệt điều chỉnh sau chốt, biểu đồ doanh số dashboard đọc theo ghi nhận KPI.
+- App: màn báo cáo ngày, ghi nhận thực địa GPS + ảnh.
+- AI, KH quan tâm theo SĐT, QL duyệt điều chỉnh sau chốt, biểu đồ doanh số dashboard đọc theo ghi nhận KPI, màn cấu hình KPI / import Excel.

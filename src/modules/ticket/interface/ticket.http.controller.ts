@@ -487,6 +487,14 @@ export const ticketHttpController = {
     );
   },
 
+  async productsReorder(req: Request, res: Response) {
+    return ok(
+      res,
+      await getTicketConfigService().reorderProducts(readPayload(req).ids),
+      "Đã lưu thứ tự"
+    );
+  },
+
   async configRemove(req: Request, res: Response) {
     await getTicketConfigService().remove(param(req, "kind"), param(req, "id"));
     return res.status(200).json({ message: "Đã xoá" });

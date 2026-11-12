@@ -20,6 +20,7 @@ export function toProductDef(doc: any): ProductDef {
     description: doc.description ?? "",
     handlerIds: ids(doc.handler_ids),
     isActive: doc.is_active !== false,
+    sortOrder: typeof doc.sort_order === "number" ? doc.sort_order : null,
     createdAt: doc.createdAt ?? new Date(0)
   };
 }
@@ -75,19 +76,29 @@ const byCreated = (a: { createdAt: Date; id: string }, b: { createdAt: Date; id:
 
 export const sortCategories = (categories: CategoryDef[]) => [...categories].sort(byCreated);
 
-// Sản phẩm nhóm theo "Nhóm" (VNFITE, TIKLUY, vWork...); nhóm xếp theo ngày tạo sớm nhất của nhóm, trong nhóm xếp theo ngày tạo của sản phẩm.
+// Sản phẩm luôn nhóm theo "Nhóm" (VNFITE, TIKLUY, vWork...) — cùng nhóm đứng liền nhau.
+// Thứ tự gốc của một sản phẩm: `sortOrder` do người quản trị kéo thả (tăng dần); chưa có thì xếp sau, theo ngày tạo.
+// Nhóm đứng theo sản phẩm đứng đầu của nhóm; trong nhóm xếp theo thứ tự gốc.
+// (Infinity - Infinity = NaN là falsy nên hai sản phẩm cùng chưa có thứ tự sẽ so ngày tạo.)
+const compareProducts = (a: ProductDef, b: ProductDef) =>
+  (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity) || byCreated(a, b);
+
 export function sortProducts(products: ProductDef[]): ProductDef[] {
   const groupKey = (product: ProductDef) => product.group || "";
-  const firstCreated = new Map<string, number>();
+  const leader = new Map<string, ProductDef>();
   products.forEach((product) => {
     const key = groupKey(product);
-    firstCreated.set(key, Math.min(firstCreated.get(key) ?? Infinity, timeOf(product)));
+    const current = leader.get(key);
+    if (!current || compareProducts(product, current) < 0) leader.set(key, product);
   });
   return [...products].sort(
     (a, b) =>
-      (firstCreated.get(groupKey(a)) ?? 0) - (firstCreated.get(groupKey(b)) ?? 0) ||
+      compareProducts(
+        leader.get(groupKey(a)) as ProductDef,
+        leader.get(groupKey(b)) as ProductDef
+      ) ||
       groupKey(a).localeCompare(groupKey(b), "vi") ||
-      byCreated(a, b)
+      compareProducts(a, b)
   );
 }
 

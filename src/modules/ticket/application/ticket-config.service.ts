@@ -251,6 +251,19 @@ async function validateCalendarInput(input: Record<string, any>): Promise<void> 
 
 const isDuplicateKey = (error: unknown) => (error as { code?: number })?.code === 11000;
 
+// Thứ tự cho sản phẩm mới (hoặc vừa đổi nhóm): xuống cuối danh sách. Chưa ai được kéo thả (toàn null) thì để null,
+// vì gán số 0 sẽ làm sản phẩm này nhảy lên đầu — sản phẩm cũ vẫn xếp theo ngày tạo như trước.
+async function nextProductSortOrder(): Promise<number | null> {
+  const top = (await TicketProductModel.findOne({
+    isDeleted: false,
+    sort_order: { $type: "number" }
+  })
+    .sort({ sort_order: -1 })
+    .select("sort_order")
+    .lean()) as { sort_order: number } | null;
+  return top ? top.sort_order + 1 : null;
+}
+
 export class TicketConfigService {
   constructor(private readonly directory: TicketDirectory = new MongooseTicketDirectory()) {}
 
@@ -292,7 +305,9 @@ export class TicketConfigService {
       throw new ArgumentInvalidException(`${definition.label}: thiếu ${missing.join(", ")}`);
     }
     try {
-      const doc = await definition.model.create(definition.toDoc(input));
+      const data = definition.toDoc(input);
+      if (kind === "products") data.sort_order = await nextProductSortOrder();
+      const doc = await definition.model.create(data);
       return definition.toDef(doc.toObject());
     } catch (error) {
       if (isDuplicateKey(error)) {
@@ -308,12 +323,18 @@ export class TicketConfigService {
     if (!mongoose.isValidObjectId(id))
       throw new NotFoundException(`${definition.label} không tồn tại`);
     try {
+      const data = definition.toDoc(input);
+      // Đổi nhóm thì sản phẩm sang cuối danh sách (cùng nhóm phải đứng liền nhau)
+      if (kind === "products" && "group" in data) {
+        const current = await TicketProductModel.findOne({ _id: id, isDeleted: false })
+          .select("group")
+          .lean();
+        if (current && (current.group ?? "") !== (data.group ?? "")) {
+          data.sort_order = await nextProductSortOrder();
+        }
+      }
       const doc = await definition.model
-        .findOneAndUpdate(
-          { _id: id, isDeleted: false },
-          { $set: definition.toDoc(input) },
-          { new: true }
-        )
+        .findOneAndUpdate({ _id: id, isDeleted: false }, { $set: data }, { new: true })
         .lean();
       if (!doc) throw new NotFoundException(`${definition.label} không tồn tại`);
       return definition.toDef(doc);
@@ -323,6 +344,50 @@ export class TicketConfigService {
       }
       throw error;
     }
+  }
+
+  // Lưu thứ tự hiển thị sản phẩm. `ids` là TOÀN BỘ sản phẩm (kể cả đang tắt) theo thứ tự mới; cùng nhóm phải đứng liền
+  // nhau. Gửi cả danh sách (không chỉ "dòng nào chuyển đi đâu") để hai người sửa cùng lúc không làm lệch số.
+  // eslint-disable-next-line class-methods-use-this
+  async reorderProducts(ids: unknown) {
+    if (!Array.isArray(ids) || ids.some((id) => !mongoose.isValidObjectId(id))) {
+      throw new ArgumentInvalidException("Danh sách sản phẩm không hợp lệ");
+    }
+    const wanted = ids.map(String);
+    if (new Set(wanted).size !== wanted.length) {
+      throw new ArgumentInvalidException("Danh sách sản phẩm bị trùng");
+    }
+
+    const docs = await TicketProductModel.find({ isDeleted: false }).select("group").lean();
+    const groupOf = new Map(docs.map((doc) => [String(doc._id), doc.group ?? ""]));
+    if (groupOf.size !== wanted.length || wanted.some((id) => !groupOf.has(id))) {
+      throw new ConflictException(
+        "Danh sách sản phẩm đã thay đổi, hãy tải lại trang rồi sắp xếp lại"
+      );
+    }
+
+    const seen = new Set<string>();
+    let previous: string | null = null;
+    wanted.forEach((id) => {
+      const group = groupOf.get(id) as string;
+      if (group !== previous) {
+        if (seen.has(group)) {
+          throw new ArgumentInvalidException("Các sản phẩm cùng nhóm phải đứng liền nhau");
+        }
+        seen.add(group);
+        previous = group;
+      }
+    });
+
+    await TicketProductModel.bulkWrite(
+      wanted.map((id, index) => ({
+        updateOne: {
+          filter: { _id: id, isDeleted: false },
+          update: { $set: { sort_order: index } }
+        }
+      }))
+    );
+    return this.list("products");
   }
 
   // Xoá mềm; ticket cũ vẫn giữ id và hiển thị tên bình thường.

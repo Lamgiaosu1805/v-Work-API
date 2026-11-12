@@ -640,6 +640,30 @@ describe("thứ tự hiển thị danh mục cấu hình — nhóm → ngày t�
     expect(sorted.map((item) => item.id)).toEqual(["v1", "v2", "t1", "t2", "w1", "x1"]);
   });
 
+  it("sản phẩm có thứ tự kéo thả: theo thứ tự đó, nhóm đứng theo sản phẩm đầu của nhóm", () => {
+    const ordered = (id: string, group: string, day: number, sortOrder: number | null) =>
+      ({ id, group, createdAt: at(day), sortOrder }) as any;
+    const sorted = sortProducts([
+      ordered("v1", "VNFITE", 1, 4),
+      ordered("t1", "TIKLUY", 2, 2),
+      ordered("v2", "VNFITE", 3, 5),
+      ordered("w1", "vWork", 4, 0),
+      ordered("t2", "TIKLUY", 5, 3),
+      ordered("w2", "vWork", 6, 1)
+    ]);
+    expect(sorted.map((item) => item.id)).toEqual(["w1", "w2", "t1", "t2", "v1", "v2"]);
+  });
+
+  it("sản phẩm chưa có thứ tự xếp sau sản phẩm đã có, theo ngày tạo", () => {
+    const sorted = sortProducts([
+      { id: "new2", group: "A", createdAt: at(9), sortOrder: null },
+      { id: "b", group: "B", createdAt: at(1), sortOrder: 0 },
+      { id: "new1", group: "A", createdAt: at(8), sortOrder: null },
+      { id: "a", group: "A", createdAt: at(2), sortOrder: 1 }
+    ] as any[]);
+    expect(sorted.map((item) => item.id)).toEqual(["b", "a", "new1", "new2"]);
+  });
+
   it("loại yêu cầu theo ngày tạo; mẫu theo loại rồi ngày tạo", () => {
     const categories = [
       { id: "c2", createdAt: at(8) },

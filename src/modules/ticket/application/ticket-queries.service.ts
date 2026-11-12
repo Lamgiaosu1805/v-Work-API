@@ -165,23 +165,26 @@ export class TicketQueryService {
       { key: "department", tab: "department", scope: "waiting" },
       { key: "yellow", tab: "yellow" }
     ];
-    const entries = await Promise.all(
-      badges.map(
-        async ({ key, tab, scope }) =>
-          [
-            key,
-            await TicketModel.countDocuments(buildListFilter({ tab, scope }, actor, now))
-          ] as const
-      )
-    );
-    // `total`: số ticket KHÁC NHAU cần người dùng để ý — một ticket nằm ở nhiều tab chỉ đếm một lần (badge menu).
-    const total = await TicketModel.countDocuments({
-      $and: [
-        { isDeleted: false },
-        visibilityFilter(actor),
-        { $or: badges.map(({ tab, scope }) => tabFilter({ tab, scope }, actor, now)) }
-      ]
-    });
+    // Các lần đếm độc lập nhau nên chạy cùng lúc (kể cả `total`), không chờ nối tiếp.
+    const [entries, total] = await Promise.all([
+      Promise.all(
+        badges.map(
+          async ({ key, tab, scope }) =>
+            [
+              key,
+              await TicketModel.countDocuments(buildListFilter({ tab, scope }, actor, now))
+            ] as const
+        )
+      ),
+      // `total`: số ticket KHÁC NHAU cần người dùng để ý — một ticket nằm ở nhiều tab chỉ đếm một lần (badge menu).
+      TicketModel.countDocuments({
+        $and: [
+          { isDeleted: false },
+          visibilityFilter(actor),
+          { $or: badges.map(({ tab, scope }) => tabFilter({ tab, scope }, actor, now)) }
+        ]
+      })
+    ]);
     return { ...Object.fromEntries(entries), total };
   }
 

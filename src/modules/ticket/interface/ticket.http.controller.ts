@@ -1,7 +1,11 @@
 import { Request, Response } from "express";
 import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
 import { MongooseTicketDirectory } from "../infrastructure/ticket-directory";
-import { AbilityLike, buildTicketActor } from "../application/ticket-actor";
+import {
+  AbilityLike,
+  buildTicketActor,
+  buildTicketActorForEmployee
+} from "../application/ticket-actor";
 import { getTicketCommandService } from "../application/ticket-commands.service";
 import { getTicketConfigService } from "../application/ticket-config.service";
 import { getTicketQueryService } from "../application/ticket-queries.service";
@@ -31,6 +35,8 @@ const directory = new MongooseTicketDirectory();
 
 async function actorOf(req: Request) {
   const ability = (req as unknown as { permissionAbility?: AbilityLike }).permissionAbility;
+  // requirePermission đã tra nhân viên rồi: dùng lại, đỡ một lượt hỏi DB
+  if (req.employeeId) return buildTicketActorForEmployee(directory, req.employeeId, ability);
   return buildTicketActor(directory, String(req.account?._id), ability);
 }
 
@@ -484,6 +490,14 @@ export const ticketHttpController = {
       res,
       await getTicketConfigService().update(param(req, "kind"), param(req, "id"), readPayload(req)),
       "Đã cập nhật"
+    );
+  },
+
+  async productsReorder(req: Request, res: Response) {
+    return ok(
+      res,
+      await getTicketConfigService().reorderProducts(readPayload(req).ids),
+      "Đã lưu thứ tự"
     );
   },
 

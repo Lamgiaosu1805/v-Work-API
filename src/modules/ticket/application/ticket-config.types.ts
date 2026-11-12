@@ -11,6 +11,8 @@ export interface ProductDef {
   description: string;
   handlerIds: string[];
   isActive: boolean;
+  // Thứ tự do người quản trị kéo thả; null/thiếu = chưa sắp xếp tay (xếp theo ngày tạo)
+  sortOrder?: number | null;
   // Ngày tạo — dùng để sắp xếp danh sách cấu hình (nhóm sản phẩm → ngày tạo)
   createdAt: Date;
 }

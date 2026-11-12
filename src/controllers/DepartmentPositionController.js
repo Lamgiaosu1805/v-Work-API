@@ -5,6 +5,7 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const UserInfoModel = require("../models/UserInfoModel");
 const { ensureFolderForDept } = require("../jobs/ensureDeptFolders");
 const { invalidatePermissionCache } = require("../core/authorization/invalidate-permission-cache");
+const { invalidateDirectoryCaches } = require("../core/cache/ttl-cache");
 
 const DepartmentPositionController = {
   createDepartment: async (req, res) => {
@@ -45,6 +46,7 @@ const DepartmentPositionController = {
         manager: manager_id || null
       });
 
+      invalidateDirectoryCaches();
       if (LEAF_TYPES.includes(newDept.type)) {
         ensureFolderForDept(department_code);
       }
@@ -140,6 +142,7 @@ const DepartmentPositionController = {
       }
 
       await dept.save();
+      invalidateDirectoryCaches();
       if (manager_id !== undefined) {
         await invalidatePermissionCache([
           previousManagerId,
@@ -173,6 +176,7 @@ const DepartmentPositionController = {
       dept.isDeleted = true;
       dept.is_active = false;
       await dept.save();
+      invalidateDirectoryCaches();
 
       return res.status(200).json({ message: "Xóa phòng ban thành công" });
     } catch (error) {

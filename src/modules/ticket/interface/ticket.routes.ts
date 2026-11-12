@@ -33,6 +33,7 @@ router.get("/directory/departments", ...view, asyncHandler(ticketHttpController.
 
 router.get("/config/settings", ...config, asyncHandler(ticketHttpController.settingsGet));
 router.patch("/config/settings", ...config, asyncHandler(ticketHttpController.settingsUpdate));
+router.put("/config/products/order", ...config, asyncHandler(ticketHttpController.productsReorder));
 router.get("/config/:kind", ...config, asyncHandler(ticketHttpController.configList));
 router.post("/config/:kind", ...config, asyncHandler(ticketHttpController.configCreate));
 router.patch("/config/:kind/:id", ...config, asyncHandler(ticketHttpController.configUpdate));

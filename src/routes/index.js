@@ -40,6 +40,7 @@ const handbookAssistantRouter = require("../modules/handbook-assistant/interface
 const ticketRouter = require("../modules/ticket/interface/ticket.routes");
 const leaveRouter = require("../modules/leave/interface/leave.routes");
 const appReleaseRouter = require("../modules/app-release/interface/app-release.routes");
+const dailyReportRouter = require("../modules/daily-report/interface/daily-report.routes");
 
 const route = (app) => {
   app.use("/app-release", appReleaseRouter);
@@ -84,6 +85,7 @@ const route = (app) => {
   app.use("/handbook-assistant", handbookAssistantRouter);
   app.use("/tickets", ticketRouter);
   app.use("/leave", leaveRouter);
+  app.use("/daily-reports", dailyReportRouter);
 };
 
 module.exports = route;

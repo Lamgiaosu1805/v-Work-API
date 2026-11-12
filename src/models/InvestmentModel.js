@@ -50,6 +50,22 @@ const InvestmentSchema = new mongoose.Schema(
             },
         },
 
+        // === GHI NHẬN KPI (docs/CRM-DAILY-REPORT-FLOWS.md mục 4, R2) ===
+        // Doanh số tính cho Sale đang giữ khách lúc tạo khoản (mọi kỳ hạn, độc lập hoa hồng) + TTKD lúc đó.
+        // Ghi 1 lần khi tạo, KHÔNG đổi khi khách được gán/chuyển về sau (khác commission.sale_id).
+        kpi_attribution: {
+            type: new mongoose.Schema(
+                {
+                    sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
+                    department_id: { type: mongoose.Schema.Types.ObjectId, ref: "department", default: null },
+                    agent_id: { type: mongoose.Schema.Types.ObjectId, ref: "agent", default: null },
+                    channel: { type: String, enum: ["sale", "agent", "unassigned"], required: true },
+                    attributed_at: { type: Date, required: true },
+                },
+                { _id: false }
+            ),
+            default: null,
+        },
         ...BaseSchema.obj,
     },
     {
@@ -65,5 +81,6 @@ InvestmentSchema.index({ "commission.sale_id": 1 });
 InvestmentSchema.index({ "commission.agent_id": 1 });
 InvestmentSchema.index({ "commission.period_month": 1, "commission.period_year": 1 });
 InvestmentSchema.index({ status: 1, invested_at: 1, customer_id: 1 });
+InvestmentSchema.index({ app_id: 1, invested_at: 1, "kpi_attribution.sale_id": 1 });
 
 module.exports = mongoose.model("investment", InvestmentSchema);

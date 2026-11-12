@@ -24,6 +24,7 @@ const { decrypt, buildCustomerPipeline } = require("../helpers/customerHelper");
 const { canAccessCustomer, canManageSale } = require("../helpers/crmScope");
 const { invalidatePermissionCache } = require("../core/authorization/invalidate-permission-cache");
 const { syncCustomerCareInBackground } = require("../workflows/sync-customer-care.workflow");
+const { buildKpiCif, isKpiCifOf } = require("../helpers/kpiAttribution");
 
 const GENDER_LABELS = {
   male: "Nam",
@@ -286,6 +287,24 @@ const CustomerController = {
           }
         }
 
+        // Ghi nhận KPI (CIF) theo ngày đăng ký — docs/CRM-DAILY-REPORT-FLOWS.md R1
+        newDoc.original_ref_code = matched_ref_code ?? null;
+        if (referred_by) {
+          newDoc.kpi_cif = await buildKpiCif({
+            channel: "sale_ref",
+            saleId: referred_by,
+            at: newDoc.registeredAt,
+            session
+          });
+        } else if (agent_id) {
+          newDoc.kpi_cif = await buildKpiCif({
+            channel: "agent",
+            agentId: agent_id,
+            at: newDoc.registeredAt,
+            session
+          });
+        }
+
         const [customer] = await CustomerModel.create([newDoc], { session });
 
         // Ghi interaction log nếu có sale hoặc agent
@@ -379,6 +398,31 @@ const CustomerController = {
         updateData.agent_id = agent_id;
         updateData.ref_code = matched_ref_code;
         updateData.source_type = "agent";
+      }
+
+      // Ghi nhận KPI (CIF) lần đầu khách có Sale/đại lý qua mã — docs/CRM-DAILY-REPORT-FLOWS.md R1
+      // Bản ghi nhận chưa có Sale (đại lý chưa gán Sale phụ trách) vẫn được ghi đè khi khách có Sale
+      if (updateData.referred_by && !existingCustomer.kpi_cif?.sale_id) {
+        updateData.kpi_cif = await buildKpiCif({
+          channel: "sale_ref",
+          saleId: referred_by,
+          at: now,
+          session
+        });
+      } else if (updateData.agent_id && !existingCustomer.kpi_cif) {
+        updateData.kpi_cif = await buildKpiCif({
+          channel: "agent",
+          agentId: agent_id,
+          at: now,
+          session
+        });
+      }
+      if (
+        matched_ref_code &&
+        !existingCustomer.original_ref_code &&
+        (updateData.referred_by || updateData.agent_id)
+      ) {
+        updateData.original_ref_code = matched_ref_code;
       }
 
       const updatedCustomer = await CustomerModel.findByIdAndUpdate(
@@ -1761,6 +1805,8 @@ const CustomerController = {
         resetData.cif_commission = null;
       if (customer.ekyc_commission?.sale_id?.toString() === oldSaleId.toString())
         resetData.ekyc_commission = null;
+      // Bỏ gán = sửa sai → huỷ ghi nhận CIF của Sale cũ (docs/CRM-DAILY-REPORT-FLOWS.md R1)
+      if (isKpiCifOf(customer.kpi_cif, oldSaleId)) resetData.kpi_cif = null;
 
       await CustomerModel.findByIdAndUpdate(customer._id, { $set: resetData }, { session });
 
@@ -1892,6 +1938,15 @@ const CustomerController = {
         ref_code: `${sale.phone_number}-${sale.ma_nv}`,
         referred_at: new Date()
       };
+      // Chỉ gán có xác nhận "do Sale giới thiệu" mới được ghi nhận CIF (docs/CRM-DAILY-REPORT-FLOWS.md R1)
+      if (confirm_sale_source && !customer.kpi_cif?.sale_id) {
+        updateData.kpi_cif = await buildKpiCif({
+          channel: "manual_confirmed",
+          saleId: sale._id,
+          at: updateData.referred_at,
+          session
+        });
+      }
 
       await CustomerModel.findByIdAndUpdate(customer._id, { $set: updateData }, { session });
 
@@ -2060,6 +2115,15 @@ const CustomerController = {
           ref_code: `${sale.phone_number}-${sale.ma_nv}`,
           referred_at: new Date()
         };
+        // Chỉ gán có xác nhận "do Sale giới thiệu" mới được ghi nhận CIF (docs/CRM-DAILY-REPORT-FLOWS.md R1)
+        if (confirm_sale_source && !customer.kpi_cif?.sale_id) {
+          updateData.kpi_cif = await buildKpiCif({
+            channel: "manual_confirmed",
+            saleId: sale._id,
+            at: updateData.referred_at,
+            session
+          });
+        }
         await CustomerModel.findByIdAndUpdate(customer._id, { $set: updateData }, { session });
 
         const unownedInvestments = await InvestmentModel.find({

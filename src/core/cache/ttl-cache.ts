@@ -5,9 +5,17 @@
 // - Lưu cả Promise: nhiều request cùng lúc khi cache nguội chỉ gọi DB một lần.
 // - Lỗi không được lưu (lần sau thử lại).
 // - Khi chạy test (NODE_ENV=test) cache tắt hẳn để test thấy dữ liệu vừa ghi ngay.
-// - Chỉ đúng trong MỘT tiến trình: chạy nhiều bản API thì dữ liệu có thể cũ tối đa `ttlMs` ở bản khác.
+// - Xoá chủ động: cache có thể gia nhập một "nhóm"; code ghi dữ liệu gọi invalidateCacheGroup(nhóm) để các cache
+//   trong nhóm được nạp lại ngay ở lần đọc kế tiếp.
+// - Chỉ đúng trong MỘT tiến trình: ghi từ bản API khác, script hay sửa tay trong DB thì phải chờ hết `ttlMs`.
+//   Vì vậy luôn giữ ttlMs ngắn làm lưới an toàn, dù đã có xoá chủ động.
 
 const MAX_ENTRIES = 5000;
+
+// Nhóm cache dữ liệu danh bạ tổ chức (phòng ban, nhân viên): xoá bằng invalidateDirectoryCaches()
+export const DIRECTORY_CACHE_GROUP = "directory";
+
+const groups = new Map<string, Set<{ clear(): void }>>();
 
 export function cacheTtl(ms: number): number {
   return process.env.NODE_ENV === "test" ? 0 : ms;
@@ -16,7 +24,15 @@ export function cacheTtl(ms: number): number {
 export class TtlCache<T> {
   private readonly entries = new Map<string, { promise: Promise<T>; expiresAt: number }>();
 
-  constructor(private readonly ttl: number) {}
+  constructor(
+    private readonly ttl: number,
+    group?: string
+  ) {
+    if (group) {
+      if (!groups.has(group)) groups.set(group, new Set());
+      groups.get(group)?.add(this);
+    }
+  }
 
   getOrLoad(key: string, load: () => Promise<T>): Promise<T> {
     if (this.ttl <= 0) return load();
@@ -35,4 +51,14 @@ export class TtlCache<T> {
   clear(): void {
     this.entries.clear();
   }
+}
+
+// Xoá mọi cache thuộc nhóm (trong tiến trình này)
+export function invalidateCacheGroup(group: string): void {
+  groups.get(group)?.forEach((cache) => cache.clear());
+}
+
+// Gọi sau khi ghi phòng ban / liên kết tài khoản–nhân viên để cache danh bạ nạp lại ngay
+export function invalidateDirectoryCaches(): void {
+  invalidateCacheGroup(DIRECTORY_CACHE_GROUP);
 }

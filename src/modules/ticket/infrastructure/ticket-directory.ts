@@ -2,7 +2,7 @@ import DepartmentModel from "../../../models/DepartmentModel";
 import UserDepartmentPositionModel from "../../../models/UserDepartmentPositionModel";
 import UserInfoModel from "../../../models/UserInfoModel";
 import { resolveEmployeeId } from "../../../core/authorization/resolve-employee-id";
-import { cacheTtl, TtlCache } from "../../../core/cache/ttl-cache";
+import { cacheTtl, DIRECTORY_CACHE_GROUP, TtlCache } from "../../../core/cache/ttl-cache";
 import { filterEmployeesWithPermission } from "../../../core/authorization/employee-permissions";
 import { DepartmentSummary, EmployeeSummary, TicketDirectory } from "../application/ports";
 
@@ -16,8 +16,10 @@ interface DepartmentRow {
 }
 
 // Cây phòng ban hiếm đổi nhưng được đọc 2–3 lần mỗi request (dựng người thao tác, tab phòng ban...): giữ 30 giây.
-// Đổi phòng ban / trưởng phòng có thể chậm tới 30 giây mới ảnh hưởng quyền xem ticket.
-const departmentsCache = new TtlCache<DepartmentRow[]>(cacheTtl(30_000));
+// DepartmentPositionController gọi invalidateDirectoryCaches() sau khi tạo / sửa / xoá phòng ban nên đổi qua API này có
+// hiệu lực ngay trong cùng bản API; sửa từ bản API khác, script hay trực tiếp trong DB thì tối đa 30 giây.
+// (Thành viên phòng KHÔNG nằm trong cache này nên chuyển người giữa các phòng có hiệu lực ngay.)
+const departmentsCache = new TtlCache<DepartmentRow[]>(cacheTtl(30_000), DIRECTORY_CACHE_GROUP);
 
 async function loadDepartments(): Promise<DepartmentRow[]> {
   return departmentsCache.getOrLoad(

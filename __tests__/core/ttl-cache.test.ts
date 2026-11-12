@@ -1,4 +1,10 @@
-import { cacheTtl, TtlCache } from "../../src/core/cache/ttl-cache";
+import {
+  cacheTtl,
+  DIRECTORY_CACHE_GROUP,
+  invalidateCacheGroup,
+  invalidateDirectoryCaches,
+  TtlCache
+} from "../../src/core/cache/ttl-cache";
 
 describe("TtlCache", () => {
   afterEach(() => {
@@ -54,6 +60,39 @@ describe("TtlCache", () => {
 
     expect(a).toHaveBeenCalledTimes(2);
     expect(b).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidateCacheGroup chỉ xoá các cache cùng nhóm", async () => {
+    const inGroupA = new TtlCache<string>(1000, "nhom-a");
+    const inGroupA2 = new TtlCache<string>(1000, "nhom-a");
+    const inGroupB = new TtlCache<string>(1000, "nhom-b");
+    const noGroup = new TtlCache<string>(1000);
+    const loads = [inGroupA, inGroupA2, inGroupB, noGroup].map((cache) => {
+      const load = jest.fn().mockResolvedValue("x");
+      return { cache, load };
+    });
+    await Promise.all(loads.map(({ cache, load }) => cache.getOrLoad("k", load)));
+
+    invalidateCacheGroup("nhom-a");
+    await Promise.all(loads.map(({ cache, load }) => cache.getOrLoad("k", load)));
+
+    expect(loads.map(({ load }) => load.mock.calls.length)).toEqual([2, 2, 1, 1]);
+  });
+
+  it("invalidateDirectoryCaches xoá cache nhóm danh bạ, không đụng nhóm khác", async () => {
+    const directory = new TtlCache<string>(1000, DIRECTORY_CACHE_GROUP);
+    const other = new TtlCache<string>(1000, "khac");
+    const loadDirectory = jest.fn().mockResolvedValue("d");
+    const loadOther = jest.fn().mockResolvedValue("o");
+    await directory.getOrLoad("k", loadDirectory);
+    await other.getOrLoad("k", loadOther);
+
+    invalidateDirectoryCaches();
+    await directory.getOrLoad("k", loadDirectory);
+    await other.getOrLoad("k", loadOther);
+
+    expect(loadDirectory).toHaveBeenCalledTimes(2);
+    expect(loadOther).toHaveBeenCalledTimes(1);
   });
 
   it("thời hạn 0 (và khi chạy test) tắt cache", async () => {

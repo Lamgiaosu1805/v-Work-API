@@ -9,6 +9,7 @@ const UserDepartmentPositionModel = require("../models/UserDepartmentPositionMod
 const { toMongoQuery, canOnSubject } = require("../modules/permission");
 const { castObjectIdFields } = require("../core/db/cast-object-id-fields");
 const { syncCustomerCareInBackground } = require("../workflows/sync-customer-care.workflow");
+const { buildInvestmentAttribution } = require("../helpers/kpiAttribution");
 const {
   calculateCommission,
   getTNCNRate,
@@ -373,7 +374,9 @@ const InvestmentController = {
             invested_at,
             maturity_at,
             status,
-            commission: commissionData
+            commission: commissionData,
+            // Ghi nhận KPI mọi kỳ hạn, độc lập hoa hồng — docs/CRM-DAILY-REPORT-FLOWS.md R2
+            kpi_attribution: await buildInvestmentAttribution(customer, session)
           }
         ],
         { session }
@@ -946,7 +949,9 @@ const InvestmentController = {
               tncn_amount: 0,
               net_amount: 0,
               status: "none" // không tính hoa hồng
-            }
+            },
+            // Ghi nhận KPI theo người đang giữ khách lúc đồng bộ — docs/CRM-DAILY-REPORT-FLOWS.md R2
+            kpi_attribution: await buildInvestmentAttribution(customer)
           });
 
           results.created++;

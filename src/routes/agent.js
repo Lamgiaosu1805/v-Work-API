@@ -13,5 +13,11 @@ router.get(
   requirePermission("agent.view", "Agent"),
   AgentController.getAll
 );
+router.patch(
+  "/:id/manager-sale",
+  authenticate,
+  requirePermission("agent.assign_sale", "Agent"),
+  AgentController.setManagerSale
+);
 
 module.exports = router;

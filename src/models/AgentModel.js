@@ -18,7 +18,9 @@ const AgentSchema = new mongoose.Schema(
         address: { type: String, default: null },
         is_active: { type: Boolean, default: true },
         branch_name: { type: String, default: null },
-
+        // Sale phụ trách đại lý/CTV — CIF + doanh số qua đại lý ghi nhận KPI cho Sale này (docs/CRM-DAILY-REPORT-FLOWS.md R4)
+        manager_sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
+        manager_assigned_at: { type: Date, default: null },
 
         ...BaseSchema.obj,
     },

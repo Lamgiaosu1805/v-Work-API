@@ -81,6 +81,11 @@ const COMPANY_EXECUTIVE_GRANTS: PermissionGrantDoc[] = [
     permissionCode: "ticket.view_sensitive",
     dataScopePolicyCode: "TICKET_ALL_COMPANY",
     fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "daily_report.view",
+    dataScopePolicyCode: "DAILY_REPORT_ALL_COMPANY",
+    fieldScopePolicyCode: null
   }
 ];
 

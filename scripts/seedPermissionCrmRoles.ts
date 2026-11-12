@@ -81,6 +81,11 @@ const SALE_GRANTS: PermissionGrantDoc[] = [
     permissionCode: "customer_call.update_relationship_status",
     dataScopePolicyCode: "CUSTOMER_SELF_ASSIGNED",
     fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "daily_report.submit",
+    dataScopePolicyCode: "DAILY_REPORT_SELF",
+    fieldScopePolicyCode: null
   }
 ];
 
@@ -143,6 +148,16 @@ const TEAM_LEAD_GRANTS: PermissionGrantDoc[] = [
   {
     permissionCode: "customer_interaction.view",
     dataScopePolicyCode: "CUSTOMER_INTERACTION_OWN_DEPARTMENT",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "daily_report.submit",
+    dataScopePolicyCode: "DAILY_REPORT_SELF",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "daily_report.view",
+    dataScopePolicyCode: "DAILY_REPORT_MANAGED",
     fieldScopePolicyCode: null
   }
 ];
@@ -319,6 +334,21 @@ const SALE_MANAGER_GRANTS: PermissionGrantDoc[] = [
   {
     permissionCode: "app_integration.manage",
     dataScopePolicyCode: "APP_INTEGRATION_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "agent.assign_sale",
+    dataScopePolicyCode: "AGENT_ALL_COMPANY",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "daily_report.submit",
+    dataScopePolicyCode: "DAILY_REPORT_SELF",
+    fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "daily_report.view",
+    dataScopePolicyCode: "DAILY_REPORT_ALL_COMPANY",
     fieldScopePolicyCode: null
   }
 ];

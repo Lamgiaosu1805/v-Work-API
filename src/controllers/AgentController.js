@@ -1,6 +1,8 @@
+const mongoose = require("mongoose");
 const QRCode = require("qrcode");
 const AgentModel = require("../models/AgentModel");
 const AppModel = require("../models/AppModel");
+const UserInfoModel = require("../models/UserInfoModel");
 
 const AgentController = {
   upsert: async (req, res) => {
@@ -135,7 +137,11 @@ const AgentController = {
       }
 
       const [agents, total] = await Promise.all([
-        AgentModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
+        AgentModel.find(filter)
+          .populate("manager_sale_id", "full_name ma_nv")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(Number(limit)),
         AgentModel.countDocuments(filter)
       ]);
 
@@ -151,6 +157,43 @@ const AgentController = {
       });
     } catch (error) {
       console.error("Error in getAll agents:", error);
+      return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+  },
+
+  // PATCH /agents/:id/manager-sale — gán/bỏ Sale phụ trách đại lý (docs/CRM-DAILY-REPORT-FLOWS.md R4).
+  // Chỉ ảnh hưởng ghi nhận KPI phát sinh SAU thời điểm gán; số đã ghi nhận trước đó giữ nguyên.
+  setManagerSale: async (req, res) => {
+    try {
+      const { sale_user_info_id = null } = req.body;
+      if (
+        !mongoose.Types.ObjectId.isValid(req.params.id) ||
+        (sale_user_info_id && !mongoose.Types.ObjectId.isValid(sale_user_info_id))
+      ) {
+        return res.status(400).json({ message: "ID không hợp lệ" });
+      }
+
+      const agent = await AgentModel.findOne({ _id: req.params.id, isDeleted: false });
+      if (!agent) return res.status(404).json({ message: "Không tìm thấy đại lý" });
+
+      if (sale_user_info_id) {
+        const sale = await UserInfoModel.findOne({ _id: sale_user_info_id, isDeleted: false })
+          .select("_id")
+          .lean();
+        if (!sale) return res.status(404).json({ message: "Không tìm thấy nhân viên" });
+      }
+
+      agent.manager_sale_id = sale_user_info_id || null;
+      agent.manager_assigned_at = sale_user_info_id ? new Date() : null;
+      await agent.save();
+      await agent.populate("manager_sale_id", "full_name ma_nv");
+
+      return res.status(200).json({
+        message: sale_user_info_id ? "Đã gán Sale phụ trách đại lý" : "Đã bỏ Sale phụ trách đại lý",
+        data: agent
+      });
+    } catch (error) {
+      console.error("Error in setManagerSale:", error);
       return res.status(500).json({ message: "Internal server error", error: error.message });
     }
   }

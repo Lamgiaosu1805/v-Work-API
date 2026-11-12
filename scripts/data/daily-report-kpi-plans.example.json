@@ -1,0 +1,38 @@
+{
+  "year": 2026,
+  "plans": [
+    {
+      "ma_nv": "NV_PILOT_TTKD",
+      "template": "TTKD",
+      "effective_from": "2026-11-06",
+      "decision_ref": "Số QĐ giao KPI",
+      "note": "Theo sheet TTKD file Khung KPI",
+      "targets": {
+        "investment_amount": 250000000,
+        "cif_new": 20,
+        "merchant_sale": 10,
+        "ctv_new": 12,
+        "merchant_active": 8
+      }
+    },
+    {
+      "ma_nv": "NV_PILOT_PRIORITY_1",
+      "template": "PRIORITY",
+      "effective_from": "2026-11-06",
+      "note": "Theo sheet Priority file Khung KPI — KH 800 triệu: xác nhận chung 2 người hay mỗi người",
+      "targets": {
+        "investment_amount": 800000000,
+        "cif_first_investment": 10
+      }
+    },
+    {
+      "ma_nv": "NV_PILOT_PRIORITY_2",
+      "template": "PRIORITY",
+      "effective_from": "2026-11-06",
+      "targets": {
+        "investment_amount": { "annual": 150000000, "monthly": [] },
+        "cif_first_investment": 10
+      }
+    }
+  ]
+}

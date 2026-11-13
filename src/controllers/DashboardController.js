@@ -140,13 +140,23 @@ const resolveScopedCustomerIds = async (account, appId) => {
 const scopedMatch = (field, customerIds) =>
   customerIds === null ? {} : { [field]: { $in: customerIds } };
 
+// Khoản còn hiệu lực tại thời điểm `at` — cùng định nghĩa "Số dư đang đầu tư" của Bảng điều hành kinh doanh
+// (src/workflows/daily-report/auto-metric-sources.ts → aum): trừ khoản đã tất toán theo đồng bộ TIKLUY (`closure`)
+// hoặc đã có trạng thái kết thúc. Trạng thái `active` một mình không đủ vì TIKLUY không luôn đẩy trạng thái đáo hạn.
+const CLOSED_STATUSES = ["cancelled", "matured", "early_terminated", "renewed"];
+const openAtFilter = (at) => ({
+  status: { $ne: "cancelled" },
+  invested_at: { $lte: at },
+  $or: [{ closure: null, status: { $nin: CLOSED_STATUSES } }, { "closure.closed_at": { $gt: at } }]
+});
+
+// Khách đang đầu tư + AUM là ảnh chụp cuối kỳ đang lọc (không phải tổng phát sinh trong kỳ)
 const calculateKeyMetrics = async (range, customerIds, appId) => {
   const investmentFilter = {
     app_id: appId,
     isDeleted: false,
-    status: "active",
     ...scopedMatch("customer_id", customerIds),
-    ...dateMatch("invested_at", range)
+    ...openAtFilter(range.to ?? new Date())
   };
   const [kycVerified, activeCustomerIds, aumRows] = await Promise.all([
     CustomerModel.countDocuments({

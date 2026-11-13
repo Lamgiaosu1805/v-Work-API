@@ -122,7 +122,7 @@ A + B làm trên nhánh mới tách từ `feat/crm-daily-report` (PR #179/#181/#
 |---|---|---|
 | Trường ghi nhận tất toán | `src/models/InvestmentModel.js` | `closure` (type matured/early_terminated, closed_at, principal, profit, form_of_maturity, renewed, synced_at), `closure_attribution` (Sale/TTKD đang giữ khách lúc đồng bộ — Q2), `renewal_of` (khoản sinh ra do tái tục), `holding_synced_at`. Index `app_id + closure.closed_at` |
 | Gọi danh mục TIKLUY | `src/utils/tikluyClient.js` → `getInvestmentHoldings(externalId, { pageNumber, pageSize, type })` | `GET /user-investment-holding/crm/{external_id}` |
-| Ánh xạ dòng TIKLUY | `src/workflows/investment-closure/holding-mapper.ts` | status 1 tất toán trước hạn / 2 đã tất toán; trước hạn mà `endDate` còn ở tương lai → lấy lúc phát hiện; tái tục = đáo hạn + `formOfMaturity` có "tái tục"; khoản tái tục = khoản mới cùng khách trong ±2 ngày, gốc ≥ 99% |
+| Ánh xạ dòng TIKLUY | `src/workflows/investment-closure/holding-mapper.ts` | Khớp theo `id` của TIKLUY (= `external_investment_id`; `investmentCode` chỉ là mã hiển thị VNF…); ngày dạng `HH:mm DD/MM/YYYY`; status 1 tất toán trước hạn / 2 đã tất toán; trước hạn: `endDate` (ngày đáo hạn hợp đồng) nếu đã qua, chưa tới thì lấy lúc phát hiện; tái tục = đáo hạn + `formOfMaturity` "Chuyển gốc (và lãi) sang kỳ hạn mới" / "Tái tục…"; khoản tái tục = khoản mới cùng khách trong ±2 ngày, tiền ≥ 99% gốc, ưu tiên tiền sát gốc + lãi nhất |
 | Đồng bộ | `src/workflows/investment-closure-sync.workflow.ts` | Chỉ hỏi khách còn khoản chưa ghi nhận tất toán; **không đổi `status` / hoa hồng**; chạy lại không ghi trùng; chuỗi tái tục đã đáo hạn hết (chạy bù) vẫn nối đúng từng khoản |
 | Cron | `src/jobs/investmentClosureSyncJob.js` | 01:30 hằng đêm, khoá Redis có tiền tố môi trường, app `tikluy` |
 | Chạy bù / chạy tay | `scripts/syncInvestmentClosures.ts --app=tikluy [--dry-run] [--limit=N] [--concurrency=3]` | Chạy `--dry-run` trước (vẫn gọi TIKLUY, không ghi DB) |
@@ -154,7 +154,7 @@ quản lý, quyền RBAC 2 role).
 
 ### 8.3 Trước khi bật trên live
 
-1. TIKLUY xác nhận 4 điểm mục 3.3 (mã khoản, `endDate` khi tất toán trước hạn, giá trị `formOfMaturity`, tải).
+1. Đã đối chiếu dữ liệu live 13/11/2026: mã khoản, định dạng ngày, giá trị `formOfMaturity` (đã sửa theo dữ liệu thật). Còn hỏi TIKLUY: ngày tất toán thật của khoản tất toán trước hạn (API chỉ trả ngày đáo hạn hợp đồng) và tải gọi API hằng đêm.
 2. Deploy API (có cron 01:30) → chạy `scripts/syncInvestmentClosures.ts --app=tikluy --dry-run --limit=50`, đối chiếu
    vài khách với TIKLUY → chạy thật toàn bộ (chạy bù lịch sử).
 3. Thêm `renewal_rate` vào file kế hoạch KPI của Sale Priority (vd `"renewal_rate": 70`) rồi seed lại kế hoạch.

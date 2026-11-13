@@ -1,11 +1,14 @@
 import moment from "moment-timezone";
 
 // Ánh xạ 1 dòng danh mục đầu tư TIKLUY → bản ghi tất toán của vWork (docs/CRM-LEADERSHIP-DASHBOARD-AI-PLAN.md mục 3).
-// GIẢ ĐỊNH chờ TIKLUY xác nhận (mục 3.3): investmentCode = external_investment_id; endDate của khoản tất toán đúng hạn
-// là ngày tất toán; formOfMaturity là chữ mô tả (có "tái tục" khi gốc được tái tục).
+// Đối chiếu dữ liệu live 13/11/2026: `id` (UUID) = external_investment_id của vWork, `investmentCode` chỉ là mã hiển thị
+// (VNF…); ngày dạng "HH:mm DD/MM/YYYY"; tái tục ghi "Chuyển gốc và lãi sang kỳ hạn mới", khoản mới = gốc + lãi.
+// Tất toán trước hạn không có ngày tất toán thật — endDate là ngày đáo hạn theo hợp đồng.
 
 const TZ = "Asia/Ho_Chi_Minh";
 const DATE_FORMATS = [
+  "HH:mm DD/MM/YYYY",
+  "HH:mm:ss DD/MM/YYYY",
   "DD/MM/YYYY HH:mm:ss",
   "DD/MM/YYYY HH:mm",
   "DD/MM/YYYY",
@@ -21,6 +24,7 @@ const RENEWAL_MIN_RATIO = 0.99;
 export const HOLDING_STATUS = { ACTIVE: 0, EARLY_TERMINATED: 1, MATURED: 2 } as const;
 
 export interface HoldingRow {
+  id?: string | null;
   investmentCode?: string | number | null;
   investAmount?: number | string | null;
   startDate?: string | null;
@@ -56,11 +60,22 @@ export function parseTikluyDate(value: unknown): Date | null {
 const unaccent = (text: string) =>
   text.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
 
-/** Hình thức đáo hạn có tái tục gốc (vd "Tái tục gốc", "Tái tục gốc và lãi"), trừ dạng phủ định "không tái tục". */
+/** Mã để khớp với external_investment_id: `id` của TIKLUY, dữ liệu cũ thiếu `id` thì thử `investmentCode`. */
+export function holdingKeys(row: HoldingRow): string[] {
+  return [row.id, row.investmentCode]
+    .filter((value) => value !== null && value !== undefined && value !== "")
+    .map(String);
+}
+
+/**
+ * Hình thức đáo hạn có chuyển gốc sang kỳ mới: "Chuyển gốc và lãi sang kỳ hạn mới", "Chuyển gốc sang kỳ hạn mới",
+ * "Tái tục gốc"…, trừ dạng phủ định "không tái tục". "Nhận lãi và gốc cuối kỳ" là rút.
+ */
 export function isRenewalForm(form: unknown): boolean {
   if (typeof form !== "string") return false;
   const text = unaccent(form);
-  return text.includes("tai tuc") && !text.includes("khong tai tuc");
+  if (text.includes("khong tai tuc")) return false;
+  return text.includes("tai tuc") || text.includes("sang ky han moi");
 }
 
 /**
@@ -94,22 +109,20 @@ interface RenewalCandidate {
   invested_at: Date;
 }
 
-/** Khoản mới của cùng khách sinh ra do tái tục khoản vừa đáo hạn (gần nhất theo thời gian), không có → null. */
+/**
+ * Khoản mới của cùng khách sinh ra do tái tục khoản vừa đáo hạn, không có → null. Nhiều khoản đáo hạn cùng lúc
+ * (vd 1 triệu và 2 triệu cùng ngày) → chọn khoản có số tiền sát gốc nhất (gốc + lãi), rồi gần thời điểm nhất.
+ */
 export function findRenewalTarget<T extends RenewalCandidate>(
   closure: ClosureRecord,
   candidates: T[]
 ): T | null {
   if (closure.type !== "matured") return null;
   const closedMs = closure.closed_at.getTime();
+  const gap = (c: T) => Math.abs(new Date(c.invested_at).getTime() - closedMs);
   const matches = candidates.filter(
-    (c) =>
-      Math.abs(new Date(c.invested_at).getTime() - closedMs) <= RENEWAL_WINDOW_MS &&
-      c.amount >= closure.principal * RENEWAL_MIN_RATIO
+    (c) => gap(c) <= RENEWAL_WINDOW_MS && c.amount >= closure.principal * RENEWAL_MIN_RATIO
   );
-  matches.sort(
-    (a, b) =>
-      Math.abs(new Date(a.invested_at).getTime() - closedMs) -
-      Math.abs(new Date(b.invested_at).getTime() - closedMs)
-  );
+  matches.sort((a, b) => a.amount - b.amount || gap(a) - gap(b));
   return matches[0] ?? null;
 }

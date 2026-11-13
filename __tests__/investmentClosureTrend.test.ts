@@ -467,3 +467,120 @@ describe("chạy bù lịch sử", () => {
     expect((await reloadById(c1)).renewal_of).toBeNull();
   });
 });
+
+describe("dữ liệu thật TIKLUY (đối chiếu live 13/11/2026)", () => {
+  test("ngày dạng 'HH:mm DD/MM/YYYY' và hình thức chuyển sang kỳ hạn mới", () => {
+    expect(parseTikluyDate("09:05 16/08/2026")).toEqual(vn("2026-08-16T09:05:00"));
+    expect(parseTikluyDate("23:59 16/09/2026")).toEqual(vn("2026-09-16T23:59:00"));
+    expect(isRenewalForm("Chuyển gốc và lãi sang kỳ hạn mới")).toBe(true);
+    expect(isRenewalForm("Chuyển gốc sang kỳ hạn mới")).toBe(true);
+    expect(isRenewalForm("Nhận lãi và gốc cuối kỳ")).toBe(false);
+    expect(isRenewalForm("Nhận lãi hàng ngày")).toBe(false);
+  });
+
+  test("nhiều khoản đáo hạn cùng lúc: khoản tái tục là khoản có tiền sát gốc + lãi nhất", () => {
+    const closure = mapHoldingClosure(
+      { status: 2, investAmount: "1000000", endDate: "23:59 16/08/2026" },
+      syncAt
+    )!;
+    const candidates = [
+      { _id: "2tr", amount: 2_012_103, invested_at: vn("2026-08-16T00:00:00") },
+      { _id: "1tr", amount: 1_006_051, invested_at: vn("2026-08-16T00:00:00") }
+    ];
+    expect(findRenewalTarget(closure, candidates)?._id).toBe("1tr");
+  });
+
+  test("khớp theo `id` (investmentCode chỉ là mã hiển thị VNF…), nối đúng cặp tái tục, bỏ qua ví không kỳ hạn", async () => {
+    const appId = id();
+    await AppModel.create({ _id: appId, name: "Thật", code: "real-app" });
+    const [customer] = await CustomerModel.create([
+      { app_id: appId, phone_number: "0911000077", external_id: "kh-real", referred_by: ids.s1 }
+    ]);
+    const make = (code: string, amount: number, investedAt: string) =>
+      InvestmentModel.create({
+        app_id: appId,
+        customer_id: customer._id,
+        external_investment_id: code,
+        product_name: "LỘC VÀNG",
+        amount,
+        term_type: "month",
+        term_value: 1,
+        interest_rate: 7.5,
+        invested_at: new Date(investedAt),
+        maturity_at: new Date(investedAt)
+      });
+    const old2 = await make("d11f0824", 2_000_000, "2026-07-16T00:00:00.000Z");
+    const old1 = await make("d3106437", 1_000_000, "2026-07-16T00:00:00.000Z");
+    const new2 = await make("83156246", 2_012_103, "2026-08-16T00:00:00.000Z");
+    const new1 = await make("f6fc63ba", 1_006_051, "2026-08-16T00:00:00.000Z");
+    const roll = "Chuyển gốc và lãi sang kỳ hạn mới";
+    const rows = [
+      {
+        id: "83156246",
+        investmentCode: "VNF0000000002935",
+        investAmount: "2012103.0",
+        startDate: "09:05 16/08/2026",
+        endDate: "23:59 16/09/2026",
+        status: "1",
+        formOfMaturity: roll
+      },
+      {
+        id: "f6fc63ba",
+        investmentCode: "VNF0000000002936",
+        investAmount: "1006051.0",
+        startDate: "09:05 16/08/2026",
+        endDate: "23:59 16/09/2026",
+        status: "1",
+        formOfMaturity: roll
+      },
+      {
+        id: "db142a5d",
+        investmentCode: "GWV22cb60a043dd3",
+        investAmount: "313832.00",
+        startDate: "10:00 02/08/2026",
+        endDate: null,
+        status: "0",
+        formOfMaturity: "Nhận lãi hàng ngày"
+      },
+      {
+        id: "d11f0824",
+        investmentCode: "VNF0000000002456",
+        investAmount: "2000000",
+        startDate: "09:00 16/07/2026",
+        endDate: "23:59 16/08/2026",
+        status: "2",
+        formOfMaturity: roll
+      },
+      {
+        id: "d3106437",
+        investmentCode: "VNF0000000002455",
+        investAmount: "1000000",
+        startDate: "09:00 16/07/2026",
+        endDate: "23:59 16/08/2026",
+        status: "2",
+        formOfMaturity: roll
+      }
+    ];
+
+    const result = await syncInvestmentClosures({
+      appCode: "real-app",
+      now: syncAt,
+      fetchHoldings: async () => rows
+    });
+
+    expect(result).toMatchObject({ closed: 4, renewed: 2, renewalLinks: 2, unknownCodes: 0 });
+    const reloadById = async (doc: any) => (await InvestmentModel.findById(doc._id).lean()) as any;
+    expect(String((await reloadById(new2)).renewal_of)).toBe(String(old2._id));
+    expect(String((await reloadById(new1)).renewal_of)).toBe(String(old1._id));
+    expect((await reloadById(old2)).closure).toMatchObject({
+      type: "matured",
+      renewed: true,
+      closed_at: vn("2026-08-16T23:59:00")
+    });
+    expect((await reloadById(new2)).closure).toMatchObject({
+      type: "early_terminated",
+      principal: 2_012_103,
+      closed_at: vn("2026-09-16T23:59:00")
+    });
+  });
+});

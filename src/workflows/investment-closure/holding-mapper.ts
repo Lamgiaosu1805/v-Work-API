@@ -41,6 +41,8 @@ export interface ClosureRecord {
   profit: number;
   form_of_maturity: string | null;
   renewed: boolean;
+  /** Tất toán trước hạn không rõ ngày (phát hiện ở lần đồng bộ đầu) — không tính tiền ra theo kỳ, chỉ trừ số dư */
+  date_unknown: boolean;
   synced_at: Date;
 }
 
@@ -89,7 +91,10 @@ export function mapHoldingClosure(row: HoldingRow, now: Date): ClosureRecord | n
   if (!(principal > 0)) return null;
 
   let closedAt = parseTikluyDate(row.endDate);
-  if (status === HOLDING_STATUS.EARLY_TERMINATED && (!closedAt || closedAt > now)) closedAt = now;
+  // Trước hạn mà ngày đáo hạn HĐ chưa tới: TIKLUY không trả ngày tất toán thật → lấy lúc phát hiện, workflow
+  // quyết định có đáng tin không (đã từng đồng bộ thấy còn mở → tất toán trong khoảng 1 ngày qua)
+  const detected = status === HOLDING_STATUS.EARLY_TERMINATED && (!closedAt || closedAt > now);
+  if (detected) closedAt = now;
   if (!closedAt || closedAt.getTime() > now.getTime() + DAY_MS) return null;
 
   return {
@@ -99,6 +104,7 @@ export function mapHoldingClosure(row: HoldingRow, now: Date): ClosureRecord | n
     profit: Number(row.totalProfit) || 0,
     form_of_maturity: row.formOfMaturity ?? null,
     renewed: status === HOLDING_STATUS.MATURED && isRenewalForm(row.formOfMaturity),
+    date_unknown: detected,
     synced_at: now
   };
 }

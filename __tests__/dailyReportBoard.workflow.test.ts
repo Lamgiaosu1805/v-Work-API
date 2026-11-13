@@ -278,6 +278,20 @@ describe("báo cáo ngày", () => {
     expect(s1Row.result_status).toBe("on_time");
   });
 
+  test("quyền toàn công ty cấp từ 2 role RBAC (conditions rỗng) vẫn thấy dòng chưa phân bổ", async () => {
+    const summary = await getDailyReportSummary({
+      ability: buildAbility([
+        { action: "daily_report.view", subject: "DailyReport", conditions: {} as any },
+        { action: "daily_report.view", subject: "DailyReport", conditions: {} as any }
+      ]),
+      dateKey: "2026-11-12",
+      now: vn("2026-11-12T18:00:00")
+    });
+    expect(summary.company_wide).toBe(true);
+    expect(summary.units.find((u: any) => u.id === "__unassigned__")).toBeDefined();
+    expect(summary.totals.metrics.investment_amount.day).toBe(90_000_000);
+  });
+
   test("quản lý theo phạm vi: chỉ thấy Sale mình quản lý, không có dòng chưa phân bổ", async () => {
     const summary = await getDailyReportSummary({
       ability: buildAbility([

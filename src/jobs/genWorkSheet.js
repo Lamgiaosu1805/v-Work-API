@@ -28,6 +28,71 @@ async function ensurePendingStatus(userId, worksheetId, date) {
   );
 }
 
+
+// Lấy 2 ca mặc định của nhân sự fulltime (cron + import dùng chung).
+async function loadDefaultShifts() {
+  const [adminShift, morningShift] = await Promise.all([
+    Shift.findOne({ name: "Ca hành chính" }),
+    Shift.findOne({ name: "Ca sáng" })
+  ]);
+  return { adminShift, morningShift };
+}
+
+// Tạo (nếu chưa có) WorkSheet + WorkDayStatus "pending" cho 1 nhân sự ở 1 ngày QUÁ KHỨ — dùng khi
+// import bảng công của người vào làm trước ngày có tài khoản vWork (cron chỉ tạo cho ngày hiện tại nên
+// các ngày đó không có worksheet). Cùng quy tắc ca / ngày nghỉ với cron createDailyWorkSheets: bỏ Chủ
+// nhật, ngày lễ toàn công ty / chi nhánh; fulltime theo ca hành chính (T7 ca sáng), parttime theo
+// WorkSchedule. Thêm: chỉ tạo trong thời gian làm việc (start_date <= ngày <= resignation_date).
+// `holidaysOfDay` = các Holiday đúng ngày đó. Trả về worksheet (đã có hoặc mới tạo) hoặc null nếu
+// ngày đó không phải ngày làm việc của người này.
+async function ensureWorkSheetForUserDay({ user, date, holidaysOfDay = [], defaultShifts }) {
+  const day = moment.tz(date, TZ).startOf("day");
+  const dayDate = day.toDate();
+  if (user.isDeleted) return null;
+  if (user.start_date && dayDate < moment.tz(user.start_date, TZ).startOf("day").toDate())
+    return null;
+  if (user.resignation_date && new Date(user.resignation_date).getTime() < dayDate.getTime())
+    return null;
+
+  const dayOfWeek = day.day() === 0 ? 7 : day.day();
+  if (dayOfWeek === 7) return null;
+  if (holidaysOfDay.some((h) => h.scope_type === "all")) return null;
+  if (
+    user.branch_id &&
+    holidaysOfDay.some(
+      (h) =>
+        h.scope_type === "branch" &&
+        (h.branches || []).some((b) => b.toString() === user.branch_id.toString())
+    )
+  )
+    return null;
+
+  let shiftIds;
+  if (!user.employment_type || user.employment_type === "fulltime") {
+    const shift = dayOfWeek === 6 ? defaultShifts.morningShift : defaultShifts.adminShift;
+    if (!shift) return null;
+    shiftIds = [shift._id];
+  } else if (user.employment_type === "parttime") {
+    const schedules = await WorkSchedule.find({
+      userId: user._id,
+      dayOfWeek,
+      isDeleted: false
+    }).populate("shifts");
+    shiftIds = schedules.flatMap((ws) => ws.shifts).map((s) => s._id);
+    if (!shiftIds.length) return null;
+  } else {
+    return null;
+  }
+
+  const worksheet = await WorkSheet.findOneAndUpdate(
+    { user_id: user._id, date: dayDate, isDeleted: false },
+    { $setOnInsert: { shifts: shiftIds } },
+    { upsert: true, new: true }
+  );
+  await ensurePendingStatus(user._id, worksheet._id, dayDate);
+  return worksheet;
+}
+
 async function createDailyWorkSheets(targetDate) {
   try {
     const refMoment = targetDate ? moment.tz(targetDate, TZ) : moment.tz(TZ);
@@ -140,4 +205,9 @@ function registerGenWorkSheetJob() {
   );
 }
 
-module.exports = { createDailyWorkSheets, registerGenWorkSheetJob };
+module.exports = {
+  createDailyWorkSheets,
+  registerGenWorkSheetJob,
+  ensureWorkSheetForUserDay,
+  loadDefaultShifts
+};

@@ -171,6 +171,46 @@ describe("AttendanceController.importExcel", () => {
     );
   });
 
+  test("ngày chưa có worksheet nhưng có giờ máy chấm công và nằm trong thời gian làm việc: tự tạo worksheet rồi tính công", async () => {
+    const user: any = await UserInfoModel.create({
+      full_name: "NV Vào Trước Ngày Tạo TK",
+      cccd: "000000000009",
+      phone_number: "0900000009",
+      sex: 1,
+      date_of_birth: new Date("1995-01-01"),
+      address: "HN",
+      tinh_trang_hon_nhan: 0,
+      id_account: new mongoose.Types.ObjectId(),
+      ma_nv: "NV009",
+      employment_type: "fulltime",
+      start_date: moment.tz("2026-07-01", TZ).toDate()
+    });
+    await AttendanceMachineMappingModel.create({ machine_code: "M009", user_id: user._id });
+    await ShiftModel.create({ name: "Ca hành chính", start_time: "08:00", end_time: "17:30" });
+
+    const buffer = buildExcelBuffer([
+      {
+        machineCode: "M009",
+        days: [
+          // 29/06 trước start_date -> không tạo; 01/07 (thứ 4) hợp lệ; 05/07 là Chủ nhật -> không tạo
+          { dateStr: "29/06/2026", inTime: "08:00", outTime: "17:30" },
+          { dateStr: "01/07/2026", inTime: "08:00", outTime: "17:30" },
+          { dateStr: "05/07/2026", inTime: "08:00", outTime: "17:30" }
+        ]
+      }
+    ]);
+    const res = makeRes();
+    await AttendanceController.importExcel({ file: { buffer } }, res);
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ imported: 1, skipped: 2 }) })
+    );
+    const sheets: any[] = await WorkSheetModel.find({ user_id: user._id }).lean();
+    expect(sheets).toHaveLength(1);
+    expect(moment.tz(sheets[0].date, TZ).format("YYYY-MM-DD")).toBe("2026-07-01");
+    expect(sheets[0].work_unit).toBe(1);
+  });
+
   test("chạy import 2 lần với dữ liệu giống hệt: lần 2 tính vào unchanged", async () => {
     const userId = new mongoose.Types.ObjectId();
     await UserInfoModel.create({

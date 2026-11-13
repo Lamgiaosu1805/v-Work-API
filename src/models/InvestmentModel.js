@@ -1,6 +1,18 @@
 const mongoose = require("mongoose");
 const BaseSchema = require("./BaseSchema");
 
+// Bản chụp ghi nhận KPI: Sale + TTKD + kênh tại thời điểm phát sinh (docs/CRM-DAILY-REPORT-FLOWS.md mục 4)
+const KpiAttributionSchema = new mongoose.Schema(
+    {
+        sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
+        department_id: { type: mongoose.Schema.Types.ObjectId, ref: "department", default: null },
+        agent_id: { type: mongoose.Schema.Types.ObjectId, ref: "agent", default: null },
+        channel: { type: String, enum: ["sale", "agent", "unassigned"], required: true },
+        attributed_at: { type: Date, required: true },
+    },
+    { _id: false }
+);
+
 const InvestmentSchema = new mongoose.Schema(
     {
         app_id: { type: mongoose.Schema.Types.ObjectId, ref: "app", required: true },
@@ -53,19 +65,30 @@ const InvestmentSchema = new mongoose.Schema(
         // === GHI NHẬN KPI (docs/CRM-DAILY-REPORT-FLOWS.md mục 4, R2) ===
         // Doanh số tính cho Sale đang giữ khách lúc tạo khoản (mọi kỳ hạn, độc lập hoa hồng) + TTKD lúc đó.
         // Ghi 1 lần khi tạo, KHÔNG đổi khi khách được gán/chuyển về sau (khác commission.sale_id).
-        kpi_attribution: {
+        kpi_attribution: { type: KpiAttributionSchema, default: null },
+
+        // === TẤT TOÁN (đồng bộ từ danh mục đầu tư TIKLUY — docs/CRM-LEADERSHIP-DASHBOARD-AI-PLAN.md mục 3) ===
+        closure: {
             type: new mongoose.Schema(
                 {
-                    sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
-                    department_id: { type: mongoose.Schema.Types.ObjectId, ref: "department", default: null },
-                    agent_id: { type: mongoose.Schema.Types.ObjectId, ref: "agent", default: null },
-                    channel: { type: String, enum: ["sale", "agent", "unassigned"], required: true },
-                    attributed_at: { type: Date, required: true },
+                    type: { type: String, enum: ["matured", "early_terminated"], required: true },
+                    closed_at: { type: Date, required: true },
+                    principal: { type: Number, required: true }, // gốc tất toán = tiền ra
+                    profit: { type: Number, default: 0 },
+                    form_of_maturity: { type: String, default: null },
+                    // Tái tục: tiền không rời khỏi hệ thống → KHÔNG tính tiền ra (Q1)
+                    renewed: { type: Boolean, default: false },
+                    synced_at: { type: Date, required: true },
                 },
                 { _id: false }
             ),
             default: null,
         },
+        // Tiền ra trừ vào Sale đang giữ khách lúc tất toán + TTKD của Sale lúc đó (Q2)
+        closure_attribution: { type: KpiAttributionSchema, default: null },
+        // Khoản mới sinh ra do tái tục khoản cũ → KHÔNG tính tiền vào (Q1)
+        renewal_of: { type: mongoose.Schema.Types.ObjectId, ref: "investment", default: null },
+        holding_synced_at: { type: Date, default: null },
         ...BaseSchema.obj,
     },
     {
@@ -82,5 +105,6 @@ InvestmentSchema.index({ "commission.agent_id": 1 });
 InvestmentSchema.index({ "commission.period_month": 1, "commission.period_year": 1 });
 InvestmentSchema.index({ status: 1, invested_at: 1, customer_id: 1 });
 InvestmentSchema.index({ app_id: 1, invested_at: 1, "kpi_attribution.sale_id": 1 });
+InvestmentSchema.index({ app_id: 1, "closure.closed_at": 1 });
 
 module.exports = mongoose.model("investment", InvestmentSchema);

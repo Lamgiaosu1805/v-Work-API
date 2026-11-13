@@ -14,6 +14,21 @@ tikluyClient.interceptors.request.use((config) => {
   return config;
 });
 
+// Danh mục đầu tư của 1 khách (cùng API màn chi tiết khách đang dùng): { rows, total }.
+// Dòng có investmentCode, investAmount, startDate, endDate, status (0 đang đầu tư / 1 tất toán trước hạn / 2 đã tất toán),
+// totalProfit, formOfMaturity. type=1 giống tab "Đầu tư" của web.
+const getInvestmentHoldings = async (externalId, { pageNumber = 0, pageSize = 50, type = 1 } = {}) => {
+  const res = await tikluyClient.get(`/user-investment-holding/crm/${externalId}`, {
+    params: { pageNumber, pageSize, type }
+  });
+  const data = res.data?.data ?? {};
+  return {
+    rows: Array.isArray(data.investmentHoldingProducts) ? data.investmentHoldingProducts : [],
+    total: Number(data.totalRecords ?? 0)
+  };
+};
+
 module.exports = {
-  tikluyClient
+  tikluyClient,
+  getInvestmentHoldings
 };

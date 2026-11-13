@@ -22,7 +22,8 @@
       "note": "Theo sheet Priority file Khung KPI — KH 800 triệu: xác nhận chung 2 người hay mỗi người",
       "targets": {
         "investment_amount": 800000000,
-        "cif_first_investment": 10
+        "cif_first_investment": 10,
+        "renewal_rate": 70
       }
     },
     {

@@ -51,6 +51,7 @@ src/
     ticket/                     # Ticket hỗ trợ nội bộ: nhóm xử lý chủ trì + phối hợp, tờ trình (file), cảnh báo vàng thay SLA (route /tickets). Xem docs/TICKET-MODULE-PLAN.md
     app-release/                # Ép cập nhật app mobile: GET /app-release (public), PUT /app-release (admin, cập nhật minVersion/latestVersion cả iOS + Android, hoặc 1 bên nếu truyền platform), POST /app-release/notify (admin, bắn push tự viết nội dung tới máy iOS/Android, bấm mở store) + middleware appVersionGate (426 khi header x-app-version < min_version)
     daily-report/               # Báo cáo ngày kinh doanh + kế hoạch KPI năm (route /daily-reports) — docs/CRM-DAILY-REPORT-FLOWS.md
+    agent-harness/              # Lõi agent AI dùng chung (hội thoại, hạn mức, vòng gọi công cụ Claude, socket agent:*, route /ai-agents); agent cụ thể đăng ký từ src/workflows/agents/ (vd sales-bi — Trợ lý kinh doanh) — docs/CRM-LEADERSHIP-DASHBOARD-AI-PLAN.md mục 9
   workflows/                    # Tầng orchestration xuyên module — xem mục "workflows/" trong "DDD + Hexagonal"
     request-side-effects/       # Side-effect theo request_type (leave/late_early/forgot_checkin/away-day)
   controllers/                  # Pattern CŨ — xử lý logic request/response trực tiếp (chưa migrate)
@@ -170,6 +171,7 @@ BÊN TRONG `src/modules/`.
 | `DISABLE_CRON` | `1`/`true` → `startCronJobs()` không đăng ký cron nào. Dùng khi chạy local trỏ vào DB dùng chung (test) để job không ghi vào dữ liệu đó |
 | `HANDBOOK_ANTHROPIC_API_KEY` | Key Claude cho Trợ lý Nội quy (rơi về `ANTHROPIC_API_KEY`). Còn `HANDBOOK_AI_MODEL`, `HANDBOOK_AI_EFFORT` (mặc định `low`), `HANDBOOK_DAILY_QUOTA` (30), `HANDBOOK_MAX_TURNS` (20), `HANDBOOK_RETENTION_DAYS` (180)… — bảng đầy đủ ở `docs/HANDBOOK-ASSISTANT.md` |
 | `VNFITE_FILE_MANAGER_URL` | Tuỳ chọn. Gốc kho file VNFITE để xem ảnh eKYC (CCCD, chân dung) của khách VNFITE ở `GET /customer/local-image`; ảnh đọc bằng `GET {url}/file/{fileId}` (không cần xác thực). Mặc định `https://service.vnfite.com.vn/file-manager/v2`. Server vWork phải gọi được URL này |
+| `AGENT_ANTHROPIC_API_KEY` | Tuỳ chọn. Khoá Claude cho agent harness (bỏ trống → `HANDBOOK_ANTHROPIC_API_KEY` → `ANTHROPIC_API_KEY`). Theo agent: `SALES_BI_AI_MODEL` (mặc định `claude-sonnet-5-5`), `SALES_BI_AI_EFFORT` (`medium`), `SALES_BI_DAILY_QUOTA` (50) |
 | `TICKET_DIR_DEV` / `TICKET_DIR_PROD` | Tuỳ chọn. Thư mục file đính kèm ticket (CCCD, tờ trình...); bỏ trống = `UPLOAD_DIR_*/ticket` (dùng chung volume upload). `/document/getFile` chặn thư mục này — file ticket chỉ tải qua `/tickets` |
 
 Mọi path resolve dùng `path.resolve(dir)` — tương thích cả relative (dev) và absolute (prod).
@@ -436,6 +438,7 @@ Các trường hợp **bắt buộc** dùng transaction:
 | `/handbook-assistant` | modules/handbook-assistant | `authenticate` + `handbook_assistant.use` | Trợ lý Nội quy (lịch sử, trích dẫn, hạn mức; hỏi AI qua socket `handbook:*`) |
 | `/leave` | modules/leave/interface | `authenticate` (chỉ trả dữ liệu của chính người gọi) | Màn "Phép của tôi": `GET /leave/my-overview?year=` (số dư hiện tại, đã dùng/đã cộng theo năm, phép đang chờ duyệt, điều kiện hợp đồng, ngày cộng kế tiếp), `GET /leave/my-ledger?year=&type=all\|in\|out&page=&limit=` (lịch sử sổ phép mới → cũ, số dư luỹ kế tính từ toàn bộ lịch sử, kèm đơn liên quan; tổ hợp ở `workflows/get-my-leave.workflow.ts`) |
 | `/tickets` | modules/ticket/interface | `authenticate` + `requirePermission(ticket.*)` | Ticket hỗ trợ nội bộ (+ `/tickets/config/*` quyền `ticket.config`) |
+| `/ai-agents` | module `agent-harness` | `authenticate` + quyền `agent.<code>.use` theo từng agent | Danh sách agent được dùng + hạn mức, lịch sử hội thoại; hỏi/stream qua socket `agent:*` |
 | `/daily-reports` | module `daily-report` | `daily_report.submit` / `daily_report.view` | Báo cáo ngày kinh doanh: `/me`, `/me/plan`, `/me/result`, `/summary` (theo cây TTKD), `/trend` (xu hướng 1 chỉ tiêu theo tuần/tháng) |
 
 ---

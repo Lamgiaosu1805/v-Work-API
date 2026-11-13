@@ -86,6 +86,11 @@ const COMPANY_EXECUTIVE_GRANTS: PermissionGrantDoc[] = [
     permissionCode: "daily_report.view",
     dataScopePolicyCode: "DAILY_REPORT_ALL_COMPANY",
     fieldScopePolicyCode: null
+  },
+  {
+    permissionCode: "agent.sales_bi.use",
+    dataScopePolicyCode: "AGENT_SALES_BI_ALL_COMPANY",
+    fieldScopePolicyCode: null
   }
 ];
 

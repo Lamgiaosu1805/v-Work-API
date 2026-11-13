@@ -954,7 +954,20 @@ const DEFINITIONS: PermissionDef[] = [
     name: "Xem báo cáo ngày & bảng KPI kinh doanh",
     entity: "DailyReport",
     actionKind: "READ",
-    validDataScopePolicies: ["DAILY_REPORT_ALL_COMPANY", "DAILY_REPORT_MANAGED", "DAILY_REPORT_SELF"]
+    validDataScopePolicies: [
+      "DAILY_REPORT_ALL_COMPANY",
+      "DAILY_REPORT_MANAGED",
+      "DAILY_REPORT_SELF"
+    ]
+  },
+  // Trợ lý kinh doanh (AI) — agent `sales-bi` của agent harness; số liệu vẫn theo phạm vi daily_report.view của người hỏi
+  {
+    code: "agent.sales_bi.use",
+    module: "crm",
+    name: "Hỏi Trợ lý kinh doanh (AI)",
+    entity: "AgentSalesBi",
+    actionKind: "READ",
+    validDataScopePolicies: ["AGENT_SALES_BI_ALL_COMPANY"]
   },
   {
     code: "ai_chat.use",

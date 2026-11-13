@@ -129,7 +129,7 @@ A + B làm trên nhánh mới tách từ `feat/crm-daily-report` (PR #179/#181/#
 | Tất toán trước hạn không rõ ngày | `closure.date_unknown`; sửa dữ liệu lần đồng bộ đầu: `scripts/markUnknownEarlyTerminations.ts --app=tikluy --synced-on=YYYY-MM-DD [--dry-run]` | TIKLUY không trả ngày tất toán trước hạn. Khoản phát hiện ở lần đồng bộ ĐẦU mà hợp đồng chưa đáo hạn → không rõ ngày: không tính tiền ra theo kỳ, vẫn trừ số dư. Từ lần sau (đã từng thấy còn mở) → ngày phát hiện là ngày thật (sai số ≤ 1 ngày) |
 | Chỉ tiêu mới | `src/modules/daily-report/domain/kpi-metrics.ts` | `investment_outflow` (Tiền ra), `net_growth` (Tăng net = vào − ra trên cùng Sale/TTKD), `aum` (Số dư đang đầu tư cuối ngày, theo Sale đang giữ khách), `renewal_rate` (tự động, dạng tỷ lệ). Tiền vào bỏ khoản có `renewal_of` |
 | Tỷ lệ | `daily-report-board.workflow.ts` | Ô tỷ lệ trả `rate_day/rate_month/rate_year`, `plan_rate`, `pct_* = tỷ lệ / KH`; KH tỷ lệ trong file kế hoạch nhập `70` hay `0.7` đều hiểu là 70% |
-| Xu hướng | `GET /daily-reports/trend?metric=&granularity=week\|month&to=YYYY-MM-DD&periods=` (`daily_report.view`) — `src/workflows/daily-report-trend.workflow.ts` | Tuần bắt đầu thứ Hai / tháng dương lịch, kỳ cuối tính tới ngày xem; mặc định 8 tuần / 6 tháng, tối đa 24 kỳ; cộng dồn lên cây đơn vị như bảng tổng hợp; chỉ tiêu tỷ lệ trả thêm tử/mẫu |
+| Xu hướng | `GET /daily-reports/trend?metric=&granularity=week\|month&to=YYYY-MM-DD&periods=` (`daily_report.view`) — `src/workflows/daily-report-trend.workflow.ts` | Tuần báo cáo thứ Sáu tuần trước → thứ Năm tuần này / tháng dương lịch, kỳ cuối tính tới ngày xem; mặc định 8 tuần / 6 tháng, tối đa 24 kỳ; cộng dồn lên cây đơn vị như bảng tổng hợp; chỉ tiêu tỷ lệ trả thêm tử/mẫu |
 | Cây đơn vị + phạm vi xem | `src/workflows/daily-report/unit-tree.ts` | Dùng chung cho tổng hợp và xu hướng |
 
 **Sửa lỗi phạm vi xem (ảnh hưởng cả bảng tổng hợp đã có ở PR #179/#181):** trước đây "toàn công ty" xác định bằng
@@ -161,3 +161,35 @@ quản lý, quyền RBAC 2 role).
 3. Thêm `renewal_rate` vào file kế hoạch KPI của Sale Priority (vd `"renewal_rate": 70`) rồi seed lại kế hoạch.
 4. Thẻ "Tổng đầu tư (AUM)" ở Dashboard CRM cũ cộng mọi khoản (không trừ tất toán) nên sẽ lớn hơn "Số dư đang đầu
    tư" ở Bảng điều hành — cần thống nhất 1 định nghĩa nếu BLĐ hỏi.
+
+## 9. Đã triển khai C — lõi agent harness + Trợ lý kinh doanh (13/11/2026)
+
+### 9.1 Lõi `src/modules/agent-harness/`
+
+| Phần | File | Ghi chú |
+|---|---|---|
+| Hợp đồng agent | `domain/agent-definition.ts` | Agent = `{ code, name, permission, systemPrompt (cố định), buildContext (ngày giờ, người hỏi — đặt ở tin nhắn), tools (chỉ đọc), model/effort qua env, maxTokens, maxToolRounds, dailyQuota, suggestions }` |
+| Đăng ký | `application/agent-registry.ts` | `registerAgent()` gọi ở `index.js` từ tầng `workflows/` |
+| Hỏi 1 câu | `application/ask-agent.service.ts` | Kiểm tra câu hỏi → khoá chống hỏi trùng (trong tiến trình + Redis) → giữ lượt / ngày → ghi tin nhắn → chạy model, stream về web → chốt nội dung, nhật ký công cụ, token, chi phí; lỗi trước khi có chữ → hoàn lượt; treo > 2 phút → huỷ |
+| Vòng gọi công cụ | `infrastructure/ai/anthropic-tool-loop.ts` | `messages.stream()` + `finalMessage()` mỗi vòng; công cụ `strict: true`; không ép `tool_choice` (Sonnet 5.5 trả 400); thinking adaptive mặc định, gửi lại nguyên khối thinking trong vòng lặp; dừng ở `refusal` / `max_tokens`; quá số vòng → vòng cuối kèm lời nhắc trả lời bằng dữ liệu đã có; prompt caching cho system + công cụ |
+| Dữ liệu | `agent_conversation`, `agent_message` (kèm `tool_calls`, `usage`, `cost_usd`), `agent_usage` (hạn mức + tổng token/chi phí theo ngày) | |
+| Socket | `agent:ask` / `agent:cancel` → `agent:start` / `agent:delta` / `agent:tool` / `agent:done` / `agent:error` (room `account:<id>`) | Danh tính chỉ lấy từ socket đã xác thực; quyền `agent.<code>.use` kiểm tra mỗi câu |
+| REST `/ai-agents` | `GET /` (agent được dùng + hạn mức), `GET /:code/conversations`, `GET /:code/conversations/:id/messages`, `DELETE /:code/conversations/:id` | `/ai-agents` để không trùng `/agents` (đại lý) |
+| Env | `AGENT_ANTHROPIC_API_KEY` (bỏ trống → `HANDBOOK_ANTHROPIC_API_KEY` → `ANTHROPIC_API_KEY`); theo agent: `SALES_BI_AI_MODEL` (mặc định `claude-sonnet-5-5`), `SALES_BI_AI_EFFORT` (mặc định `medium`), `SALES_BI_DAILY_QUOTA` (mặc định 50) | |
+
+### 9.2 Agent `sales-bi` — `src/workflows/agents/`
+
+- Quyền `agent.sales_bi.use` (cấp sẵn cho role Ban Giám đốc / CEO); số liệu luôn theo phạm vi `daily_report.view` của người hỏi.
+- 6 công cụ gọi đúng hàm của Bảng điều hành: `get_overview`, `compare_units`, `get_trend` (tuần báo cáo thứ Sáu → thứ Năm / tháng), `get_people`, `get_submission_status`, `get_report_notes`. Tiền trả về theo triệu đồng, tỷ lệ theo %; không trả thông tin khách hàng.
+- Web: `/tro-ly-kinh-doanh` (menu Báo cáo & Phân tích) + nút "Hỏi Trợ lý AI" trên Bảng điều hành.
+
+### 9.3 Đưa lên
+
+1. Merge API (main + develop) + web.
+2. Nạp quyền: `seedPermissionCatalog.ts`, `seedPermissionDataScopePolicy.ts`, `seedPermissionEntityAttributeCatalog.ts`, `seedPermissionCompanyExecutiveRole.ts`, rồi `invalidateAllPermissionCache.ts`.
+3. Thử trên test với 10–20 câu hỏi thật của BLĐ, đối chiếu Bảng điều hành; rồi mới mở trên live.
+
+### 9.4 Còn lại
+
+- Bộ câu hỏi đánh giá 30–50 câu + đáp án tính từ bảng tổng hợp, chạy lại mỗi lần đổi prompt / công cụ / model.
+- Chuyển Trợ lý Nội quy sang harness; thêm agent phòng ban (mỗi agent = system prompt + bộ công cụ + quyền).

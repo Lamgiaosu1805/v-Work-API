@@ -6,7 +6,7 @@ import {
   requireAnyPermission,
   requirePermission
 } from "../../../core/authorization/require-permission.middleware";
-import { ticketHttpController } from "./ticket.http.controller";
+import { ticketHttpController, withNoteSecrets } from "./ticket.http.controller";
 
 const router = express.Router();
 
@@ -52,8 +52,8 @@ router.get(
 
 // Việc của người tạo
 router.post("/:id/confirm", ...create, asyncHandler(ticketHttpController.confirm));
-router.post("/:id/cancel", ...create, asyncHandler(ticketHttpController.cancel));
-router.post("/:id/reopen", ...view, asyncHandler(ticketHttpController.reopen));
+router.post("/:id/cancel", ...create, asyncHandler(withNoteSecrets(ticketHttpController.cancel)));
+router.post("/:id/reopen", ...view, asyncHandler(withNoteSecrets(ticketHttpController.reopen)));
 router.post(
   "/:id/submit-info",
   ...create,
@@ -63,7 +63,7 @@ router.post(
 
 // Việc của nhóm xử lý
 router.post("/:id/claim", ...handle, asyncHandler(ticketHttpController.claim));
-router.post("/:id/release", ...handle, asyncHandler(ticketHttpController.release));
+router.post("/:id/release", ...handle, asyncHandler(withNoteSecrets(ticketHttpController.release)));
 router.post("/:id/assign", ...view, asyncHandler(ticketHttpController.assign));
 router.post(
   "/:id/collaborators",
@@ -75,14 +75,45 @@ router.delete(
   ...handleOrManage,
   asyncHandler(ticketHttpController.removeCollaborator)
 );
-router.post("/:id/request-info", ...handleOrManage, asyncHandler(ticketHttpController.requestInfo));
-router.post("/:id/approval/verify", ...view, asyncHandler(ticketHttpController.verifyApproval));
-router.post("/:id/hold", ...handleOrManage, asyncHandler(ticketHttpController.hold));
+router.post(
+  "/:id/request-info",
+  ...handleOrManage,
+  asyncHandler(withNoteSecrets(ticketHttpController.requestInfo))
+);
+router.post(
+  "/:id/approval/verify",
+  ...view,
+  asyncHandler(withNoteSecrets(ticketHttpController.verifyApproval))
+);
+router.post(
+  "/:id/hold",
+  ...handleOrManage,
+  asyncHandler(withNoteSecrets(ticketHttpController.hold))
+);
 router.post("/:id/resume", ...handleOrManage, asyncHandler(ticketHttpController.resume));
-router.post("/:id/resolve", ...handleOrManage, asyncHandler(ticketHttpController.resolve));
-router.post("/:id/close", ...handleOrManage, asyncHandler(ticketHttpController.close));
-router.post("/:id/due-hint", ...handleOrManage, asyncHandler(ticketHttpController.setDueHint));
+router.post(
+  "/:id/resolve",
+  ...handleOrManage,
+  asyncHandler(withNoteSecrets(ticketHttpController.resolve))
+);
+router.post(
+  "/:id/close",
+  ...handleOrManage,
+  asyncHandler(withNoteSecrets(ticketHttpController.close))
+);
+router.post(
+  "/:id/due-hint",
+  ...handleOrManage,
+  asyncHandler(withNoteSecrets(ticketHttpController.setDueHint))
+);
 router.post("/:id/links", ...handleOrManage, asyncHandler(ticketHttpController.linkRelated));
+
+// Hiện nội dung ẩn (mật khẩu...): quyền xem từng nội dung do service kiểm tra lại ở mỗi lần (domain canViewSecrets)
+router.post(
+  "/:id/secrets/:secretId/reveal",
+  ...view,
+  asyncHandler(ticketHttpController.revealSecret)
+);
 
 // Trao đổi: ai thấy ticket đầy đủ (và chưa kết thúc) đều nhắn được
 router.post(

@@ -20,6 +20,7 @@ import { MongooseTicketDirectory } from "../infrastructure/ticket-directory";
 import { AbilityLike, buildTicketActorForEmployee } from "./ticket-actor";
 import { TicketConfigReader } from "./ticket-config.types";
 import { TicketDirectory } from "./ports";
+import { maskSecretMarkers } from "./ticket-secrets";
 
 // Tóm tắt MỘT ticket cho Trợ lý Nội quy trả lời "ticket TK-... của tôi đang thế nào". BẢO MẬT:
 //  - chỉ ticket do CHÍNH người hỏi tạo (`created_by` = nhân viên đã xác thực). Ticket của người khác, ticket không
@@ -77,7 +78,8 @@ export function formatVnDateTime(value: Date | string | null | undefined): strin
 }
 
 const clip = (text: string | null | undefined): string => {
-  const flat = String(text ?? "")
+  // Văn bản đưa vào prompt gửi Claude: dấu hiệu nội dung ẩn (mật khẩu...) không bao giờ được lọt vào
+  const flat = maskSecretMarkers(String(text ?? ""))
     .replace(/\s+/g, " ")
     .trim();
   return flat.length > MAX_NOTE_LENGTH ? `${flat.slice(0, MAX_NOTE_LENGTH)}…` : flat;

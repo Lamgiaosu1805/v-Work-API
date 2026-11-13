@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -12,6 +13,7 @@ import TicketCategoryModel from "../../../src/models/TicketCategoryModel";
 import TicketCounterModel from "../../../src/models/TicketCounterModel";
 import TicketMessageModel from "../../../src/models/TicketMessageModel";
 import TicketProductModel from "../../../src/models/TicketProductModel";
+import TicketSecretModel from "../../../src/models/TicketSecretModel";
 import TicketSettingModel from "../../../src/models/TicketSettingModel";
 import TicketTemplateModel from "../../../src/models/TicketTemplateModel";
 import UserInfoModel from "../../../src/models/UserInfoModel";
@@ -20,6 +22,8 @@ import { errorHandlerMiddleware } from "../../../src/core/http/error-handler.mid
 // Thư mục lưu file riêng cho test — phải đặt TRƯỚC khi nạp middleware upload.
 const TICKET_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-http-"));
 process.env.TICKET_DIR_DEV = TICKET_DIR;
+// Khoá mã hoá nội dung ẩn: sinh ngẫu nhiên mỗi lần chạy test (không ghi cứng chuỗi giống khoá thật vào mã nguồn)
+process.env.TICKET_SECRET_KEY = crypto.randomBytes(32).toString("hex");
 
 jest.mock("../../../src/services/notificationService", () => ({
   createNotification: jest.fn().mockResolvedValue(null)
@@ -62,6 +66,7 @@ const ALL_MODELS: Array<mongoose.Model<any>> = [
   TicketActivityModel,
   TicketAttachmentModel,
   TicketMessageModel,
+  TicketSecretModel,
   TicketCounterModel,
   TicketProductModel,
   TicketCategoryModel,
@@ -493,5 +498,84 @@ describe("danh bạ nhân viên", () => {
     );
     expect(res.body.data[0].cccd).toBeUndefined();
     expect(res.body.data[0].phone_number).toBeUndefined();
+  });
+});
+
+describe("nội dung ẩn trong ô ghi chú của thao tác", () => {
+  const HIDDEN_VALUE = crypto.randomBytes(9).toString("hex");
+
+  it("báo xong kèm mật khẩu: văn bản chỉ còn dấu hiệu, lưu mã hoá; chủ trì và người tạo xem được qua reveal, người ngoài thì không", async () => {
+    const created = await createTicket();
+    await post(itPerson, `/tickets/${created.id}/claim`).expect(200);
+
+    await post(itPerson, `/tickets/${created.id}/resolve`)
+      .send({
+        note: "Đã reset, mật khẩu mới ⟦s:k1⟧",
+        actionTaken: "Reset trên CMS",
+        secrets: [{ key: "k1", value: HIDDEN_VALUE }]
+      })
+      .expect(200);
+
+    const stored: any = await TicketSecretModel.findOne({ ticket_id: created.id }).lean();
+    expect(stored.message_id).toBeNull();
+    expect(JSON.stringify(stored)).not.toContain(HIDDEN_VALUE);
+
+    const detail = await get(itPerson, `/tickets/${created.id}`).expect(200);
+    expect(detail.body.data.resolution.note).toBe(`Đã reset, mật khẩu mới ⟦s:${stored._id}⟧`);
+    expect(JSON.stringify(detail.body.data)).not.toContain(HIDDEN_VALUE);
+    expect(detail.body.data.secrets).toEqual([
+      { id: String(stored._id), label: "", canReveal: true }
+    ]);
+
+    // Người tạo (không phải chủ trì) cũng thấy nút xem
+    const asRequester = await get(requester, `/tickets/${created.id}`).expect(200);
+    expect(asRequester.body.data.secrets[0].canReveal).toBe(true);
+
+    const reveal = (who: Person) =>
+      post(who, `/tickets/${created.id}/secrets/${stored._id}/reveal`);
+    const byIt = await reveal(itPerson).expect(200);
+    expect(byIt.body.data.secret.value).toBe(HIDDEN_VALUE);
+    expect(byIt.headers["cache-control"]).toBe("no-store");
+    await reveal(requester).expect(200);
+    // Người ngoài (mở được ticket nhưng không phải người tạo / chủ trì / người gõ): bị từ chối
+    await reveal(stranger).expect(403);
+  });
+
+  it("đóng ticket / huỷ / tạm hoãn / mở lại: ô ghi chú nào cũng nhận nội dung ẩn", async () => {
+    const created = await createTicket();
+    await post(itPerson, `/tickets/${created.id}/claim`).expect(200);
+    await post(itPerson, `/tickets/${created.id}/hold`)
+      .send({ reason: "Chờ OTP ⟦s:a⟧", secrets: [{ key: "a", value: `${HIDDEN_VALUE}-1` }] })
+      .expect(200);
+    await post(itPerson, `/tickets/${created.id}/resume`).send({}).expect(200);
+    await post(itPerson, `/tickets/${created.id}/close`)
+      .send({
+        code: "not_a_bug",
+        note: "Tài khoản ⟦s:b⟧",
+        actionTaken: "Đã gửi ⟦s:c⟧",
+        secrets: [
+          { key: "b", value: `${HIDDEN_VALUE}-2` },
+          { key: "c", value: `${HIDDEN_VALUE}-3` }
+        ]
+      })
+      .expect(200);
+    expect(await TicketSecretModel.countDocuments({ ticket_id: created.id })).toBe(3);
+  });
+
+  it("dấu hiệu không khai báo → 400, ticket không đổi, không lưu gì; thao tác lỗi thì không lưu nội dung ẩn", async () => {
+    const created = await createTicket();
+    await post(itPerson, `/tickets/${created.id}/claim`).expect(200);
+
+    const forged = await post(itPerson, `/tickets/${created.id}/resolve`)
+      .send({ note: "Xem ⟦s:507f1f77bcf86cd799439011⟧" })
+      .expect(400);
+    expect(forged.body.message).toMatch(/dấu hiệu ẩn/);
+
+    // Người ngoài nhóm không báo xong được (403) dù gửi kèm nội dung ẩn hợp lệ
+    await post(stranger, `/tickets/${created.id}/resolve`)
+      .send({ note: "x ⟦s:k⟧", secrets: [{ key: "k", value: "lọt" }] })
+      .expect(403);
+    expect(await TicketSecretModel.countDocuments({ ticket_id: created.id })).toBe(0);
+    expect(((await TicketModel.findById(created.id).lean()) as any).status).toBe("in_progress");
   });
 });

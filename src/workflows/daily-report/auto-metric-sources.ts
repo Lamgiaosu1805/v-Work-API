@@ -147,7 +147,10 @@ const telesaleCall: AutoMetricSource = async ({ range, saleIds }) =>
     ])
   );
 
-/** Tiền ra: gốc khoản tất toán (đúng hạn + trước hạn, không tính tái tục) theo `closure_attribution` (Q2). */
+/**
+ * Tiền ra: gốc khoản tất toán (đúng hạn + trước hạn, không tính tái tục) theo `closure_attribution` (Q2).
+ * Bỏ khoản tất toán trước hạn không rõ ngày (phát hiện ở lần đồng bộ đầu) — vẫn trừ khỏi số dư.
+ */
 const investmentOutflow: AutoMetricSource = async ({ appId, range, saleIds }) =>
   toRows(
     await InvestmentModel.aggregate([
@@ -157,6 +160,7 @@ const investmentOutflow: AutoMetricSource = async ({ appId, range, saleIds }) =>
           isDeleted: false,
           "closure.closed_at": inRange(range),
           "closure.renewed": { $ne: true },
+          "closure.date_unknown": { $ne: true },
           ...(saleIds ? { "closure_attribution.sale_id": { $in: saleIds.map(oid) } } : {})
         }
       },

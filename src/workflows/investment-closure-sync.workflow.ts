@@ -66,7 +66,7 @@ export async function syncInvestmentClosures(
     status: { $ne: "cancelled" },
     closure: null
   })
-    .select("_id customer_id external_investment_id")
+    .select("_id customer_id external_investment_id holding_synced_at")
     .lean()) as any[];
   const openByCustomer = new Map<string, any[]>();
   open.forEach((inv) => {
@@ -108,7 +108,10 @@ export async function syncInvestmentClosures(
           if (closure) unmatched.push(...keys);
           return;
         }
-        if (closure) closures.push({ inv, closure });
+        if (!closure) return;
+        // Lần trước còn thấy mở → vừa tất toán, giờ phát hiện là đúng ngày; chưa từng đồng bộ → không rõ ngày
+        if (closure.date_unknown && inv.holding_synced_at) closure.date_unknown = false;
+        closures.push({ inv, closure });
       });
       if (unmatched.length) {
         // Khoản đã ghi nhận tất toán từ lần trước không phải mã lạ

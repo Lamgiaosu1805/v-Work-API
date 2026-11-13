@@ -62,7 +62,9 @@ const ownBranchColleaguesCondition = (resourceUserPath: string): ConditionTreePr
 // resource.<x> IN ${subject.departmentColleagueCustomerIds} — biến thể của
 // ownDepartmentColleaguesCondition, dùng khi resource gắn trực tiếp với khách hàng (customer_id)
 // thay vì gắn với user (sale) — vd Investment.customer_id.
-const ownDepartmentColleagueCustomersCondition = (resourceCustomerPath: string): ConditionTreeProps => ({
+const ownDepartmentColleagueCustomersCondition = (
+  resourceCustomerPath: string
+): ConditionTreeProps => ({
   operator: "AND",
   clauses: [
     {
@@ -134,7 +136,8 @@ const GENERIC_ALL_COMPANY_ENTITIES: Record<string, string> = {
   HOTLINE_ADMIN_ALL_COMPANY: "HotlineAdmin",
   PERMISSION_SYSTEM_ALL_COMPANY: "PermissionSystem",
   INTERNAL_GROUP_ALL_COMPANY: "InternalGroup",
-  HANDBOOK_ASSISTANT_ALL_COMPANY: "HandbookAssistant"
+  HANDBOOK_ASSISTANT_ALL_COMPANY: "HandbookAssistant",
+  AGENT_SALES_BI_ALL_COMPANY: "AgentSalesBi"
 };
 
 const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
@@ -154,7 +157,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
   },
 
   // ---- Attendance ----
-  { code: "ATTENDANCE_ALL_COMPANY", entity: "Attendance", label: "Toàn công ty", conditionTree: null },
+  {
+    code: "ATTENDANCE_ALL_COMPANY",
+    entity: "Attendance",
+    label: "Toàn công ty",
+    conditionTree: null
+  },
   {
     code: "ATTENDANCE_OWN_DEPARTMENT",
     entity: "Attendance",
@@ -223,7 +231,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
   },
 
   // ---- Investment ----
-  { code: "INVESTMENT_ALL_COMPANY", entity: "Investment", label: "Toàn công ty", conditionTree: null },
+  {
+    code: "INVESTMENT_ALL_COMPANY",
+    entity: "Investment",
+    label: "Toàn công ty",
+    conditionTree: null
+  },
   {
     code: "INVESTMENT_SELF_ASSIGNED",
     entity: "Investment",
@@ -321,7 +334,12 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
   },
 
   // ---- DailyReport (báo cáo ngày kinh doanh — docs/CRM-DAILY-REPORT-FLOWS.md mục 6) ----
-  { code: "DAILY_REPORT_ALL_COMPANY", entity: "DailyReport", label: "Toàn công ty", conditionTree: null },
+  {
+    code: "DAILY_REPORT_ALL_COMPANY",
+    entity: "DailyReport",
+    label: "Toàn công ty",
+    conditionTree: null
+  },
   {
     code: "DAILY_REPORT_MANAGED",
     entity: "DailyReport",

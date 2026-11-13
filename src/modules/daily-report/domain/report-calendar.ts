@@ -118,21 +118,30 @@ export interface PeriodBucket {
   range: DateRange;
 }
 
-/** `count` kỳ liên tiếp (tuần bắt đầu thứ Hai / tháng dương lịch), kỳ cuối là kỳ chứa `toKey` và tính tới hết ngày đó. */
+// Tuần báo cáo kinh doanh: thứ Sáu tuần trước → thứ Năm tuần này (moment: thứ Sáu = 5)
+const REPORT_WEEK_START_DAY = 5;
+
+/**
+ * `count` kỳ liên tiếp (tuần báo cáo thứ Sáu → thứ Năm / tháng dương lịch), kỳ cuối là kỳ chứa `toKey` và tính tới
+ * hết ngày đó.
+ */
 export function bucketsEndingAt(
   toKey: string,
   granularity: TrendGranularity,
   count: number
 ): PeriodBucket[] {
-  const unit = granularity === "week" ? "isoWeek" : "month";
   const end = startOf(toKey);
+  const weekStart = end.clone().subtract((end.day() - REPORT_WEEK_START_DAY + 7) % 7, "day");
   const buckets: PeriodBucket[] = [];
   for (let i = count - 1; i >= 0; i -= 1) {
-    const start = end
-      .clone()
-      .subtract(i, granularity === "week" ? "week" : "month")
-      .startOf(unit);
-    const naturalEnd = start.clone().endOf(unit).startOf("day");
+    const start =
+      granularity === "week"
+        ? weekStart.clone().subtract(i * 7, "day")
+        : end.clone().subtract(i, "month").startOf("month");
+    const naturalEnd =
+      granularity === "week"
+        ? start.clone().add(6, "day")
+        : start.clone().endOf("month").startOf("day");
     const last = naturalEnd.isAfter(end) ? end : naturalEnd;
     const fromKey = start.format("YYYY-MM-DD");
     const lastKey = last.format("YYYY-MM-DD");

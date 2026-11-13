@@ -46,6 +46,7 @@ const {
 } = require("../helpers/payrollStats");
 const { buildTimesheetWorkbook, isFixedCtv } = require("../helpers/timesheetExcel");
 const { stillEmployedAtFilter } = require("../shared-kernel/resignation");
+const { ensureWorkSheetForUserDay, loadDefaultShifts } = require("../jobs/genWorkSheet");
 
 const IMPORT_EXCEL_DAY_CONCURRENCY = 10;
 
@@ -1026,6 +1027,7 @@ const AttendanceController = {
       const resolveForgotPenalty = await buildForgotPenaltyResolver();
       console.log(`[importExcel][timing] build penalty resolvers: ${elapsed(resolverStartedAt)}`);
 
+      const defaultShifts = await loadDefaultShifts();
       const unmatched = [];
       const failures = [];
       const counts = { imported: 0, skipped: 0, unchanged: 0 };
@@ -1089,6 +1091,39 @@ const AttendanceController = {
           worksheetMap = new Map(
             worksheets.map((ws) => [moment.tz(ws.date, TZ).format("YYYY-MM-DD"), ws])
           );
+
+          // Ngày có giờ máy chấm công nhưng chưa có worksheet (vd nhân sự vào làm trước ngày có tài
+          // khoản vWork — cron chỉ tạo worksheet cho ngày hiện tại) -> tự tạo trong thời gian làm việc.
+          const missingDays = dayRows.filter(
+            ({ dateStr, rawIn, rawOut }) =>
+              (rawIn || rawOut) &&
+              !worksheetMap.has(moment.tz(dateStr, "DD/MM/YYYY", TZ).format("YYYY-MM-DD"))
+          );
+          if (missingDays.length) {
+            const userInfo = await UserInfoModel.findById(userId);
+            if (userInfo) {
+              const holidays = await HolidayModel.find({
+                date: { $gte: rangeStart, $lte: rangeEnd },
+                isDeleted: false
+              });
+              for (const { dateStr } of missingDays) {
+                const date = moment.tz(dateStr, "DD/MM/YYYY", TZ).startOf("day").toDate();
+                const dateKey = moment.tz(date, TZ).format("YYYY-MM-DD");
+                const created = await ensureWorkSheetForUserDay({
+                  user: userInfo,
+                  date,
+                  holidaysOfDay: holidays.filter(
+                    (h) => moment.tz(h.date, TZ).format("YYYY-MM-DD") === dateKey
+                  ),
+                  defaultShifts
+                });
+                if (created) {
+                  const populated = await WorkSheetModel.findById(created._id).populate("shifts");
+                  worksheetMap.set(dateKey, populated);
+                }
+              }
+            }
+          }
           ({ forgotMap, forgotOccurrenceMap, lateForgivenSet, earlyForgivenSet, leavePeriodsMap } =
             context);
           console.log(

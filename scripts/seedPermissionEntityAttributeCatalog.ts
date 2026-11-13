@@ -590,6 +590,25 @@ const DEFINITIONS: EntityAttributeCatalogDef[] = [
     ]
   },
   {
+    entity: "DailyReport",
+    subjectAttributes: [
+      { path: "subject.userId", label: "ID nhân viên (chính mình)", type: "reference" },
+      {
+        path: "subject.managedEmployeeUserIds",
+        label: "Nhân viên thuộc phạm vi quản lý (xuyên cấp phòng ban + tier-2)",
+        type: "reference"
+      }
+    ],
+    resourceAttributes: [
+      { path: "resource.employee_id", label: "Sale báo cáo", type: "reference" }
+    ],
+    fields: [
+      { name: "report_date", label: "Ngày báo cáo" },
+      { name: "plan", label: "Kế hoạch ngày" },
+      { name: "result", label: "Kết quả ngày" }
+    ]
+  },
+  {
     entity: "CustomerClaimRequest",
     subjectAttributes: [],
     resourceAttributes: [],

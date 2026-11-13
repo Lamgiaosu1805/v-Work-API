@@ -21,6 +21,7 @@ export {
 export { buildUnifiedForgotOccurrenceMap } from "./domain/penalty-tier";
 export type { ForgotDaySnapshot, ForgotOccurrenceEntry } from "./domain/penalty-tier";
 export { buildHolidayDefaultWorkUnitMap } from "./domain/holiday-work-unit";
+export { listFullLeaveDays } from "./application/list-full-leave-days.service";
 export type { HolidaySnapshot } from "./domain/holiday-work-unit";
 export type {
   WorksheetSnapshot,

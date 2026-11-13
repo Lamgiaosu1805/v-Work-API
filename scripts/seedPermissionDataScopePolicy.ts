@@ -320,6 +320,35 @@ const REAL_SCOPE_DEFINITIONS: DataScopePolicyDef[] = [
     conditionTree: ownBranchColleaguesCondition("resource.sale_id")
   },
 
+  // ---- DailyReport (báo cáo ngày kinh doanh — docs/CRM-DAILY-REPORT-FLOWS.md mục 6) ----
+  { code: "DAILY_REPORT_ALL_COMPANY", entity: "DailyReport", label: "Toàn công ty", conditionTree: null },
+  {
+    code: "DAILY_REPORT_MANAGED",
+    entity: "DailyReport",
+    label: "Đơn vị mình quản lý (gồm cấp dưới) và chính mình",
+    conditionTree: {
+      operator: "OR",
+      clauses: [
+        {
+          left: "resource.employee_id",
+          operator: "IN",
+          right: { type: "SUBJECT_REF", path: "subject.managedEmployeeUserIds" }
+        },
+        {
+          left: "resource.employee_id",
+          operator: "EQ",
+          right: { type: "SUBJECT_REF", path: "subject.userId" }
+        }
+      ]
+    }
+  },
+  {
+    code: "DAILY_REPORT_SELF",
+    entity: "DailyReport",
+    label: "Chỉ chính mình",
+    conditionTree: selfCondition("resource.employee_id", "subject.userId")
+  },
+
   // ---- CallLog ----
   { code: "CALL_LOG_ALL_COMPANY", entity: "CallLog", label: "Toàn công ty", conditionTree: null },
   {

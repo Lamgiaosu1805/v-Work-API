@@ -84,6 +84,29 @@ const CustomerModel = new mongoose.Schema(
 
     registeredAt: { type: Date, required: true, default: Date.now },
 
+    // === GHI NHẬN KPI (docs/CRM-DAILY-REPORT-FLOWS.md mục 4, R1) ===
+    // Mã giới thiệu lúc đăng ký — ref_code bị ghi đè khi chuyển Sale, field này thì không
+    original_ref_code: { type: String, default: null },
+    // CIF được ghi nhận cho Sale nào / TTKD nào / kênh nào — ghi 1 lần, KHÔNG đổi khi chuyển/thu hồi khách;
+    // chỉ huỷ (null) khi QL bỏ gán hoặc thu hồi yêu cầu nhận khách đã duyệt (thao tác sửa sai)
+    kpi_cif: {
+      type: new mongoose.Schema(
+        {
+          sale_id: { type: mongoose.Schema.Types.ObjectId, ref: "user_info", default: null },
+          department_id: { type: mongoose.Schema.Types.ObjectId, ref: "department", default: null },
+          agent_id: { type: mongoose.Schema.Types.ObjectId, ref: "agent", default: null },
+          channel: {
+            type: String,
+            enum: ["sale_ref", "claim", "manual_confirmed", "agent"],
+            required: true
+          },
+          at: { type: Date, required: true }
+        },
+        { _id: false }
+      ),
+      default: null
+    },
+
     ...BaseSchema.obj
   },
   {
@@ -97,5 +120,6 @@ CustomerModel.index({ app_id: 1, phone_number: 1 }, { unique: true });
 CustomerModel.index({ "identity.verified_at": 1, createdAt: 1 });
 CustomerModel.index({ referred_by: 1, createdAt: -1 });
 CustomerModel.index({ registeredAt: -1 });
+CustomerModel.index({ app_id: 1, "kpi_cif.at": 1 });
 
 module.exports = mongoose.model("customer", CustomerModel);

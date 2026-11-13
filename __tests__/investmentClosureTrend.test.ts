@@ -109,15 +109,24 @@ describe("ánh xạ danh mục đầu tư TIKLUY", () => {
 });
 
 describe("kỳ xu hướng", () => {
-  test("tuần bắt đầu thứ Hai, kỳ cuối tới ngày đang xem", () => {
-    const weeks = bucketsEndingAt("2026-11-13", "week", 2);
+  test("tuần báo cáo thứ Sáu → thứ Năm, kỳ cuối tới ngày đang xem", () => {
+    // 12/11/2026 là thứ Năm (hết tuần báo cáo), 13/11 là thứ Sáu (đầu tuần mới)
+    const weeks = bucketsEndingAt("2026-11-12", "week", 2);
     expect(weeks.map((b) => [b.fromKey, b.toKey, b.label])).toEqual([
-      ["2026-11-02", "2026-11-08", "02/11–08/11"],
-      ["2026-11-09", "2026-11-13", "09/11–13/11"]
+      ["2026-10-30", "2026-11-05", "30/10–05/11"],
+      ["2026-11-06", "2026-11-12", "06/11–12/11"]
     ]);
     expect(weeks[1].range).toEqual({
-      from: vn("2026-11-09T00:00:00"),
-      to: vn("2026-11-14T00:00:00")
+      from: vn("2026-11-06T00:00:00"),
+      to: vn("2026-11-13T00:00:00")
+    });
+    expect(bucketsEndingAt("2026-11-13", "week", 2).map((b) => [b.fromKey, b.toKey])).toEqual([
+      ["2026-11-06", "2026-11-12"],
+      ["2026-11-13", "2026-11-13"]
+    ]);
+    expect(bucketsEndingAt("2026-11-18", "week", 1)[0]).toMatchObject({
+      fromKey: "2026-11-13",
+      toKey: "2026-11-18"
     });
   });
 
@@ -396,7 +405,8 @@ describe("xu hướng", () => {
     expect(trend.units.map((u: any) => u.id).sort()).toEqual(
       [String(ids.cn), String(ids.hn2)].sort()
     );
-    expect(trend.totals.values).toEqual([0, 60 * M]);
+    // Tuần 06/11–12/11 chứa tất toán B1 (12/11); tuần 13/11 mới bắt đầu
+    expect(trend.totals.values).toEqual([60 * M, 0]);
   });
 
   test("quyền toàn công ty cấp từ 2 role RBAC (conditions rỗng) vẫn là toàn công ty", async () => {

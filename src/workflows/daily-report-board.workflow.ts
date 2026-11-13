@@ -1,7 +1,7 @@
 import DepartmentModel from "../models/DepartmentModel";
 import UserInfoModel from "../models/UserInfoModel";
 import { resolveSaleUnitIds } from "../helpers/kpiAttribution";
-import { Ability, canOnSubject, toMongoQuery } from "../modules/permission";
+import { Ability, canOnSubject } from "../modules/permission";
 import { listFullLeaveDays } from "../modules/timesheet";
 import {
   AUTO_METRIC_CODES,
@@ -418,8 +418,12 @@ export async function getDailyReportSummary(input: {
 }) {
   const appCode = input.appCode || DAILY_REPORT_DEFAULT_APP;
   const appId = await requireAppId(appCode);
+  // Quy tắc từ RBAC luôn mang `conditions: {}` (vd 2 role cùng "Toàn công ty" → truy vấn {$or:[{},{}]}),
+  // nên xét trực tiếp quy tắc: có quy tắc cho phép không điều kiện và không có quy tắc chặn
+  const viewRules = input.ability.rulesFor("daily_report.view", "DailyReport");
   const companyWide =
-    Object.keys(toMongoQuery(input.ability, "daily_report.view", "DailyReport")).length === 0;
+    viewRules.some((rule) => !rule.inverted && Object.keys(rule.conditions ?? {}).length === 0) &&
+    !viewRules.some((rule) => rule.inverted);
   const board = await buildBoard({
     appId,
     dateKey: input.dateKey,

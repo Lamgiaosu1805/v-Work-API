@@ -1,11 +1,12 @@
 import DepartmentModel from "../models/DepartmentModel";
 import UserInfoModel from "../models/UserInfoModel";
 import { resolveSaleUnitIds } from "../helpers/kpiAttribution";
-import { Ability, canOnSubject, toMongoQuery } from "../modules/permission";
+import type { Ability } from "../modules/permission";
 import { listFullLeaveDays } from "../modules/timesheet";
 import {
   AUTO_METRIC_CODES,
   DEFAULT_TEMPLATE,
+  aggregationOf,
   KPI_TEMPLATES,
   METRICS,
   METRIC_ORDER,
@@ -40,10 +41,12 @@ import type {
   KpiPlanView,
   KpiTemplateCode,
   MetricCode,
+  MetricDef,
   PeriodValues,
   SubmissionStatus
 } from "../modules/daily-report";
 import { AUTO_METRIC_SOURCES } from "./daily-report/auto-metric-sources";
+import { loadUnitTree, viewerScope } from "./daily-report/unit-tree";
 
 // Bảng báo cáo ngày + KPI theo cây đơn vị (docs/CRM-DAILY-REPORT-FLOWS.md mục 5–6):
 // gộp số tự động (ghi nhận KPI), số Sale nhập tay, kế hoạch KPI năm, tình hình nộp báo cáo, tuân thủ.
@@ -53,9 +56,6 @@ export const DAILY_REPORT_DEFAULT_APP = "tikluy";
 
 const PERIODS = ["day", "mtd", "ytd"] as const;
 type Period = (typeof PERIODS)[number];
-
-const NO_UNIT_ID = "__no_unit__";
-const UNASSIGNED_ID = "__unassigned__";
 
 interface Cell {
   actual: PeriodValues;
@@ -102,7 +102,13 @@ const addNullable = (a: number | null, b: number | null) =>
 
 function mergeCell(target: Cell, source: Cell): void {
   addInto(target.actual, source.actual);
-  if (source.base) target.base = addInto(target.base ?? emptyPeriodValues(), source.base);
+  if (source.base) {
+    // Chỉ tiêu tỷ lệ: cộng tử số + mẫu số; kế hoạch là 1 tỷ lệ (vd 70%) → giữ nguyên, không cộng
+    target.base = addInto(target.base ?? emptyPeriodValues(), source.base);
+    target.planYear = target.planYear ?? source.planYear;
+    target.planMonth = target.planMonth ?? source.planMonth;
+    return;
+  }
   target.planYear = addNullable(target.planYear, source.planYear);
   target.planMonth = addNullable(target.planMonth, source.planMonth);
   target.planDay = addNullable(target.planDay, source.planDay);
@@ -133,7 +139,7 @@ async function buildBoard(input: {
     listDailyReports(appId, yearStart, dateKey, employeeIds ?? undefined),
     loadHolidayKeys(yearStart, `${year}-12-31`),
     Promise.all(
-      AUTO_METRIC_CODES.flatMap((metric) =>
+      Object.keys(AUTO_METRIC_SOURCES).flatMap((metric) =>
         (
           [
             ["day", ranges.day],
@@ -185,8 +191,25 @@ async function buildBoard(input: {
     metricRows.forEach((row) => {
       if (!row.saleId && !input.includeUnassigned) return;
       const unit = row.departmentId ?? (row.saleId ? (currentUnit.get(row.saleId) ?? null) : null);
-      cellOf(row.saleId, unit, metric as MetricCode).actual[period] += row.value;
+      const cell = cellOf(row.saleId, unit, metric as MetricCode);
+      cell.actual[period] += row.value;
+      if (row.base !== undefined) {
+        cell.base = cell.base ?? emptyPeriodValues();
+        cell.base[period] += row.base;
+      }
     });
+  });
+
+  // Tăng net = tiền vào − tiền ra trên cùng (Sale, TTKD) → cộng dồn lên cây vẫn khớp từng cấp
+  rows.forEach((row) => {
+    const inflow = row.cells.get("investment_amount");
+    const outflow = row.cells.get("investment_outflow");
+    if (!inflow && !outflow) return;
+    const net = emptyCell();
+    PERIODS.forEach((period) => {
+      net.actual[period] = (inflow?.actual[period] ?? 0) - (outflow?.actual[period] ?? 0);
+    });
+    row.cells.set("net_growth", net);
   });
 
   // Số nhập tay + mục tiêu ngày — TTKD theo phiếu báo cáo
@@ -221,6 +244,13 @@ async function buildBoard(input: {
     plan.targets.forEach((target, metric) => {
       if (!(metric in METRICS)) return;
       const cell = cellOf(plan.employeeId, unit, metric as MetricCode);
+      if (aggregationOf(metric as MetricCode) === "ratio") {
+        // KH tỷ lệ (tái tục 70%, tuân thủ 100%) áp dụng nguyên cho mọi kỳ; nhập 70 hay 0.7 đều hiểu là 70%
+        const rate = target.annual > 1 ? target.annual / 100 : target.annual;
+        cell.planYear = rate;
+        cell.planMonth = rate;
+        return;
+      }
       cell.planYear = (cell.planYear ?? 0) + target.annual;
       cell.planMonth = (cell.planMonth ?? 0) + monthlyTarget(target, month);
     });
@@ -292,15 +322,28 @@ async function buildBoard(input: {
 const round = (value: number | null) => (value === null ? null : Math.round(value * 10000) / 10000);
 
 function serializeCell(metric: MetricCode, cell: Cell) {
-  if (cell.base) {
+  if (cell.base || aggregationOf(metric) === "ratio") {
+    // Tỷ lệ thực hiện = tử / mẫu; % HT = tỷ lệ / KH tỷ lệ (không giao KH → so với 100%).
+    // Có KH mà chưa phát sinh mẫu số (chưa khoản nào đáo hạn) vẫn trả dạng tỷ lệ, tỷ lệ = null.
+    const base = cell.base ?? emptyPeriodValues();
+    const planRate = cell.planYear ?? 1;
+    const rate = (period: Period) => completionRatio(cell.actual[period], base[period]);
+    const pct = (period: Period) => {
+      const value = rate(period);
+      return value === null ? null : round(value / planRate);
+    };
     return {
       day: cell.actual.day,
       mtd: cell.actual.mtd,
       ytd: cell.actual.ytd,
-      base: { ...cell.base },
-      pct_day: round(completionRatio(cell.actual.day, cell.base.day)),
-      pct_month: round(completionRatio(cell.actual.mtd, cell.base.mtd)),
-      pct_year: round(completionRatio(cell.actual.ytd, cell.base.ytd))
+      base: { ...base },
+      plan_rate: cell.planYear,
+      rate_day: round(rate("day")),
+      rate_month: round(rate("mtd")),
+      rate_year: round(rate("ytd")),
+      pct_day: pct("day"),
+      pct_month: pct("mtd"),
+      pct_year: pct("ytd")
     };
   }
   return {
@@ -314,7 +357,7 @@ function serializeCell(metric: MetricCode, cell: Cell) {
     pct_month: round(completionRatio(cell.actual.mtd, cell.planMonth)),
     pct_year: round(completionRatio(cell.actual.ytd, cell.planYear)),
     remaining_year: round(shortfall(cell.actual.ytd, cell.planYear)),
-    ...(METRICS[metric].source === "unavailable" ? { unavailable: true } : {})
+    ...((METRICS[metric] as MetricDef).source === "unavailable" ? { unavailable: true } : {})
   };
 }
 
@@ -418,8 +461,7 @@ export async function getDailyReportSummary(input: {
 }) {
   const appCode = input.appCode || DAILY_REPORT_DEFAULT_APP;
   const appId = await requireAppId(appCode);
-  const companyWide =
-    Object.keys(toMongoQuery(input.ability, "daily_report.view", "DailyReport")).length === 0;
+  const { companyWide, canSee } = viewerScope(input.ability);
   const board = await buildBoard({
     appId,
     dateKey: input.dateKey,
@@ -428,35 +470,12 @@ export async function getDailyReportSummary(input: {
     includeUnassigned: companyWide
   });
 
-  const canSee = (employeeId: string) =>
-    companyWide ||
-    canOnSubject(input.ability, "daily_report.view", "DailyReport", { employee_id: employeeId });
   const visibleRows = [...board.rows.values()].filter((row) =>
     row.employeeId ? canSee(row.employeeId) : companyWide
   );
 
-  const departments = (await DepartmentModel.find({ isDeleted: false })
-    .select("department_name department_code type parent manager")
-    .populate("manager", "full_name")
-    .lean()) as any[];
-  const deptById = new Map(departments.map((d) => [String(d._id), d]));
-  const ancestorsOf = (deptId: string): string[] => {
-    const chain: string[] = [];
-    const seen = new Set<string>();
-    let current = deptById.get(deptId);
-    while (current && !seen.has(String(current._id))) {
-      seen.add(String(current._id));
-      chain.push(String(current._id));
-      current = current.parent ? deptById.get(String(current.parent)) : undefined;
-    }
-    return chain;
-  };
-  const unitKeyOf = (row: { employeeId: string | null; departmentId: string | null }) => {
-    if (!row.employeeId) return UNASSIGNED_ID;
-    return row.departmentId && deptById.has(row.departmentId) ? row.departmentId : NO_UNIT_ID;
-  };
-  const chainOf = (unitKey: string) =>
-    unitKey === UNASSIGNED_ID || unitKey === NO_UNIT_ID ? [unitKey] : ancestorsOf(unitKey);
+  const tree = await loadUnitTree();
+  const { unitKeyOf, chainOf } = tree;
 
   const unitCells = new Map<string, Map<MetricCode, Cell>>();
   const unitSubmissions = new Map<string, SubmissionCount>();
@@ -497,26 +516,13 @@ export async function getDailyReportSummary(input: {
     countSubmission(totalSubmission, submission);
   });
 
-  const pseudoUnits: Record<string, { kind: string; name: string }> = {
-    [UNASSIGNED_ID]: { kind: "unassigned", name: "Chưa phân bổ" },
-    [NO_UNIT_ID]: { kind: "no_unit", name: "Chưa gán TTKD" }
-  };
   const unitIds = new Set([...unitCells.keys(), ...unitSubmissions.keys()]);
-  const units = [...unitIds].map((unitId) => {
-    const dept = deptById.get(unitId);
-    return {
-      id: unitId,
-      kind: dept ? "department" : pseudoUnits[unitId].kind,
-      name: dept ? dept.department_name : pseudoUnits[unitId].name,
-      code: dept?.department_code ?? null,
-      type: dept?.type ?? null,
-      parent_id: dept?.parent && unitIds.has(String(dept.parent)) ? String(dept.parent) : null,
-      manager_name: dept?.manager?.full_name ?? null,
-      employee_count: unitEmployees.get(unitId)?.size ?? 0,
-      submission: unitSubmissions.get(unitId) ?? emptySubmissionCount(),
-      metrics: serializeCells(unitCells.get(unitId) ?? new Map())
-    };
-  });
+  const units = [...unitIds].map((unitId) => ({
+    ...tree.describe(unitId, unitIds),
+    employee_count: unitEmployees.get(unitId)?.size ?? 0,
+    submission: unitSubmissions.get(unitId) ?? emptySubmissionCount(),
+    metrics: serializeCells(unitCells.get(unitId) ?? new Map())
+  }));
 
   const employeeIds = [
     ...new Set(visibleRows.map((row) => row.employeeId).filter(Boolean) as string[])
@@ -617,7 +623,9 @@ export async function getMyDailyReport(input: {
       weight: weights.get(def.code) ?? null,
       ...serializeCell(def.code, cell),
       suggested_day:
-        cell.base || def.source === "unavailable"
+        cell.base ||
+        (def as MetricDef).source === "unavailable" ||
+        aggregationOf(def.code) !== "sum"
           ? null
           : round(
               suggestedDailyTarget({

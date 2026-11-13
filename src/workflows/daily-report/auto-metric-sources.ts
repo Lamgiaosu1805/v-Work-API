@@ -12,6 +12,7 @@ export interface AutoMetricRow {
   saleId: string | null;
   departmentId: string | null; // null = nguồn không chụp TTKD → workflow lấy TTKD hiện tại của Sale
   value: number;
+  base?: number; // mẫu số của chỉ tiêu tỷ lệ (vd tỷ lệ tái tục)
 }
 
 export interface AutoMetricQuery {
@@ -32,10 +33,11 @@ const toRows = (groups: any[]): AutoMetricRow[] =>
   groups.map((g) => ({
     saleId: g._id?.s ? String(g._id.s) : null,
     departmentId: g._id?.d ? String(g._id.d) : null,
-    value: g.value
+    value: g.value,
+    ...(g.base !== undefined ? { base: g.base } : {})
   }));
 
-/** Doanh số đầu tư (gross) theo ghi nhận `kpi_attribution` — trừ khoản bị huỷ. */
+/** Tiền vào: gốc khoản mới theo ghi nhận `kpi_attribution` — trừ khoản bị huỷ và khoản sinh ra do tái tục (Q1). */
 const investmentAmount: AutoMetricSource = async ({ appId, range, saleIds }) =>
   toRows(
     await InvestmentModel.aggregate([
@@ -44,6 +46,7 @@ const investmentAmount: AutoMetricSource = async ({ appId, range, saleIds }) =>
           app_id: oid(appId),
           isDeleted: false,
           status: { $ne: "cancelled" },
+          renewal_of: null,
           invested_at: inRange(range),
           ...(saleIds ? { "kpi_attribution.sale_id": { $in: saleIds.map(oid) } } : {})
         }
@@ -144,8 +147,94 @@ const telesaleCall: AutoMetricSource = async ({ range, saleIds }) =>
     ])
   );
 
+/** Tiền ra: gốc khoản tất toán (đúng hạn + trước hạn, không tính tái tục) theo `closure_attribution` (Q2). */
+const investmentOutflow: AutoMetricSource = async ({ appId, range, saleIds }) =>
+  toRows(
+    await InvestmentModel.aggregate([
+      {
+        $match: {
+          app_id: oid(appId),
+          isDeleted: false,
+          "closure.closed_at": inRange(range),
+          "closure.renewed": { $ne: true },
+          ...(saleIds ? { "closure_attribution.sale_id": { $in: saleIds.map(oid) } } : {})
+        }
+      },
+      {
+        $group: {
+          _id: { s: "$closure_attribution.sale_id", d: "$closure_attribution.department_id" },
+          value: { $sum: "$closure.principal" }
+        }
+      }
+    ])
+  );
+
+/**
+ * Tỷ lệ tái tục: gốc được tái tục / gốc các khoản đáo hạn (không tính tất toán trước hạn) trong kỳ,
+ * theo Sale đang giữ khách lúc đáo hạn.
+ */
+const renewalRate: AutoMetricSource = async ({ appId, range, saleIds }) =>
+  toRows(
+    await InvestmentModel.aggregate([
+      {
+        $match: {
+          app_id: oid(appId),
+          isDeleted: false,
+          "closure.type": "matured",
+          "closure.closed_at": inRange(range),
+          ...(saleIds ? { "closure_attribution.sale_id": { $in: saleIds.map(oid) } } : {})
+        }
+      },
+      {
+        $group: {
+          _id: { s: "$closure_attribution.sale_id", d: "$closure_attribution.department_id" },
+          value: { $sum: { $cond: ["$closure.renewed", "$closure.principal", 0] } },
+          base: { $sum: "$closure.principal" }
+        }
+      }
+    ])
+  );
+
+// Khoản đã kết thúc theo trạng thái TIKLUY gửi qua upsert nhưng chưa có ngày tất toán → coi như không còn đầu tư
+const CLOSED_STATUSES = ["cancelled", "matured", "early_terminated", "renewed"];
+
+/** Số dư đang đầu tư (AUM) cuối kỳ, theo Sale đang giữ khách hiện tại. Chính xác sau khi đồng bộ tất toán. */
+const aum: AutoMetricSource = async ({ appId, range, saleIds }) =>
+  toRows(
+    await InvestmentModel.aggregate([
+      {
+        $match: {
+          app_id: oid(appId),
+          isDeleted: false,
+          status: { $ne: "cancelled" },
+          invested_at: { $lt: range.to },
+          $or: [
+            { closure: null, status: { $nin: CLOSED_STATUSES } },
+            { "closure.closed_at": { $gte: range.to } }
+          ]
+        }
+      },
+      { $group: { _id: "$customer_id", amount: { $sum: "$amount" } } },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "_id",
+          foreignField: "_id",
+          pipeline: [{ $project: { referred_by: 1 } }],
+          as: "c"
+        }
+      },
+      { $addFields: { s: { $arrayElemAt: ["$c.referred_by", 0] } } },
+      ...(saleIds ? [{ $match: { s: { $in: saleIds.map(oid) } } }] : []),
+      { $group: { _id: { s: "$s" }, value: { $sum: "$amount" } } }
+    ])
+  );
+
 export const AUTO_METRIC_SOURCES: Record<string, AutoMetricSource> = {
   investment_amount: investmentAmount,
+  investment_outflow: investmentOutflow,
+  aum,
+  renewal_rate: renewalRate,
   cif_new: cifNew,
   cif_first_investment: cifFirstInvestment,
   telesale_call: telesaleCall

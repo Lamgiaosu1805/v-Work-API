@@ -20,9 +20,16 @@ export {
   DEFAULT_TEMPLATE,
   templateMetrics,
   manualMetrics,
-  plannableMetrics
+  plannableMetrics,
+  targetMetrics,
+  aggregationOf
 } from "./domain/kpi-metrics";
-export type { MetricCode, MetricDef, KpiTemplateCode } from "./domain/kpi-metrics";
+export type {
+  MetricCode,
+  MetricDef,
+  MetricAggregation,
+  KpiTemplateCode
+} from "./domain/kpi-metrics";
 export {
   REPORT_DEADLINES,
   toDateKey,
@@ -35,9 +42,15 @@ export {
   deadlineOf,
   isReportDay,
   reportDaysBetween,
-  submissionStatus
+  submissionStatus,
+  bucketsEndingAt
 } from "./domain/report-calendar";
-export type { DateRange, SubmissionStatus } from "./domain/report-calendar";
+export type {
+  DateRange,
+  SubmissionStatus,
+  TrendGranularity,
+  PeriodBucket
+} from "./domain/report-calendar";
 export {
   emptyPeriodValues,
   addInto,

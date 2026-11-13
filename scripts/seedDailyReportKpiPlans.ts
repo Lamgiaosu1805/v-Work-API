@@ -9,7 +9,7 @@ import {
   KPI_TEMPLATES,
   KpiTemplateCode,
   parseDateKey,
-  plannableMetrics
+  targetMetrics
 } from "../src/modules/daily-report";
 
 // Nạp kế hoạch KPI năm (Quyết định giao chỉ tiêu) cho Sale — có kế hoạch = phải nộp báo cáo ngày từ effective_from.
@@ -34,7 +34,7 @@ const DRY_RUN = args.includes("--dry-run");
 
 function parseTargets(input: PlanInput) {
   const template = input.template as KpiTemplateCode;
-  const allowed = plannableMetrics(template);
+  const allowed = targetMetrics(template);
   return Object.entries(input.targets).map(([metric, raw]) => {
     if (!allowed.includes(metric as never)) {
       throw new Error(

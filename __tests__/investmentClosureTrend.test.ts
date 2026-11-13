@@ -15,6 +15,7 @@ import {
   parseTikluyDate
 } from "../src/workflows/investment-closure/holding-mapper";
 import { syncInvestmentClosures } from "../src/workflows/investment-closure-sync.workflow";
+import { AUTO_METRIC_SOURCES } from "../src/workflows/daily-report/auto-metric-sources";
 import { getDailyReportSummary } from "../src/workflows/daily-report-board.workflow";
 import { getDailyReportTrend } from "../src/workflows/daily-report-trend.workflow";
 
@@ -72,6 +73,7 @@ describe("ánh xạ danh mục đầu tư TIKLUY", () => {
       profit: 50_000,
       form_of_maturity: "Tái tục gốc",
       renewed: true,
+      date_unknown: false,
       synced_at: now
     });
   });
@@ -82,7 +84,12 @@ describe("ánh xạ danh mục đầu tư TIKLUY", () => {
         { status: 1, investAmount: 5 * M, endDate: "01/03/2027", formOfMaturity: "Tái tục gốc" },
         now
       )
-    ).toMatchObject({ type: "early_terminated", closed_at: now, renewed: false });
+    ).toMatchObject({
+      type: "early_terminated",
+      closed_at: now,
+      renewed: false,
+      date_unknown: true
+    });
   });
 
   test("khoản tái tục: gần ngày đáo hạn nhất, gốc ≥ 99% gốc cũ", () => {
@@ -221,6 +228,11 @@ beforeAll(async () => {
   await investment(cA, "A2", 100 * M, vn("2026-11-10T08:00:00"));
   await investment(cB, "B1", 60 * M, vn("2026-10-15T09:00:00"));
   await investment(cB, "B2", 30 * M, vn("2026-11-12T10:00:00"));
+  // A3 đã được đồng bộ đêm trước (còn mở) → tất toán trước hạn phát hiện đêm nay là ngày thật
+  await InvestmentModel.updateOne(
+    { _id: inv.A3._id },
+    { $set: { holding_synced_at: vn("2026-11-12T01:30:00") } }
+  );
 });
 
 afterAll(async () => {
@@ -269,7 +281,8 @@ describe("đồng bộ tất toán", () => {
     expect(String((await reload("A2")).renewal_of)).toBe(String(inv.A1._id));
     expect((await reload("A3")).closure).toMatchObject({
       type: "early_terminated",
-      closed_at: syncAt
+      closed_at: syncAt,
+      date_unknown: false
     });
     expect((await reload("B1")).closure).toMatchObject({ renewed: false, principal: 60 * M });
     expect((await reload("B2")).holding_synced_at).toEqual(syncAt);
@@ -582,5 +595,54 @@ describe("dữ liệu thật TIKLUY (đối chiếu live 13/11/2026)", () => {
       principal: 2_012_103,
       closed_at: vn("2026-09-16T23:59:00")
     });
+  });
+});
+
+describe("tất toán trước hạn phát hiện ở lần đồng bộ đầu", () => {
+  test("không rõ ngày → không tính tiền ra theo kỳ, nhưng vẫn trừ khỏi số dư", async () => {
+    const appId = id();
+    await AppModel.create({ _id: appId, name: "Lần đầu", code: "first-sync-app" });
+    const [customer] = await CustomerModel.create([
+      { app_id: appId, phone_number: "0911000088", external_id: "kh-first", referred_by: ids.s2 }
+    ]);
+    const early = await InvestmentModel.create({
+      app_id: appId,
+      customer_id: customer._id,
+      external_investment_id: "E1",
+      product_name: "LỘC VÀNG",
+      amount: 70 * M,
+      term_type: "month",
+      term_value: 12,
+      interest_rate: 12,
+      invested_at: vn("2026-05-22T09:00:00"),
+      maturity_at: vn("2027-05-22T09:00:00"),
+      kpi_attribution: await buildInvestmentAttribution(customer, null, vn("2026-05-22T09:00:00"))
+    });
+    const result = await syncInvestmentClosures({
+      appCode: "first-sync-app",
+      now: syncAt,
+      fetchHoldings: async () => [
+        {
+          id: "E1",
+          investAmount: "70000000",
+          startDate: "09:00 22/05/2026",
+          endDate: "23:59 22/05/2027",
+          status: "1"
+        }
+      ]
+    });
+    expect(result.closed).toBe(1);
+    expect(((await InvestmentModel.findById(early._id).lean()) as any).closure).toMatchObject({
+      type: "early_terminated",
+      date_unknown: true
+    });
+
+    const range = { from: vn("2026-11-01T00:00:00"), to: vn("2026-11-14T00:00:00") };
+    expect(
+      await AUTO_METRIC_SOURCES.investment_outflow({ appId: String(appId), range, saleIds: null })
+    ).toEqual([]);
+    expect(await AUTO_METRIC_SOURCES.aum({ appId: String(appId), range, saleIds: null })).toEqual(
+      []
+    );
   });
 });

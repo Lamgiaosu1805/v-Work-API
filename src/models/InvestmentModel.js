@@ -78,6 +78,8 @@ const InvestmentSchema = new mongoose.Schema(
                     form_of_maturity: { type: String, default: null },
                     // Tái tục: tiền không rời khỏi hệ thống → KHÔNG tính tiền ra (Q1)
                     renewed: { type: Boolean, default: false },
+                    // Tất toán trước hạn phát hiện ở lần đồng bộ đầu, TIKLUY không có ngày thật → không tính tiền ra theo kỳ
+                    date_unknown: { type: Boolean, default: false },
                     synced_at: { type: Date, required: true },
                 },
                 { _id: false }

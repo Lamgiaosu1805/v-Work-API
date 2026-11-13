@@ -37,6 +37,8 @@ const ids = {
   otherDept: id(),
   s1: id(),
   s2: id(),
+  s3: id(),
+  s4: id(),
   account1: id(),
   agent: id()
 };
@@ -90,7 +92,10 @@ beforeAll(async () => {
       createdAt: vn("2026-01-01T00:00:00")
     },
     { user: ids.s1, department: ids.hn1, position: id(), createdAt: vn("2026-02-01T00:00:00") },
-    { user: ids.s2, department: ids.hn2, position: id() }
+    { user: ids.s2, department: ids.hn2, position: id() },
+    // S3 chưa phát sinh số liệu, S4 đã nghỉ việc — đều thuộc TTKD HN2
+    { user: ids.s3, department: ids.hn2, position: id() },
+    { user: ids.s4, department: ids.hn2, position: id() }
   ]);
   await mongoose.connection.collection("user_infos").insertMany([
     {
@@ -100,7 +105,16 @@ beforeAll(async () => {
       id_account: ids.account1,
       isDeleted: false
     },
-    { _id: ids.s2, full_name: "Sale Hai", ma_nv: "NV002", id_account: id(), isDeleted: false }
+    { _id: ids.s2, full_name: "Sale Hai", ma_nv: "NV002", id_account: id(), isDeleted: false },
+    { _id: ids.s3, full_name: "Sale Ba", ma_nv: "NV003", id_account: id(), isDeleted: false },
+    {
+      _id: ids.s4,
+      full_name: "Sale Bốn",
+      ma_nv: "NV004",
+      id_account: id(),
+      isDeleted: false,
+      resignation_date: vn("2026-10-01T00:00:00")
+    }
   ]);
   await AgentModel.create({
     _id: ids.agent,
@@ -290,6 +304,20 @@ describe("báo cáo ngày", () => {
     expect(summary.company_wide).toBe(true);
     expect(summary.units.find((u: any) => u.id === "__unassigned__")).toBeDefined();
     expect(summary.totals.metrics.investment_amount.day).toBe(90_000_000);
+  });
+
+  test("BLĐ thấy mọi nhân sự đang làm ở TTKD, kể cả chưa phát sinh số; người đã nghỉ thì không", async () => {
+    const summary = await getDailyReportSummary({
+      ability: buildAbility([{ action: "daily_report.view", subject: "DailyReport" }]),
+      dateKey: "2026-11-12",
+      now: vn("2026-11-12T18:00:00")
+    });
+    const s3 = summary.employees.find((e: any) => e.ma_nv === "NV003") as any;
+    expect(s3).toMatchObject({ unit_id: String(ids.hn2), participant: false, metrics: {} });
+    expect(summary.employees.find((e: any) => e.ma_nv === "NV004")).toBeUndefined();
+    const hn2 = summary.units.find((u: any) => u.id === String(ids.hn2)) as any;
+    expect(hn2.employee_count).toBe(2);
+    expect(hn2.metrics.investment_amount.day).toBe(30_000_000);
   });
 
   test("quản lý theo phạm vi: chỉ thấy Sale mình quản lý, không có dòng chưa phân bổ", async () => {

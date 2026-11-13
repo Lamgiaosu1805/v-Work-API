@@ -7,6 +7,7 @@ const AppModel = require("../models/AppModel");
 const InvestmentModel = require("../models/InvestmentModel");
 const { createCifCommission, createEkycCommission, calculateCommission, getTNCNRate } = require("../helpers/commissionCalculator");
 const { invalidatePermissionCache } = require("../core/authorization/invalidate-permission-cache");
+const { buildKpiCif, isKpiCifOf } = require("../helpers/kpiAttribution");
 const {
     syncCustomerCareInBackground,
     syncCustomerCareByCustomerId,
@@ -249,6 +250,15 @@ const CustomerClaimRequestController = {
             if (ekycGranted) {
                 updateData.ekyc_commission = createEkycCommission(sale._id, accountId);
             }
+            // Ghi nhận KPI (CIF) theo ngày duyệt — docs/CRM-DAILY-REPORT-FLOWS.md R1
+            if (!customer.kpi_cif?.sale_id) {
+                updateData.kpi_cif = await buildKpiCif({
+                    channel: "claim",
+                    saleId: sale._id,
+                    at: updateData.referred_at,
+                    session,
+                });
+            }
 
             await CustomerModel.findByIdAndUpdate(
                 customer._id,
@@ -400,6 +410,10 @@ const CustomerClaimRequestController = {
             }
             if (customer.ekyc_commission?.sale_id?.toString() === saleId.toString()) {
                 resetData.ekyc_commission = null;
+            }
+            // Thu hồi yêu cầu đã duyệt = nhận nhầm → huỷ ghi nhận CIF tạo từ lần duyệt này
+            if (isKpiCifOf(customer.kpi_cif, saleId, ["claim"])) {
+                resetData.kpi_cif = null;
             }
 
             await CustomerModel.findByIdAndUpdate(

@@ -10,6 +10,8 @@ const { registerReconcileFecLeadCommissionJob } = require("./reconcileFecLeadCom
 const { registerCustomerCareJobs } = require("./customerCareJob");
 const { registerHandbookAssistantJobs } = require("./handbookAssistantJob");
 const { registerTicketSweepJob } = require("./ticketSweepJob");
+const { registerDailyReportJobs } = require("./dailyReportJob");
+const { registerInvestmentClosureSyncJob } = require("./investmentClosureSyncJob");
 
 // DISABLE_CRON=1: không đăng ký cron nào — để chạy local/dev trỏ vào DB dùng chung (test) mà không
 // làm các job (chốt công, cộng phép, đối soát hoa hồng, nhắc báo cáo...) ghi vào dữ liệu đó.
@@ -38,6 +40,8 @@ function startCronJobs() {
   registerCustomerCareJobs();
   registerHandbookAssistantJobs();
   registerTicketSweepJob();
+  registerDailyReportJobs();
+  registerInvestmentClosureSyncJob();
 }
 
 module.exports = { startCronJobs };

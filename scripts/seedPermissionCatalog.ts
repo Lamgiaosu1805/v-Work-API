@@ -825,6 +825,14 @@ const DEFINITIONS: PermissionDef[] = [
     validDataScopePolicies: ["AGENT_ALL_COMPANY"]
   },
   {
+    code: "agent.assign_sale",
+    module: "crm",
+    name: "Gán Sale phụ trách đại lý",
+    entity: "Agent",
+    actionKind: "WRITE",
+    validDataScopePolicies: ["AGENT_ALL_COMPANY"]
+  },
+  {
     code: "investment.view",
     module: "crm",
     name: "Xem khoản đầu tư",
@@ -931,6 +939,22 @@ const DEFINITIONS: PermissionDef[] = [
     entity: "DashboardMetric",
     actionKind: "READ",
     validDataScopePolicies: ["DASHBOARD_METRIC_ALL_COMPANY"]
+  },
+  {
+    code: "daily_report.submit",
+    module: "crm",
+    name: "Nộp báo cáo ngày kinh doanh",
+    entity: "DailyReport",
+    actionKind: "WRITE",
+    validDataScopePolicies: ["DAILY_REPORT_SELF"]
+  },
+  {
+    code: "daily_report.view",
+    module: "crm",
+    name: "Xem báo cáo ngày & bảng KPI kinh doanh",
+    entity: "DailyReport",
+    actionKind: "READ",
+    validDataScopePolicies: ["DAILY_REPORT_ALL_COMPANY", "DAILY_REPORT_MANAGED", "DAILY_REPORT_SELF"]
   },
   {
     code: "ai_chat.use",

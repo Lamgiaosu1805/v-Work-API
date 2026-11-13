@@ -12,7 +12,9 @@ import { TicketActivityRepository } from "../infrastructure/ticket-activity.repo
 import { MongooseSchedulerLoader } from "../infrastructure/ticket-scheduler.loader";
 import { MongooseTicketDirectory } from "../infrastructure/ticket-directory";
 import { NotificationServiceTicketNotifier } from "../infrastructure/ticket-notifier";
-import { TicketDirectory, TicketNotifier } from "./ports";
+import { SocketIoTicketRealtime } from "../infrastructure/ticket-realtime";
+import { TicketDirectory, TicketNotifier, TicketRealtime } from "./ports";
+import { TicketWatchService } from "./ticket-watch.service";
 import { recipientsWithTicketAccess } from "./ticket-recipient-access";
 import { refreshSchedule, SchedulerLoader } from "./ticket-scheduling";
 import {
@@ -33,6 +35,8 @@ export interface TicketSweepDeps {
   scheduler: SchedulerLoader;
   notifier: TicketNotifier;
   directory: TicketDirectory;
+  // Báo người đang mở trang chi tiết khi cron đổi ticket (tự đóng, đánh dấu đã nhắc).
+  realtime?: TicketRealtime;
   now: () => Date;
 }
 
@@ -52,6 +56,7 @@ export class TicketSweepService {
       scheduler: new MongooseSchedulerLoader(),
       notifier: new NotificationServiceTicketNotifier(),
       directory: new MongooseTicketDirectory(),
+      realtime: new SocketIoTicketRealtime(new TicketWatchService()),
       now: () => new Date()
     }
   ) {
@@ -209,6 +214,7 @@ Ticket đã chờ quá ngưỡng cảnh báo mà chưa có người nhận xử 
       ticket.publishEvents(eventBus).catch((error) => {
         logger.error("Lỗi khi xử lý sự kiện ticket", { error, ticketId });
       });
+      this.deps.realtime?.publishChanged({ ticketId, kind: "updated", actorId: null });
       return "done";
     } catch (error) {
       // Ticket vừa bị người dùng sửa / không còn ở trạng thái tự đóng: bỏ qua, lần quét sau xét lại.
@@ -247,6 +253,7 @@ Ticket đã chờ quá ngưỡng cảnh báo mà chưa có người nhận xử 
         );
         throw error;
       }
+      this.deps.realtime?.publishChanged({ ticketId, kind: "updated", actorId: null });
       return "done";
     } catch (error) {
       logger.warn("Không nhắc được ticket", { error, ticketId });

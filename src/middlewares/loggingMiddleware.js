@@ -1,6 +1,7 @@
 // src/middlewares/loggingMiddleware.js
 const IS_PROD = process.env.NODE_ENV === 'production';
-const SENSITIVE_KEYS = new Set(['password', 'accessToken', 'refreshToken', 'authorization']);
+// `secrets` / `secret`: nội dung ẩn của ticket (mật khẩu... — gửi lên và trả về khi bấm "Hiện")
+const SENSITIVE_KEYS = new Set(['password', 'accessToken', 'refreshToken', 'authorization', 'secrets', 'secret']);
 // Bỏ qua log cho các request tĩnh/health
 const SKIP_PATHS = ['/favicon.ico', '/health'];
 
@@ -37,7 +38,9 @@ const safeSanitize = (value, options = {}) => {
   try {
     for (const key of Object.keys(value)) {
       try {
-        out[key] = SENSITIVE_KEYS.has(key) ? '*** HIDDEN ***'
+        // Request multipart gửi JSON trong field `payload` (chuỗi): có kèm `secrets` thì ẩn cả chuỗi
+        const hiddenPayload = key === 'payload' && typeof value[key] === 'string' && value[key].includes('"secrets"');
+        out[key] = SENSITIVE_KEYS.has(key) || hiddenPayload ? '*** HIDDEN ***'
           : safeSanitize(value[key], { maxDepth, _depth: _depth + 1, _seen });
       } catch { out[key] = '[Sanitize error]'; }
     }

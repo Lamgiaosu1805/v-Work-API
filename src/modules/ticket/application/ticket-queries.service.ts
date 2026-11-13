@@ -5,20 +5,28 @@ import TicketActivityModel from "../../../models/TicketActivityModel";
 import TicketAttachmentModel from "../../../models/TicketAttachmentModel";
 import TicketMessageModel from "../../../models/TicketMessageModel";
 import TicketModel from "../../../models/TicketModel";
+import TicketSecretModel from "../../../models/TicketSecretModel";
+import { logger } from "../../../config/logger";
 import { getTicketDir } from "../../../middlewares/uploadTicket";
 import { NotFoundException } from "../../../core/exceptions/exceptions";
 import { parsePagination } from "../../../core/http/parse-pagination";
-import { accessLevel, canViewSensitiveFiles, customerVisibility } from "../domain/ticket-access";
+import {
+  accessLevel,
+  canViewSecrets,
+  canViewSensitiveFiles,
+  customerVisibility
+} from "../domain/ticket-access";
 import { capabilitiesOf } from "../domain/ticket-capabilities";
 import { INFO_REQUEST_CATALOG, RESOLUTION_LABELS } from "../domain/ticket-catalog";
 import { isYellow } from "../domain/ticket-schedule";
 import { TicketEntity } from "../domain/ticket.entity";
-import { TicketNotFoundError } from "../domain/ticket.errors";
+import { TicketForbiddenError, TicketNotFoundError } from "../domain/ticket.errors";
 import { TicketActor, TicketProps } from "../domain/types";
 import { ticketMapper } from "../infrastructure/ticket.mapper";
 import { MongooseTicketConfigReader } from "../infrastructure/ticket-config.repository";
 import { MongooseTicketDirectory } from "../infrastructure/ticket-directory";
 import { loadTicketSettings } from "../infrastructure/ticket-settings";
+import { decryptSecret } from "../infrastructure/ticket-secret-crypto";
 import { TicketConfigReader } from "./ticket-config.types";
 import { TicketDirectory } from "./ports";
 import {
@@ -223,18 +231,23 @@ export class TicketQueryService {
       };
     }
 
-    const [messages, attachments, activities, products, categories, template] = await Promise.all([
-      TicketMessageModel.find({ ticket_id: ticket.id, isDeleted: false })
-        .sort({ createdAt: 1 })
-        .lean(),
-      TicketAttachmentModel.find({ ticket_id: ticket.id, isDeleted: false })
-        .sort({ createdAt: 1 })
-        .lean(),
-      TicketActivityModel.find({ ticket_id: ticket.id }).sort({ createdAt: 1 }).lean(),
-      this.deps.config.listProducts(false),
-      this.deps.config.listCategories(false),
-      ticket.templateId ? this.deps.config.findTemplate(ticket.templateId) : null
-    ]);
+    const [messages, secrets, attachments, activities, products, categories, template] =
+      await Promise.all([
+        TicketMessageModel.find({ ticket_id: ticket.id, isDeleted: false })
+          .sort({ createdAt: 1 })
+          .lean(),
+        // Chỉ lấy phần KHÔNG mã hoá (nhãn, người gõ): giá trị thật không bao giờ đi qua API chi tiết
+        TicketSecretModel.find({ ticket_id: ticket.id, isDeleted: false })
+          .select("message_id author_id label")
+          .lean(),
+        TicketAttachmentModel.find({ ticket_id: ticket.id, isDeleted: false })
+          .sort({ createdAt: 1 })
+          .lean(),
+        TicketActivityModel.find({ ticket_id: ticket.id }).sort({ createdAt: 1 }).lean(),
+        this.deps.config.listProducts(false),
+        this.deps.config.listCategories(false),
+        ticket.templateId ? this.deps.config.findTemplate(ticket.templateId) : null
+      ]);
 
     const peopleIds = [
       ...ticket.assignment.collaboratorIds,
@@ -280,6 +293,28 @@ export class TicketQueryService {
     });
 
     const sensitiveVisible = canViewSensitiveFiles(ticket, actor);
+
+    // Lịch sử KHÔNG hiện từng tin nhắn của nhóm xử lý (nhật ký "message" vẫn được ghi để cảnh báo "im lặng" đếm lại, chỉ ẩn khỏi
+    // hiển thị). Thay vào đó chỉ có MỘT dòng "mở phần trao đổi" ở thời điểm tin nhắn đầu tiên — của bất kỳ ai, kể cả người tạo —
+    // dựng thẳng từ tin nhắn đầu nên ticket cũ cũng có, không cần dữ liệu thêm.
+    const firstMessage: any = messages[0];
+    const timeline: any[] = [
+      ...activities.filter((activity: any) => activity.action !== "message"),
+      ...(firstMessage
+        ? [
+            {
+              _id: `discussion-${firstMessage._id}`,
+              action: "discussion_opened",
+              actor_id: firstMessage.author_id,
+              from: null,
+              to: null,
+              changes: [],
+              note: "",
+              createdAt: firstMessage.createdAt
+            }
+          ]
+        : [])
+    ].sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const customerRule = customerVisibility(ticket, actor);
     const department = ticket.assignment.departmentId
       ? (await this.deps.directory.getDepartments([ticket.assignment.departmentId]))[0]
@@ -351,6 +386,13 @@ export class TicketQueryService {
       },
       approval: { ...ticket.approval, verifiedByName: nameOf(ticket.approval.verifiedBy) },
       capabilities: capabilitiesOf(ticket, actor, now),
+      // MỌI nội dung ẩn của ticket (cả trong tin nhắn lẫn trong ô ghi chú của thao tác): web tra theo mã trong dấu hiệu
+      // `⟦s:<id>⟧` ở bất kỳ văn bản nào để hiện "Đã ẩn" và biết ai bấm xem được. Không bao giờ có giá trị thật.
+      secrets: secrets.map((secret: any) => ({
+        id: String(secret._id),
+        label: secret.label ?? "",
+        canReveal: canViewSecrets(ticket, actor, secret.author_id)
+      })),
       messages: messages.map((message: any) => ({
         id: String(message._id),
         author: { id: String(message.author_id), name: nameOf(message.author_id) },
@@ -359,6 +401,14 @@ export class TicketQueryService {
           id: String(id),
           name: nameOf(id)
         })),
+        // Nội dung ẩn của tin nhắn: `body` chỉ chứa dấu hiệu `⟦s:<id>⟧`; `canReveal` quyết định hiện nút "Hiện" hay "Đã ẩn"
+        secrets: secrets
+          .filter((secret: any) => String(secret.message_id) === String(message._id))
+          .map((secret: any) => ({
+            id: String(secret._id),
+            label: secret.label ?? "",
+            canReveal: canViewSecrets(ticket, actor, secret.author_id)
+          })),
         createdAt: message.createdAt
       })),
       // File nhạy cảm mà người xem không còn quyền mở: chỉ hiện dòng thông tin (loại giấy tờ, người tải,
@@ -379,7 +429,7 @@ export class TicketQueryService {
           createdAt: file.createdAt
         };
       }),
-      activities: activities.map((activity: any) => ({
+      activities: timeline.map((activity: any) => ({
         id: String(activity._id),
         action: activity.action,
         actor: activity.actor_id
@@ -479,6 +529,39 @@ export class TicketQueryService {
       originalName: file.original_name as string,
       mimeType: file.mime_type as string
     };
+  }
+
+  // Giải mã MỘT nội dung ẩn theo yêu cầu (bấm "Hiện"). Kiểm quyền ở MỌI lần: mất quyền (bị gỡ khỏi nhóm xử lý, ticket đã
+  // kết thúc...) là không xem được nữa dù trước đó đã thấy nút. Ghi lại người xem để truy vết.
+  // eslint-disable-next-line class-methods-use-this
+  async revealSecret(actor: TicketActor, ticketId: string, secretId: string) {
+    const doc = await findTicketDoc(ticketId);
+    const ticket = ticketMapper.toDomain(doc).getProps();
+    if (accessLevel(ticket, actor) !== "full") throw new TicketNotFoundError();
+    if (!mongoose.isValidObjectId(secretId))
+      throw new NotFoundException("Nội dung ẩn không tồn tại");
+
+    const secret = (await TicketSecretModel.findOne({
+      _id: secretId,
+      ticket_id: ticket.id,
+      isDeleted: false
+    }).lean()) as any;
+    if (!secret) throw new NotFoundException("Nội dung ẩn không tồn tại");
+    if (!canViewSecrets(ticket, actor, secret.author_id)) {
+      throw new TicketForbiddenError("Bạn không có quyền xem nội dung này");
+    }
+
+    const value = decryptSecret(secret, ticket.id);
+    await TicketSecretModel.updateOne(
+      { _id: secret._id },
+      { $push: { reveals: { $each: [{ by: actor.employeeId, at: new Date() }], $slice: -50 } } }
+    );
+    logger.info("Ticket: đã xem nội dung ẩn", {
+      ticketId: ticket.id,
+      secretId: String(secret._id),
+      employeeId: actor.employeeId
+    });
+    return { secret: { id: String(secret._id), label: secret.label ?? "", value } };
   }
 
   // ---- danh mục cho form + nhân sự ----------------------------------------------------------

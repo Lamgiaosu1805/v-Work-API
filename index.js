@@ -25,6 +25,13 @@ const {
 const {
   createHandbookOwnTicketLookup
 } = require("./src/workflows/handbook-own-ticket-lookup.workflow");
+const {
+  registerAgent,
+  setupAgentHarnessSocket,
+  shutdownAgentHarness,
+  recoverStaleAgentRuns
+} = require("./src/modules/agent-harness");
+const { createSalesBiAgent } = require("./src/workflows/agents/sales-bi.agent");
 const { setIO } = require("./src/sockets/ioRegistry");
 const { startCronJobs } = require("./src/jobs");
 const { ensureAllDeptFolders } = require("./src/jobs/ensureDeptFolders");
@@ -61,6 +68,9 @@ setupHandbookAssistantSocket(
   createHandbookReferenceContext(),
   createHandbookOwnTicketLookup()
 );
+// Agent harness (docs/CRM-LEADERSHIP-DASHBOARD-AI-PLAN.md mục 5): agent đăng ký từ tầng workflows/, hỏi qua socket `agent:*`
+registerAgent(createSalesBiAgent());
+setupAgentHarnessSocket(io);
 
 app.set("trust proxy", 1);
 
@@ -123,6 +133,10 @@ app.use(errorHandlerMiddleware);
 (async () => {
   try {
     await db.connect();
+    // Câu trả lời AI đang stream khi tiến trình trước dừng → chốt lỗi
+    recoverStaleAgentRuns().catch((err) =>
+      console.error("Lỗi khi chốt câu trả lời agent treo:", err)
+    );
 
     startCronJobs();
     await ensureAllDeptFolders();
@@ -141,6 +155,7 @@ app.use(errorHandlerMiddleware);
       } catch (err) {
         console.error("Lỗi khi dừng Trợ lý Nội quy:", err);
       }
+      shutdownAgentHarness();
       httpServer.close(async () => {
         try {
           await mongoose.disconnect();

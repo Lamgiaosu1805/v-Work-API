@@ -567,7 +567,12 @@ export async function getDailyReportSummary(input: {
     countSubmission(totalSubmission, submission);
   });
 
-  const unitIds = new Set([...unitCells.keys(), ...unitSubmissions.keys()]);
+  // Kèm đơn vị chỉ có nhân sự chưa phát sinh số (vd TTKD mới lập) — để so sánh và xem từng người
+  const unitIds = new Set([
+    ...unitCells.keys(),
+    ...unitSubmissions.keys(),
+    ...unitEmployees.keys()
+  ]);
   const units = [...unitIds].map((unitId) => ({
     ...tree.describe(unitId, unitIds),
     employee_count: unitEmployees.get(unitId)?.size ?? 0,

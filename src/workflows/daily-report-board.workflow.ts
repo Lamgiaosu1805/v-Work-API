@@ -1,4 +1,6 @@
+import AccountModel from "../models/AccountModel";
 import DepartmentModel from "../models/DepartmentModel";
+import UserDepartmentPositionModel from "../models/UserDepartmentPositionModel";
 import UserInfoModel from "../models/UserInfoModel";
 import { resolveSaleUnitIds } from "../helpers/kpiAttribution";
 import type { Ability } from "../modules/permission";
@@ -121,12 +123,46 @@ function periodsOf(dayKey: string, dateKey: string): Period[] {
   return periods;
 }
 
+/** Nhân sự đang làm (chưa nghỉ việc, tài khoản còn hoạt động) ở các đơn vị loại TTKD. */
+async function activeSalesUnitMembers(now: Date): Promise<string[]> {
+  const units = (await DepartmentModel.find({ isDeleted: false, type: "branch" })
+    .select("_id")
+    .lean()) as any[];
+  if (!units.length) return [];
+  const userIds = await UserDepartmentPositionModel.distinct("user", {
+    department: { $in: units.map((u) => u._id) },
+    isDeleted: false
+  });
+  const people = (await UserInfoModel.find({
+    _id: { $in: userIds },
+    isDeleted: false,
+    $or: [{ resignation_date: null }, { resignation_date: { $gt: now } }]
+  })
+    .select("_id id_account")
+    .lean()) as any[];
+  const deletedAccounts = new Set(
+    (
+      (await AccountModel.find({
+        _id: { $in: people.map((p) => p.id_account).filter(Boolean) },
+        isDeleted: true
+      })
+        .select("_id")
+        .lean()) as any[]
+    ).map((a) => String(a._id))
+  );
+  return people
+    .filter((p) => !p.id_account || !deletedAccounts.has(String(p.id_account)))
+    .map((p) => String(p._id));
+}
+
 async function buildBoard(input: {
   appId: string;
   dateKey: string;
   now: Date;
   employeeIds: string[] | null; // null = mọi nhân viên
   includeUnassigned: boolean;
+  /** Kèm mọi nhân sự đang làm ở các TTKD (kể cả chưa phát sinh số) — cho BLĐ xem tình hình từng người */
+  includeSalesUnitMembers?: boolean;
 }): Promise<Board> {
   const { appId, dateKey, now, employeeIds } = input;
   const ranges = periodRanges(dateKey);
@@ -166,6 +202,8 @@ async function buildBoard(input: {
       if (row.saleId) employees.add(row.saleId);
     })
   );
+  const unitMembers = input.includeSalesUnitMembers ? await activeSalesUnitMembers(now) : [];
+  unitMembers.forEach((id) => employees.add(id));
   const [unitIds, leaveDays] = await Promise.all([
     resolveSaleUnitIds([...employees]),
     listFullLeaveDays([...participants], ranges.year.from, ranges.year.to)
@@ -301,6 +339,18 @@ async function buildBoard(input: {
         cell.base![period] += 1;
         if (onTime) cell.actual[period] += 1;
       });
+    });
+  });
+
+  // Nhân sự TTKD chưa có dòng số nào → dòng rỗng ở TTKD hiện tại để vẫn hiện trong danh sách
+  const withRow = new Set([...rows.values()].map((row) => row.employeeId).filter(Boolean));
+  unitMembers.forEach((employeeId) => {
+    if (withRow.has(employeeId)) return;
+    const departmentId = currentUnit.get(employeeId) ?? null;
+    rows.set(`${employeeId}|${departmentId ?? "-"}`, {
+      employeeId,
+      departmentId,
+      cells: new Map()
     });
   });
 
@@ -467,7 +517,8 @@ export async function getDailyReportSummary(input: {
     dateKey: input.dateKey,
     now: input.now,
     employeeIds: null,
-    includeUnassigned: companyWide
+    includeUnassigned: companyWide,
+    includeSalesUnitMembers: true
   });
 
   const visibleRows = [...board.rows.values()].filter((row) =>

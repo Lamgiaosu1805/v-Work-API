@@ -12,3 +12,10 @@ export async function canEmployee(
   const rules = await loadRules(employeeId);
   return buildAbility(rules).can(action, subject);
 }
+
+// Nạp MỘT LẦN bộ quyền của nhân viên để kiểm tra nhiều quyền liền nhau (vd dựng "người thao tác" cho module ticket).
+export async function loadEmployeeAbility(
+  employeeId: string
+): Promise<{ can(action: string, subject: string): boolean }> {
+  return buildAbility(await loadRules(employeeId));
+}

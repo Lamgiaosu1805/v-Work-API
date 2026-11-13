@@ -15,6 +15,7 @@ const setupChatSocket = require("./src/sockets/chatSocket");
 const {
   setupHandbookAssistantSocket
 } = require("./src/modules/handbook-assistant/interface/handbook-assistant.socket");
+const { setupTicketSocket } = require("./src/modules/ticket/interface/ticket.socket");
 const { shutdownHandbookAssistant } = require("./src/modules/handbook-assistant");
 const {
   createHandbookPersonalContext
@@ -59,6 +60,9 @@ io.on("connection", (socket) => {
 app.set("io", io);
 setIO(io);
 setupChatSocket(io);
+// Trang chi tiết ticket: vào phòng `ticket:<id>` để biết ticket vừa đổi / bị thu quyền xem (sau setupChatSocket vì cần
+// middleware xác thực của nó).
+setupTicketSocket(io);
 // Trợ lý Nội quy tra được số ngày phép còn lại của CHÍNH người hỏi (nối module leave qua workflows/) và cấu hình
 // ticket đang áp dụng và tra ticket do chính người hỏi tạo (nối module ticket qua workflows/).
 setupHandbookAssistantSocket(

@@ -1,5 +1,7 @@
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
+import mongoose from "mongoose";
 import { ArgumentInvalidException } from "../../../core/exceptions/exceptions";
+import { PreparedSecret, prepareSecrets } from "../application/ticket-secrets";
 import { MongooseTicketDirectory } from "../infrastructure/ticket-directory";
 import {
   AbilityLike,
@@ -53,6 +55,49 @@ async function withUploadCleanup<T>(req: Request, work: () => Promise<T>): Promi
     cleanupUploadedFiles((req as unknown as { files?: unknown }).files, "ticket");
     throw error;
   }
+}
+
+// ---- nội dung ẩn trong ô ghi chú -----------------------------------------------------------------
+// Các ô ghi chú của thao tác (note / reason / actionTaken / followUp.note) dùng chung cơ chế nội dung ẩn với trao đổi: web gửi văn
+// bản chứa dấu hiệu `⟦s:<khoá>⟧` kèm `secrets: [{ key, value }]`. takeNoteSecrets đổi khoá thành mã thật NGAY TRONG req.body (trước
+// khi handler đọc payload) và trả danh sách để lưu mã hoá; withNoteSecrets lưu chúng sau khi thao tác thành công và TRƯỚC khi trả
+// response (để web tải lại chi tiết là thấy ngay). Thao tác lỗi (>= 400) thì không lưu gì.
+const NOTE_TEXT_KEYS = ["note", "reason", "actionTaken"];
+const newSecretId = () => String(new mongoose.Types.ObjectId());
+
+function takeNoteSecrets(req: Request): PreparedSecret[] {
+  const body = (req.body ?? {}) as Record<string, any>;
+  const prepared: PreparedSecret[] = [];
+  const rewrite = (container: Record<string, any> | null | undefined, key: string) => {
+    const text = container?.[key];
+    if (!container || typeof text !== "string") return;
+    const result = prepareSecrets(text, body.secrets, newSecretId);
+    container[key] = result.text;
+    prepared.push(...result.secrets);
+  };
+  NOTE_TEXT_KEYS.forEach((key) => rewrite(body, key));
+  rewrite(body.followUp, "note");
+  return prepared;
+}
+
+export function withNoteSecrets(handler: (req: Request, res: Response) => Promise<unknown>) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const secrets = takeNoteSecrets(req);
+    if (secrets.length) {
+      const send = res.json.bind(res);
+      res.json = ((body: unknown) => {
+        if (res.statusCode >= 400) return send(body);
+        actorOf(req)
+          .then((actor) =>
+            getTicketCommandService().saveNoteSecrets(actor, param(req, "id"), secrets)
+          )
+          .then(() => send(body))
+          .catch(next);
+        return res;
+      }) as Response["json"];
+    }
+    return handler(req, res);
+  };
 }
 
 const requireText = (value: unknown, message: string): string => {
@@ -280,7 +325,8 @@ export const ticketHttpController = {
           param(req, "id"),
           {
             approvalReference: approvalReferenceOf(payload),
-            note: typeof payload.note === "string" ? payload.note : undefined
+            note: typeof payload.note === "string" ? payload.note : undefined,
+            secrets: payload.secrets
           },
           readUploadedFiles(req, payload),
           toVersion(payload.version)
@@ -462,7 +508,8 @@ export const ticketHttpController = {
       const payload = readPayload(req);
       const message = {
         body: payload.body,
-        mentionIds: toObjectIdList(payload.mentionIds, "Người được nhắc tên không hợp lệ")
+        mentionIds: toObjectIdList(payload.mentionIds, "Người được nhắc tên không hợp lệ"),
+        secrets: payload.secrets
       };
       const result = await getTicketCommandService().addMessage(
         await actorOf(req),
@@ -472,6 +519,19 @@ export const ticketHttpController = {
       );
       return res.status(201).json({ message: "Đã gửi tin nhắn", data: result });
     });
+  },
+
+  // Giải mã một nội dung ẩn theo yêu cầu. Không cho trình duyệt / proxy lưu cache phản hồi chứa giá trị thật.
+  async revealSecret(req: Request, res: Response) {
+    res.setHeader("Cache-Control", "no-store");
+    return ok(
+      res,
+      await getTicketQueryService().revealSecret(
+        await actorOf(req),
+        param(req, "id"),
+        param(req, "secretId")
+      )
+    );
   },
 
   // ---- cấu hình (quyền ticket.config) -------------------------------------------------------

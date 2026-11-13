@@ -127,3 +127,19 @@ export function canViewSensitiveFiles(ticket: AccessProps, actor: TicketActor): 
   if (actor.canViewSensitive) return true;
   return isInvolved(ticket, actor) && !isFinished(ticket.status);
 }
+
+// Nội dung ẩn (mật khẩu... gõ trong trao đổi) dùng quy tắc RIÊNG, không theo file nhạy cảm và KHÔNG có quyền nào mở rộng:
+// chỉ ba người xem được — người đã gõ ra nó, người tạo ticket, và người xử lý chính (chủ trì). Người phối hợp, người có
+// ticket.view_sensitive / ticket.manage / mọi quyền khác đều KHÔNG xem được. Không phụ thuộc trạng thái ticket (đóng rồi vẫn xem
+// được). Người gọi phải mở được ticket (accessLevel "full") trước khi hỏi hàm này.
+export function canViewSecrets(
+  ticket: Pick<TicketProps, "createdBy" | "assignment">,
+  actor: TicketActor,
+  authorId: unknown
+): boolean {
+  return (
+    sameId(authorId, actor.employeeId) ||
+    isRequester(ticket, actor) ||
+    sameId(ticket.assignment.ownerId, actor.employeeId)
+  );
+}

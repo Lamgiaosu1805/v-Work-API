@@ -1,4 +1,5 @@
 /* eslint-disable class-methods-use-this, max-classes-per-file */
+import crypto from "crypto";
 import mongoose from "mongoose";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 import AppModel from "../../../src/models/AppModel";
@@ -9,6 +10,7 @@ import TicketCategoryModel from "../../../src/models/TicketCategoryModel";
 import TicketCounterModel from "../../../src/models/TicketCounterModel";
 import TicketMessageModel from "../../../src/models/TicketMessageModel";
 import TicketModel from "../../../src/models/TicketModel";
+import TicketSecretModel from "../../../src/models/TicketSecretModel";
 import TicketProductModel from "../../../src/models/TicketProductModel";
 import TicketSettingModel from "../../../src/models/TicketSettingModel";
 import TicketTemplateModel from "../../../src/models/TicketTemplateModel";
@@ -36,13 +38,28 @@ import {
   TicketVersionConflictError
 } from "../../../src/modules/ticket/domain/ticket.errors";
 import { TicketActor } from "../../../src/modules/ticket/domain/types";
-import { ArgumentInvalidException } from "../../../src/core/exceptions/exceptions";
+import {
+  ArgumentInvalidException,
+  InternalServerErrorException,
+  NotFoundException
+} from "../../../src/core/exceptions/exceptions";
+import {
+  decryptSecret,
+  encryptSecret
+} from "../../../src/modules/ticket/infrastructure/ticket-secret-crypto";
+import {
+  maskSecretMarkers,
+  prepareSecrets
+} from "../../../src/modules/ticket/application/ticket-secrets";
 
 // Firebase/FCM không có trong môi trường test; thông báo thật đã được thay bằng notifier giả bên dưới,
 // nhưng domain-event handler mặc định vẫn `require` service này khi nạp.
 jest.mock("../../../src/services/notificationService", () => ({
   createNotification: jest.fn().mockResolvedValue(null)
 }));
+
+// Khoá mã hoá nội dung ẩn: sinh ngẫu nhiên mỗi lần chạy test (không ghi cứng chuỗi giống khoá thật vào mã nguồn)
+process.env.TICKET_SECRET_KEY = crypto.randomBytes(32).toString("hex");
 
 // ---- dữ liệu tổ chức giả (thay MongooseTicketDirectory) ---------------------------------------
 
@@ -162,6 +179,7 @@ const ALL_MODELS: Array<mongoose.Model<any>> = [
   TicketActivityModel,
   TicketAttachmentModel,
   TicketMessageModel,
+  TicketSecretModel,
   TicketCounterModel,
   TicketProductModel,
   TicketCategoryModel,
@@ -2442,5 +2460,325 @@ describe("describeOwnTickets — Trợ lý Nội quy tra ticket do CHÍNH ngư�
       briefs: [],
       notFoundCodes: [created.code]
     });
+  });
+});
+
+// ---- nội dung ẩn (gõ "/" trong trao đổi / bổ sung thông tin) -------------------------------------------------------
+
+describe("lịch sử: chỉ ghi một dòng khi trao đổi được mở", () => {
+  const actionsOf = async (who: TicketActor, ticketId: string) =>
+    ((await queries.getById(who, ticketId)) as any).activities.map((item: any) => item.action);
+
+  it("chưa có tin nhắn thì không có dòng; tin đầu tiên của bất kỳ ai tạo đúng một dòng, tin sau không thêm dòng nào", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    expect(await actionsOf(itA(), created.id)).not.toContain("discussion_opened");
+
+    now = hoursLater(1);
+    await commands.addMessage(itA(), created.id, { body: "Đang kiểm tra" });
+    now = hoursLater(2);
+    await commands.addMessage(itA(), created.id, { body: "Xong bước 1" });
+    await commands.addMessage(requester(), created.id, { body: "Cảm ơn" });
+
+    const detail: any = await queries.getById(requester(), created.id);
+    const actions = detail.activities.map((item: any) => item.action);
+    expect(actions.filter((action: string) => action === "discussion_opened")).toHaveLength(1);
+    // Nhóm xử lý nhắn nhiều lần vẫn không hiện dòng "message" nào bên cạnh
+    expect(actions).not.toContain("message");
+    // Dòng mở trao đổi ghi người gửi và thời điểm của tin đầu tiên
+    const opened = detail.activities.find((item: any) => item.action === "discussion_opened");
+    expect(opened.actor.id).toBe(IT_A);
+    expect(opened.createdAt).toEqual(detail.messages[0].createdAt);
+    // Nhật ký "message" vẫn được ghi trong DB (để cảnh báo "im lặng" đếm lại)
+    expect(await activitiesOf(created.id)).toContain("message");
+  });
+
+  it("người tạo nhắn đầu tiên cũng tạo dòng mở trao đổi", async () => {
+    const created = await createPlain();
+    await commands.addMessage(requester(), created.id, { body: "Khách vẫn chưa nhận được" });
+    const detail: any = await queries.getById(requester(), created.id);
+    const opened = detail.activities.filter((item: any) => item.action === "discussion_opened");
+    expect(opened).toHaveLength(1);
+    expect(opened[0].actor.id).toBe(REQUESTER);
+  });
+});
+
+describe("nội dung ẩn — hàm thuần và mã hoá", () => {
+  let counter = 0;
+  const newId = () => {
+    counter += 1;
+    return `id${counter}`;
+  };
+
+  it("đổi khoá tạm thành mã thật, bỏ khai báo không dùng, dùng lại khoá thì cùng một mã", () => {
+    const result = prepareSecrets(
+      "Pass: ⟦s:a1⟧ và lặp lại ⟦s:a1⟧",
+      [
+        { key: "a1", label: " VPN ", value: "gia-tri-1" },
+        { key: "zz", value: "khong-dung" }
+      ],
+      newId
+    );
+    expect(result.secrets).toHaveLength(1);
+    expect(result.secrets[0]).toMatchObject({ label: "VPN", value: "gia-tri-1" });
+    const markerId = result.secrets[0].id;
+    expect(result.text).toBe(`Pass: ⟦s:${markerId}⟧ và lặp lại ⟦s:${markerId}⟧`);
+    expect(result.text).not.toContain("gia-tri-1");
+  });
+
+  it("từ chối: dấu hiệu không khai báo (giả mã trỏ nội dung ẩn của tin khác), giá trị rỗng, trùng khoá, quá giới hạn", () => {
+    const bad = (text: string, secrets: unknown) =>
+      expect(() => prepareSecrets(text, secrets, newId)).toThrow(ArgumentInvalidException);
+    bad("⟦s:giaMao⟧", []);
+    bad("⟦s:giaMao⟧", undefined);
+    bad("⟦s:a⟧", [{ key: "a", value: "   " }]);
+    bad("⟦s:a⟧", [
+      { key: "a", value: "1" },
+      { key: "a", value: "2" }
+    ]);
+    bad("⟦s:a⟧", [{ key: "a b", value: "1" }]);
+    bad("⟦s:a⟧", "khong-phai-mang");
+    bad("⟦s:a⟧", [{ key: "a", value: "x".repeat(2001) }]);
+    bad("⟦s:a⟧", [{ key: "a", label: "y".repeat(61), value: "1" }]);
+    const six = Array.from({ length: 6 }, (_, i) => ({ key: `k${i}`, value: "1" }));
+    bad(six.map((item) => `⟦s:${item.key}⟧`).join(" "), six);
+  });
+
+  it("không có dấu hiệu thì giữ nguyên văn bản; maskSecretMarkers che mọi dấu hiệu", () => {
+    expect(prepareSecrets("Xin chào", undefined, newId)).toEqual({ text: "Xin chào", secrets: [] });
+    expect(maskSecretMarkers("a ⟦s:abc123⟧ b ⟦s:x_y-1⟧")).toBe("a [nội dung ẩn] b [nội dung ẩn]");
+  });
+
+  it("mã hoá AES-GCM: khứ hồi đúng, ràng với ticket, sửa bản mã thì không giải được, thiếu khoá thì từ chối", () => {
+    const encrypted = encryptSecret("giá-trị-1", "ticket-1");
+    expect(JSON.stringify(encrypted)).not.toContain("giá-trị-1");
+    expect(decryptSecret(encrypted, "ticket-1")).toBe("giá-trị-1");
+    expect(() => decryptSecret(encrypted, "ticket-2")).toThrow();
+    const buf = Buffer.from(encrypted.cipher, "base64");
+    buf[0] = buf[0] === 0 ? 1 : 0;
+    expect(() =>
+      decryptSecret({ ...encrypted, cipher: buf.toString("base64") }, "ticket-1")
+    ).toThrow();
+
+    const saved = process.env.TICKET_SECRET_KEY;
+    delete process.env.TICKET_SECRET_KEY;
+    try {
+      expect(() => encryptSecret("x", "t")).toThrow(InternalServerErrorException);
+    } finally {
+      process.env.TICKET_SECRET_KEY = saved;
+    }
+  });
+
+  it("khoá là chuỗi bất kỳ có tiền tố môi trường (vd PROD_...): dùng được; chuỗi quá ngắn bị từ chối; khác chuỗi thì không giải được", () => {
+    const saved = process.env.TICKET_SECRET_KEY;
+    try {
+      const phrase = crypto.randomBytes(24).toString("hex");
+      process.env.TICKET_SECRET_KEY = `PROD_${phrase}`;
+      const encrypted = encryptSecret("giá-trị-2", "ticket-1");
+      expect(decryptSecret(encrypted, "ticket-1")).toBe("giá-trị-2");
+
+      // Cùng chuỗi → cùng khoá (khởi động lại vẫn giải được); chuỗi khác (UAT thay PROD) → không giải được
+      process.env.TICKET_SECRET_KEY = `PROD_${phrase}`;
+      expect(decryptSecret(encrypted, "ticket-1")).toBe("giá-trị-2");
+      process.env.TICKET_SECRET_KEY = `UAT_${phrase}`;
+      expect(() => decryptSecret(encrypted, "ticket-1")).toThrow();
+
+      process.env.TICKET_SECRET_KEY = "UAT_ngan";
+      expect(() => encryptSecret("x", "t")).toThrow(/quá ngắn/);
+    } finally {
+      process.env.TICKET_SECRET_KEY = saved;
+    }
+  });
+});
+
+describe("nội dung ẩn trong trao đổi / bổ sung thông tin", () => {
+  const HIDDEN_VALUE = crypto.randomBytes(9).toString("hex");
+  const send = (who: TicketActor, ticketId: string, text = "Pass VPN: ⟦s:k1⟧ nhé") =>
+    commands.addMessage(who, ticketId, {
+      body: text,
+      secrets: [{ key: "k1", label: "Mật khẩu VPN", value: HIDDEN_VALUE }]
+    });
+
+  it("văn bản và DB không chứa giá trị thật; chỉ bản mã hoá; người tạo + nhóm xử lý hiện được, người ngoài thì không", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await send(requester(), created.id);
+
+    const message: any = await TicketMessageModel.findOne({ ticket_id: created.id }).lean();
+    const stored: any = await TicketSecretModel.findOne({ ticket_id: created.id }).lean();
+    expect(message.body).toBe(`Pass VPN: ⟦s:${stored._id}⟧ nhé`);
+    expect(JSON.stringify(message)).not.toContain(HIDDEN_VALUE);
+    expect(JSON.stringify(stored)).not.toContain(HIDDEN_VALUE);
+    expect(String(stored.message_id)).toBe(String(message._id));
+
+    // API chi tiết: không bao giờ có giá trị; canReveal theo từng người
+    const asRequester: any = await queries.getById(requester(), created.id);
+    expect(JSON.stringify(asRequester)).not.toContain(HIDDEN_VALUE);
+    expect(asRequester.messages[0].secrets).toEqual([
+      { id: String(stored._id), label: "Mật khẩu VPN", canReveal: true }
+    ]);
+    const asHandler: any = await queries.getById(itA(), created.id);
+    expect(asHandler.messages[0].secrets[0].canReveal).toBe(true);
+    const asStranger: any = await queries.getById(stranger(), created.id);
+    expect(asStranger.messages[0].secrets[0]).toMatchObject({
+      label: "Mật khẩu VPN",
+      canReveal: false
+    });
+    expect(JSON.stringify(asStranger)).not.toContain(HIDDEN_VALUE);
+
+    const revealed = await queries.revealSecret(requester(), created.id, String(stored._id));
+    expect(revealed).toEqual({
+      secret: { id: String(stored._id), label: "Mật khẩu VPN", value: HIDDEN_VALUE }
+    });
+    expect((await queries.revealSecret(itA(), created.id, String(stored._id))).secret.value).toBe(
+      HIDDEN_VALUE
+    );
+    await expect(queries.revealSecret(stranger(), created.id, String(stored._id))).rejects.toThrow(
+      TicketForbiddenError
+    );
+
+    // Có ghi lại ai đã xem
+    const audited: any = await TicketSecretModel.findById(stored._id).lean();
+    expect(audited.reveals.map((item: any) => String(item.by))).toEqual([REQUESTER, IT_A]);
+  });
+
+  it("người nhắn hộ (không thuộc nhóm, không có quyền nhạy cảm) vẫn xem lại được nội dung chính mình gửi, người khác trong cùng hoàn cảnh thì không", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await send(stranger(), created.id, "Mã OTP: ⟦s:k1⟧");
+    const stored: any = await TicketSecretModel.findOne({ ticket_id: created.id }).lean();
+
+    expect(
+      (await queries.revealSecret(stranger(), created.id, String(stored._id))).secret.value
+    ).toBe(HIDDEN_VALUE);
+    const other = actor(IT_C, { canViewAll: true });
+    await expect(queries.revealSecret(other, created.id, String(stored._id))).rejects.toThrow(
+      TicketForbiddenError
+    );
+  });
+
+  it("thông báo tin nhắn (lưu DB + push) chỉ có chữ 'nội dung ẩn', không có giá trị", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    notifier.sent = [];
+    await send(requester(), created.id);
+
+    const notice = notifier.sent.find((item) => item.type === "message");
+    expect(notice?.body).toBe("Người tạo: Pass VPN: [nội dung ẩn] nhé");
+    expect(JSON.stringify(notifier.sent)).not.toContain(HIDDEN_VALUE);
+    expect(JSON.stringify(notifier.sent)).not.toContain("⟦s:");
+  });
+
+  it("quy tắc riêng: chỉ người gõ / người tạo / chủ trì xem được; phối hợp, quyền nhạy cảm, quản lý, người ngoài đều không", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id); // itA là chủ trì
+    await commands.addCollaborator(itA(), created.id, IT_B); // itB phối hợp (và có ticket.view_sensitive)
+    await send(requester(), created.id);
+    const stored: any = await TicketSecretModel.findOne({ ticket_id: created.id }).lean();
+    const secretId = String(stored._id);
+    const canSee = async (who: TicketActor) => {
+      const detail: any = await queries.getById(who, created.id);
+      return detail.messages[0].secrets[0].canReveal as boolean;
+    };
+
+    // Xem được: người tạo, chủ trì
+    expect(await canSee(requester())).toBe(true);
+    expect(await canSee(itA())).toBe(true);
+    expect((await queries.revealSecret(itA(), created.id, secretId)).secret.value).toBe(
+      HIDDEN_VALUE
+    );
+
+    // KHÔNG xem được dù mở được ticket: người phối hợp (có view_sensitive), sếp (có manage + view_sensitive + view_restricted)
+    expect(itB().canViewSensitive).toBe(true);
+    expect(await canSee(itB())).toBe(false);
+    expect(await canSee(boss())).toBe(false);
+    await expect(queries.revealSecret(itB(), created.id, secretId)).rejects.toThrow(
+      TicketForbiddenError
+    );
+    await expect(queries.revealSecret(boss(), created.id, secretId)).rejects.toThrow(
+      TicketForbiddenError
+    );
+
+    // Người ngoài nhóm dù xem được mọi ticket cũng không xem được; không có quyền nào mở rộng ra thêm
+    const outsider = actor(IT_C, { canViewAll: true });
+    expect(await canSee(outsider)).toBe(false);
+    expect(await canSee(stranger())).toBe(false);
+    await expect(queries.revealSecret(outsider, created.id, secretId)).rejects.toThrow(
+      TicketForbiddenError
+    );
+  });
+
+  it("ticket đã đóng: người tạo và chủ trì vẫn xem lại được (quy tắc riêng không phụ thuộc trạng thái)", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await send(requester(), created.id);
+    const stored: any = await TicketSecretModel.findOne({ ticket_id: created.id }).lean();
+
+    await commands.close(itA(), created.id, { code: "not_a_bug", note: "Hệ thống đúng nghiệp vụ" });
+
+    expect(
+      (await queries.revealSecret(requester(), created.id, String(stored._id))).secret.value
+    ).toBe(HIDDEN_VALUE);
+    expect((await queries.revealSecret(itA(), created.id, String(stored._id))).secret.value).toBe(
+      HIDDEN_VALUE
+    );
+    await expect(queries.revealSecret(boss(), created.id, String(stored._id))).rejects.toThrow(
+      TicketForbiddenError
+    );
+  });
+
+  it("không giải mã chéo ticket: mã nội dung ẩn của ticket này không mở được qua ticket khác", async () => {
+    const a = await createPlain();
+    const b = await createPlain();
+    await send(requester(), a.id);
+    const stored: any = await TicketSecretModel.findOne({ ticket_id: a.id }).lean();
+
+    await expect(queries.revealSecret(requester(), b.id, String(stored._id))).rejects.toThrow(
+      NotFoundException
+    );
+    await expect(queries.revealSecret(requester(), a.id, "khong-phai-id")).rejects.toThrow(
+      NotFoundException
+    );
+  });
+
+  it("gửi dấu hiệu giả (không khai báo) bị từ chối và không lưu gì", async () => {
+    const created = await createPlain();
+    await expect(
+      commands.addMessage(requester(), created.id, { body: "Xem ⟦s:507f1f77bcf86cd799439011⟧" })
+    ).rejects.toThrow(ArgumentInvalidException);
+    expect(await TicketMessageModel.countDocuments({ ticket_id: created.id })).toBe(0);
+    expect(await TicketSecretModel.countDocuments({ ticket_id: created.id })).toBe(0);
+  });
+
+  it("bổ sung thông tin: nội dung ẩn đi cùng tin nhắn của người tạo", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await commands.requestInfo(itA(), created.id, { items: [{ key: "description" }] });
+
+    await commands.submitInfo(requester(), created.id, {
+      note: "Tài khoản test / ⟦s:k1⟧",
+      secrets: [{ key: "k1", label: "Mật khẩu test", value: HIDDEN_VALUE }]
+    });
+
+    const message: any = await TicketMessageModel.findOne({ ticket_id: created.id }).lean();
+    const stored: any = await TicketSecretModel.findOne({ ticket_id: created.id }).lean();
+    expect(message.body).toBe(`Tài khoản test / ⟦s:${stored._id}⟧`);
+    expect(JSON.stringify(message)).not.toContain(HIDDEN_VALUE);
+    expect((await queries.revealSecret(itA(), created.id, String(stored._id))).secret.value).toBe(
+      HIDDEN_VALUE
+    );
+  });
+
+  it("thiếu khoá mã hoá: từ chối gửi chứ không lưu rõ", async () => {
+    const created = await createPlain();
+    const saved = process.env.TICKET_SECRET_KEY;
+    delete process.env.TICKET_SECRET_KEY;
+    try {
+      await expect(send(requester(), created.id)).rejects.toThrow(InternalServerErrorException);
+    } finally {
+      process.env.TICKET_SECRET_KEY = saved;
+    }
+    expect(await TicketMessageModel.countDocuments({ ticket_id: created.id })).toBe(0);
+    expect(await TicketSecretModel.countDocuments({ ticket_id: created.id })).toBe(0);
   });
 });

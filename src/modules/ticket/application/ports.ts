@@ -67,4 +67,38 @@ export interface TicketNotifier {
   notify(notification: TicketNotification): Promise<void>;
 }
 
+// Báo cho người đang mở trang chi tiết ticket (qua socket) rằng ticket vừa đổi. CHỈ là tín hiệu "tải lại đi", không
+// mang nội dung: dữ liệu vẫn lấy qua REST nên quyền xem / che thông tin vẫn do API chi tiết quyết định.
+//   - "updated": ticket đổi (trạng thái, người xử lý, nội dung...) — có thể làm ai đó mất quyền xem.
+//   - "message": chỉ có tin nhắn mới — không đổi quyền xem nên không cần kiểm tra lại quyền.
+export interface TicketChange {
+  ticketId: string;
+  kind: "updated" | "message";
+  version?: number;
+  actorId: string | null;
+}
+
+export interface TicketRealtime {
+  // Không chờ, không ném lỗi: tín hiệu hỏng không được làm hỏng thao tác đã lưu xong.
+  publishChanged(change: TicketChange): void;
+}
+
+// Lưu nội dung ẩn (mật khẩu...) của một tin nhắn — bản cài đặt mã hoá trước khi ghi.
+export interface TicketSecretStore {
+  createMany(input: {
+    ticketId: string;
+    // null = nội dung ẩn trong ô ghi chú của thao tác, không thuộc tin nhắn nào
+    messageId: string | null;
+    authorId: string;
+    secrets: Array<{ id: string; label: string; value: string }>;
+  }): Promise<void>;
+}
+
+// Kiểm tra quyền xem MỘT ticket của người đang kết nối socket (cùng quy tắc với API chi tiết: domain/ticket-access.ts).
+export interface TicketWatchAuthorizer {
+  canWatch(employeeId: string, ticketId: string): Promise<boolean>;
+  // Trong danh sách người đang xem, những ai KHÔNG còn mở được ticket (ticket bị giao lại, chuyển hạn chế, kết thúc...).
+  lostAccess(ticketId: string, employeeIds: string[]): Promise<Set<string>>;
+}
+
 export type MaybeSession = ClientSession | undefined;

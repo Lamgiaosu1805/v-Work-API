@@ -41,7 +41,17 @@ import { NotificationServiceTicketNotifier } from "../infrastructure/ticket-noti
 import { MongooseSchedulerLoader } from "../infrastructure/ticket-scheduler.loader";
 import { TicketConfigReader } from "./ticket-config.types";
 import { MongooseTicketCustomerResolver } from "../infrastructure/ticket-customer-resolver";
-import { TicketCustomerResolver, TicketDirectory, TicketNotifier } from "./ports";
+import { SocketIoTicketRealtime } from "../infrastructure/ticket-realtime";
+import {
+  TicketCustomerResolver,
+  TicketDirectory,
+  TicketNotifier,
+  TicketRealtime,
+  TicketSecretStore
+} from "./ports";
+import { TicketSecretRepository } from "../infrastructure/ticket-secret.repository";
+import { maskSecretMarkers, prepareSecrets } from "./ticket-secrets";
+import { TicketWatchService } from "./ticket-watch.service";
 import { assertCanHandle, authorizeAssignment } from "./ticket-assignment-authorization";
 import { recipientsWithTicketAccess } from "./ticket-recipient-access";
 import { planMessageNotifications } from "./ticket-notification.policy";
@@ -90,6 +100,10 @@ export interface TicketCommandDeps {
   config: TicketConfigReader;
   scheduler: SchedulerLoader;
   notifier: TicketNotifier;
+  // Tín hiệu realtime cho người đang mở trang chi tiết (không bắt buộc: test dựng deps tay có thể bỏ qua).
+  realtime?: TicketRealtime;
+  // Lưu nội dung ẩn (mật khẩu...) người dùng gõ bằng "/" trong trao đổi / bổ sung thông tin.
+  secrets: TicketSecretStore;
   customers: TicketCustomerResolver;
   nextCode: (now: Date) => Promise<string>;
   now: () => Date;
@@ -105,6 +119,8 @@ export function createDefaultTicketDeps(): TicketCommandDeps {
     config: new MongooseTicketConfigReader(),
     scheduler: new MongooseSchedulerLoader(),
     notifier: new NotificationServiceTicketNotifier(),
+    realtime: new SocketIoTicketRealtime(new TicketWatchService()),
+    secrets: new TicketSecretRepository(),
     customers: new MongooseTicketCustomerResolver(),
     nextCode: nextTicketCode,
     now: () => new Date()
@@ -127,6 +143,8 @@ interface ExecuteOptions {
 }
 
 const MAX_CONFLICT_ATTEMPTS = 3;
+
+const newSecretId = () => String(new mongoose.Types.ObjectId());
 
 function assertCanActAsHandler(ticket: TicketEntity, actor: TicketActor): void {
   if (!canActAsHandler(ticket.getProps(), actor)) {
@@ -396,11 +414,14 @@ export class TicketCommandService {
       // Nội dung người tạo nhập để đáp lại yêu cầu (mô tả rõ hơn, mã khoản vay...): lưu thành tin nhắn trong
       // phần trao đổi để nhóm xử lý đọc ngay tại ticket.
       note?: string;
+      // Nội dung ẩn gõ bằng "/" trong `note` (xem ticket-secrets.ts)
+      secrets?: unknown;
     },
     files: UploadedTicketFile[] = [],
     expectedVersion?: number
   ) {
-    const note = (input.note ?? "").trim();
+    const prepared = prepareSecrets((input.note ?? "").trim(), input.secrets, newSecretId);
+    const note = prepared.text;
     let isSensitive: (kind: string) => boolean = (kind) => DEFAULT_SENSITIVE_KINDS.includes(kind);
     return this.execute(
       ticketId,
@@ -454,11 +475,17 @@ export class TicketCommandService {
       { expectedVersion },
       async (saved) => {
         if (note) {
-          await this.deps.messages.create({
+          const messageId = await this.deps.messages.create({
             ticketId: saved.id,
             authorId: actor.employeeId,
             body: note,
             mentionIds: []
+          });
+          await this.deps.secrets.createMany({
+            ticketId: saved.id,
+            messageId,
+            authorId: actor.employeeId,
+            secrets: prepared.secrets
           });
         }
         await this.deps.attachments.createMany(
@@ -689,6 +716,25 @@ export class TicketCommandService {
     );
   }
 
+  // ---- nội dung ẩn trong ô ghi chú -------------------------------------------------------------
+
+  // Lưu (mã hoá) nội dung ẩn người dùng gõ trong ô ghi chú của một thao tác (hoàn thành, đóng, huỷ, tạm hoãn...). Controller đã đổi
+  // khoá tạm trong văn bản thành mã thật (prepareSecrets) và gọi hàm này SAU KHI thao tác thành công. Chỉ người mở được ticket mới lưu được.
+  async saveNoteSecrets(
+    actor: TicketActor,
+    ticketId: string,
+    secrets: Array<{ id: string; label: string; value: string }>
+  ): Promise<void> {
+    if (!secrets.length) return;
+    await this.load(ticketId, actor, true);
+    await this.deps.secrets.createMany({
+      ticketId,
+      messageId: null,
+      authorId: actor.employeeId,
+      secrets
+    });
+  }
+
   // ---- trao đổi ------------------------------------------------------------------------------
 
   // Tin nhắn không sửa ticket (không tăng version) — trừ khi người nhóm xử lý nhắn: khi đó tính là hoạt
@@ -696,10 +742,12 @@ export class TicketCommandService {
   async addMessage(
     actor: TicketActor,
     ticketId: string,
-    input: { body?: string; mentionIds?: string[] },
+    input: { body?: string; mentionIds?: string[]; secrets?: unknown },
     files: UploadedTicketFile[] = []
   ): Promise<{ messageId: string }> {
-    const body = (input.body ?? "").trim();
+    // Nội dung ẩn (gõ bằng "/"): văn bản lưu chỉ còn dấu hiệu, giá trị thật được mã hoá riêng (ticket-secrets.ts)
+    const prepared = prepareSecrets((input.body ?? "").trim(), input.secrets, newSecretId);
+    const body = prepared.text;
     if (!body && !files.length) {
       throw new ArgumentInvalidException("Tin nhắn phải có nội dung hoặc file đính kèm");
     }
@@ -726,6 +774,12 @@ export class TicketCommandService {
         body,
         mentionIds
       });
+      await this.deps.secrets.createMany({
+        ticketId: savedId,
+        messageId,
+        authorId: actor.employeeId,
+        secrets: prepared.secrets
+      });
       await this.deps.attachments.createMany(
         files.map((file) => ({
           ticketId: savedId,
@@ -751,9 +805,22 @@ export class TicketCommandService {
       );
     } else {
       await runInTransaction(() => persistMessage(ticket.id));
+      // Nhánh nhóm xử lý ở trên đã báo "updated" qua execute(); người ngoài nhóm nhắn thì không đổi ticket nên báo riêng.
+      this.deps.realtime?.publishChanged({
+        ticketId: ticket.id,
+        kind: "message",
+        actorId: actor.employeeId
+      });
     }
 
-    await this.notifyMessage(ticket.id, props, actor.employeeId, body, mentionIds);
+    // Thông báo (lưu DB + push FCM) chỉ nhận văn bản đã che dấu hiệu nội dung ẩn
+    await this.notifyMessage(
+      ticket.id,
+      props,
+      actor.employeeId,
+      maskSecretMarkers(body),
+      mentionIds
+    );
     return { messageId };
   }
 
@@ -919,6 +986,12 @@ export class TicketCommandService {
           return result;
         });
         this.publish(ticket);
+        this.deps.realtime?.publishChanged({
+          ticketId: saved.id,
+          kind: "updated",
+          version: saved.version,
+          actorId: actor.employeeId
+        });
         return { id: saved.id, code: saved.code, status: saved.status, version: saved.version };
       } catch (error) {
         if (!isConcurrencyConflict(error)) throw error;

@@ -107,3 +107,45 @@ export function submissionStatus(input: {
   if (input.now.getTime() >= dayRange(input.dateKey).to.getTime()) return "missing";
   return input.now.getTime() > deadline.getTime() ? "overdue" : "pending";
 }
+
+export type TrendGranularity = "week" | "month";
+
+export interface PeriodBucket {
+  key: string; // ngày đầu kỳ YYYY-MM-DD
+  label: string;
+  fromKey: string;
+  toKey: string; // ngày cuối kỳ (kỳ cuối = ngày đang xem)
+  range: DateRange;
+}
+
+/** `count` kỳ liên tiếp (tuần bắt đầu thứ Hai / tháng dương lịch), kỳ cuối là kỳ chứa `toKey` và tính tới hết ngày đó. */
+export function bucketsEndingAt(
+  toKey: string,
+  granularity: TrendGranularity,
+  count: number
+): PeriodBucket[] {
+  const unit = granularity === "week" ? "isoWeek" : "month";
+  const end = startOf(toKey);
+  const buckets: PeriodBucket[] = [];
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const start = end
+      .clone()
+      .subtract(i, granularity === "week" ? "week" : "month")
+      .startOf(unit);
+    const naturalEnd = start.clone().endOf(unit).startOf("day");
+    const last = naturalEnd.isAfter(end) ? end : naturalEnd;
+    const fromKey = start.format("YYYY-MM-DD");
+    const lastKey = last.format("YYYY-MM-DD");
+    buckets.push({
+      key: fromKey,
+      label:
+        granularity === "week"
+          ? `${start.format("DD/MM")}–${last.format("DD/MM")}`
+          : start.format("MM/YYYY"),
+      fromKey,
+      toKey: lastKey,
+      range: { from: start.toDate(), to: startOf(lastKey).add(1, "day").toDate() }
+    });
+  }
+  return buckets;
+}

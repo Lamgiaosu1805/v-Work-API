@@ -5,11 +5,16 @@
 // unavailable: chưa có dữ liệu nguồn (hiển thị "chưa có dữ liệu").
 export type MetricSource = "auto" | "manual" | "derived" | "unavailable";
 
+// sum: cộng dồn theo kỳ (mặc định); ratio: tử số / mẫu số (cộng dồn từng phần rồi mới chia);
+// snapshot: số dư tại cuối ngày đang xem (không cộng dồn theo kỳ)
+export type MetricAggregation = "sum" | "ratio" | "snapshot";
+
 export interface MetricDef {
   code: string;
   name: string;
   unit: string;
   source: MetricSource;
+  aggregation?: MetricAggregation;
   note?: string;
 }
 
@@ -19,7 +24,30 @@ export const METRICS = {
     name: "Đầu tư",
     unit: "VND",
     source: "auto",
-    note: "Tiền vào (gross) các khoản đầu tư mới, trừ khoản bị huỷ"
+    note: "Tiền vào: gốc các khoản đầu tư mới, trừ khoản bị huỷ và khoản sinh ra do tái tục"
+  },
+  // Tiền ra / tăng net / AUM — dữ liệu tất toán đồng bộ từ TIKLUY (docs/CRM-LEADERSHIP-DASHBOARD-AI-PLAN.md mục 3)
+  investment_outflow: {
+    code: "investment_outflow",
+    name: "Tiền ra",
+    unit: "VND",
+    source: "auto",
+    note: "Gốc các khoản tất toán đúng hạn + trước hạn, không tính tái tục; trừ vào Sale đang giữ khách lúc tất toán"
+  },
+  net_growth: {
+    code: "net_growth",
+    name: "Tăng net",
+    unit: "VND",
+    source: "auto",
+    note: "Tiền vào − tiền ra (theo gốc)"
+  },
+  aum: {
+    code: "aum",
+    name: "Số dư đang đầu tư",
+    unit: "VND",
+    source: "auto",
+    aggregation: "snapshot",
+    note: "Gốc các khoản đang đầu tư cuối ngày, theo Sale đang giữ khách"
   },
   cif_new: {
     code: "cif_new",
@@ -67,14 +95,16 @@ export const METRICS = {
     code: "renewal_rate",
     name: "Tỷ lệ tái tục đầu tư",
     unit: "%",
-    source: "unavailable",
-    note: "Chờ TIKLUY gửi sự kiện đáo hạn/tái tục"
+    source: "auto",
+    aggregation: "ratio",
+    note: "Gốc được tái tục / gốc các khoản đáo hạn trong kỳ (tất toán đồng bộ từ TIKLUY)"
   },
   compliance: {
     code: "compliance",
     name: "Tính tuân thủ (nộp báo cáo đúng hạn)",
     unit: "%",
     source: "derived",
+    aggregation: "ratio",
     note: "Số ngày nộp kế hoạch và kết quả đúng hạn / số ngày phải báo cáo"
   }
 } satisfies Record<string, MetricDef>;
@@ -83,6 +113,9 @@ export type MetricCode = keyof typeof METRICS;
 
 export const METRIC_ORDER: MetricCode[] = [
   "investment_amount",
+  "investment_outflow",
+  "net_growth",
+  "aum",
   "cif_new",
   "cif_first_investment",
   "telesale_call",
@@ -97,6 +130,10 @@ export const METRIC_ORDER: MetricCode[] = [
 ];
 
 export const AUTO_METRIC_CODES = METRIC_ORDER.filter((code) => METRICS[code].source === "auto");
+
+export function aggregationOf(code: MetricCode): MetricAggregation {
+  return (METRICS[code] as MetricDef).aggregation ?? "sum";
+}
 
 export type KpiTemplateCode = "TTKD" | "PRIORITY";
 
@@ -152,9 +189,17 @@ export function manualMetrics(code: KpiTemplateCode): MetricCode[] {
   return templateMetrics(code).filter((metric) => METRICS[metric].source === "manual");
 }
 
-/** Chỉ tiêu Sale đặt mục tiêu trong kế hoạch ngày (có số đếm được: tự động + nhập tay). */
+/** Chỉ tiêu Sale đặt mục tiêu trong kế hoạch ngày (số cộng dồn được: tự động + nhập tay, không phải tỷ lệ). */
 export function plannableMetrics(code: KpiTemplateCode): MetricCode[] {
-  return templateMetrics(code).filter((metric) =>
-    ["auto", "manual"].includes(METRICS[metric].source)
+  return templateMetrics(code).filter(
+    (metric) =>
+      ["auto", "manual"].includes(METRICS[metric].source) && aggregationOf(metric) === "sum"
+  );
+}
+
+/** Chỉ tiêu nhận KH năm trong Quyết định giao KPI (gồm cả tỷ lệ: tái tục 70%, tuân thủ 100%). */
+export function targetMetrics(code: KpiTemplateCode): MetricCode[] {
+  return templateMetrics(code).filter(
+    (metric) => (METRICS[metric] as MetricDef).source !== "unavailable"
   );
 }

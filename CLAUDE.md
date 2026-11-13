@@ -348,6 +348,7 @@ const memberships = await UserDepartmentPositionModel.find({ user: userInfo._id 
 | `weeklyReportJob.js` | Thứ 6 8:00 + 17:00 | Nhắc nộp + đánh dấu missing báo cáo tuần |
 | `handbookAssistantJob.js` | Mỗi phút + 02:00 | Trợ lý Nội quy: chốt câu trả lời treo + hoàn lượt (mỗi phút); xoá hẳn hội thoại quá `HANDBOOK_RETENTION_DAYS` (02:00) |
 | `dailyReportJob.js` | 08:45 + 16:30, T2–T7 | Báo cáo ngày kinh doanh: push nhắc Sale có kế hoạch KPI chưa nộp kế hoạch / kết quả (bỏ qua ngày lễ, nghỉ cả ngày có đơn). Xem `docs/CRM-DAILY-REPORT-FLOWS.md` |
+| `investmentClosureSyncJob.js` | 01:30 hằng đêm | Đồng bộ tất toán / tái tục từ danh mục đầu tư TIKLUY (tiền ra, tăng net, AUM, tỷ lệ tái tục) — không đổi `status`/hoa hồng. Chạy bù: `scripts/syncInvestmentClosures.ts`. Xem `docs/CRM-LEADERSHIP-DASHBOARD-AI-PLAN.md` mục 8 |
 | `customerCareJob.js` | Mỗi phút + 00:05 | Quy định 183A: quét SLA chăm sóc khách (cảnh báo/thu hồi) + phân khách từ kho chung; 00:05 thu hồi khách của Sale nghỉ việc/bị khoá. Xem `docs/CRM-CUSTOMER-CARE-SLA-PLAN.md` |
 | `ticketSweepJob.js` | Mỗi 5 phút | Ticket hỗ trợ: tự đóng ticket quá hạn (đã xử lý không xác nhận / chờ bổ sung không phản hồi) + nhắc 1 lần. Ticket Khẩn / Cao chưa ai nhận đã vàng thì nhắc người phụ trách 1 lần mỗi mốc `alert_at`; việc bôi vàng không nằm ở cron (chỉ là mốc `alert_at`). Khoá Redis có tiền tố môi trường |
 
@@ -435,7 +436,7 @@ Các trường hợp **bắt buộc** dùng transaction:
 | `/handbook-assistant` | modules/handbook-assistant | `authenticate` + `handbook_assistant.use` | Trợ lý Nội quy (lịch sử, trích dẫn, hạn mức; hỏi AI qua socket `handbook:*`) |
 | `/leave` | modules/leave/interface | `authenticate` (chỉ trả dữ liệu của chính người gọi) | Màn "Phép của tôi": `GET /leave/my-overview?year=` (số dư hiện tại, đã dùng/đã cộng theo năm, phép đang chờ duyệt, điều kiện hợp đồng, ngày cộng kế tiếp), `GET /leave/my-ledger?year=&type=all\|in\|out&page=&limit=` (lịch sử sổ phép mới → cũ, số dư luỹ kế tính từ toàn bộ lịch sử, kèm đơn liên quan; tổ hợp ở `workflows/get-my-leave.workflow.ts`) |
 | `/tickets` | modules/ticket/interface | `authenticate` + `requirePermission(ticket.*)` | Ticket hỗ trợ nội bộ (+ `/tickets/config/*` quyền `ticket.config`) |
-| `/daily-reports` | module `daily-report` | `daily_report.submit` / `daily_report.view` | Báo cáo ngày kinh doanh: `/me`, `/me/plan`, `/me/result`, `/summary` (theo cây TTKD) |
+| `/daily-reports` | module `daily-report` | `daily_report.submit` / `daily_report.view` | Báo cáo ngày kinh doanh: `/me`, `/me/plan`, `/me/result`, `/summary` (theo cây TTKD), `/trend` (xu hướng 1 chỉ tiêu theo tuần/tháng) |
 
 ---
 
@@ -447,6 +448,7 @@ chụp lúc phát sinh qua `src/helpers/kpiAttribution.ts`:
 - `customer.kpi_cif` — CIF ghi cho Sale/TTKD/kênh nào (mã Sale, yêu cầu nhận khách được duyệt, QL gán có xác nhận, đại lý → Sale phụ trách đại lý).
 - `investment.kpi_attribution` — doanh số mọi kỳ hạn ghi cho Sale đang giữ khách lúc tạo khoản (khác `commission.sale_id`).
 - `agent.manager_sale_id` — Sale phụ trách đại lý/CTV.
+- `investment.closure_attribution` — tiền ra (tất toán) ghi cho Sale/TTKD đang giữ khách lúc đồng bộ tất toán; `renewal_of` đánh dấu khoản sinh ra do tái tục (không tính tiền vào).
 
 Thêm điểm gán Sale mới cho khách/khoản đầu tư thì phải ghi nhận theo quy tắc ở `docs/CRM-DAILY-REPORT-FLOWS.md` mục 4.
 

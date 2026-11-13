@@ -7,6 +7,7 @@ import {
   saveMyDailyReportPlan,
   submitMyDailyReportResult
 } from "../../../workflows/daily-report-board.workflow";
+import { getDailyReportTrend } from "../../../workflows/daily-report-trend.workflow";
 
 const dateOf = (req: Request, now: Date) =>
   req.query.date ? parseDateKey(String(req.query.date)) : toDateKey(now);
@@ -49,6 +50,19 @@ export const dailyReportHttpController = {
       }
     });
     return res.status(200).json({ message: "Đã nộp kết quả ngày", data });
+  },
+
+  async getTrend(req: Request, res: Response) {
+    const now = new Date();
+    const data = await getDailyReportTrend({
+      ability: req.permissionAbility!,
+      metric: String(req.query.metric || "investment_amount"),
+      granularity: (req.query.granularity === "month" ? "month" : "week") as "week" | "month",
+      toKey: req.query.to ? parseDateKey(String(req.query.to)) : toDateKey(now),
+      periods: req.query.periods ? Number(req.query.periods) : undefined,
+      appCode: appCodeOf(req)
+    });
+    return res.status(200).json({ message: "OK", data });
   },
 
   async getSummary(req: Request, res: Response) {

@@ -59,6 +59,10 @@
 2. `endDate` với khoản tất toán trước hạn là ngày tất toán thật hay ngày đáo hạn theo hợp đồng?
 3. `formOfMaturity` có những giá trị nào (tự tái tục gốc / gốc + lãi / chuyển về ví)? Khoản tái tục có tạo hợp đồng mới không?
 4. `fromDate`/`toDate` lọc theo ngày nào; API có chịu được ~vài nghìn lượt gọi mỗi đêm không (hoặc có API lấy theo khoảng ngày cho mọi khách)?
+5. Khoản mở tại quầy (mã `VNFM…`): gửi kèm **tài khoản quầy / chi nhánh** đã mở khoản (ở `/investments/upsert` và danh mục) —
+   quy tắc ghi nhận: nhân viên dùng tài khoản quầy của chi nhánh nào thì tính cho chi nhánh đó (mục 8.4).
+6. Vì sao một số khoản không được đẩy sang `/investments/upsert`: khoản mở tại quầy `VNFM…`, một số khoản sinh ra do tự tái tục?
+7. VÍ VÀNG (không kỳ hạn, mã `GWV…`) chưa từng đẩy sang vWork — có cần tính vào tiền vào / tiền ra / số dư không?
 
 ## 4. Trợ lý AI kinh doanh cho BLĐ
 
@@ -125,7 +129,9 @@ A + B làm trên nhánh mới tách từ `feat/crm-daily-report` (PR #179/#181/#
 | Ánh xạ dòng TIKLUY | `src/workflows/investment-closure/holding-mapper.ts` | Khớp theo `id` của TIKLUY (= `external_investment_id`; `investmentCode` chỉ là mã hiển thị VNF…); ngày dạng `HH:mm DD/MM/YYYY`; status 1 tất toán trước hạn / 2 đã tất toán; trước hạn: `endDate` (ngày đáo hạn hợp đồng) nếu đã qua, chưa tới thì lấy lúc phát hiện; tái tục = đáo hạn + `formOfMaturity` "Chuyển gốc (và lãi) sang kỳ hạn mới" / "Tái tục…"; khoản tái tục = khoản mới cùng khách trong ±2 ngày, tiền ≥ 99% gốc, ưu tiên tiền sát gốc + lãi nhất |
 | Đồng bộ | `src/workflows/investment-closure-sync.workflow.ts` | Chỉ hỏi khách còn khoản chưa ghi nhận tất toán; **không đổi `status` / hoa hồng**; chạy lại không ghi trùng; chuỗi tái tục đã đáo hạn hết (chạy bù) vẫn nối đúng từng khoản |
 | Cron | `src/jobs/investmentClosureSyncJob.js` | 01:30 hằng đêm, khoá Redis có tiền tố môi trường, app `tikluy` |
-| Chạy bù / chạy tay | `scripts/syncInvestmentClosures.ts --app=tikluy [--dry-run] [--limit=N] [--concurrency=3]` | Chạy `--dry-run` trước (vẫn gọi TIKLUY, không ghi DB) |
+| Chạy bù / chạy tay | `scripts/syncInvestmentClosures.ts --app=tikluy [--dry-run] [--limit=N] [--concurrency=3] [--all-customers] [--no-backfill]` | Chạy `--dry-run` trước (vẫn gọi TIKLUY, không ghi DB, in danh sách khoản sẽ tạo bù). `--all-customers`: hỏi TIKLUY cho mọi khách (chạy bù 1 lần) |
+| Tạo bù khoản TIKLUY thiếu | `backfillMissingInvestments` trong workflow đồng bộ; `mapHoldingInvestment` / `parseHoldingTerm` trong mapper | Dòng danh mục có kỳ hạn mà vWork không có (TIKLUY không đẩy sang) → tạo khoản `source: "holding_sync"`: **không hoa hồng** (kể cả khi khách được gán Sale về sau — 3 luồng tính HH bù ở `CustomerController` / `CustomerClaimRequestController` bỏ qua), KPI ghi cho Sale đang giữ khách (như upsert), mốc = ngày đầu tư; khoản sinh ra do tái tục nối `renewal_of` (không tính tiền vào); tất toán ghi ngay trong lượt. Bỏ qua: không kỳ hạn (VÍ VÀNG), thiếu dữ liệu, mới bắt đầu < 3 ngày (chờ TIKLUY đẩy sang để có hoa hồng). Kỳ hạn "N ngày" lưu `term_type: week`, `term_value` = số ngày như upsert |
+| Mã hiển thị | `investment.investment_code` | Ghi khi đồng bộ (khoản đang mở + khoản tạo bù); `VNFM…` = mở tại quầy (`isCounterCode`) |
 | Tất toán trước hạn không rõ ngày | `closure.date_unknown`; sửa dữ liệu lần đồng bộ đầu: `scripts/markUnknownEarlyTerminations.ts --app=tikluy --synced-on=YYYY-MM-DD [--dry-run]` | TIKLUY không trả ngày tất toán trước hạn. Khoản phát hiện ở lần đồng bộ ĐẦU mà hợp đồng chưa đáo hạn → không rõ ngày: không tính tiền ra theo kỳ, vẫn trừ số dư. Từ lần sau (đã từng thấy còn mở) → ngày phát hiện là ngày thật (sai số ≤ 1 ngày) |
 | Chỉ tiêu mới | `src/modules/daily-report/domain/kpi-metrics.ts` | `investment_outflow` (Tiền ra), `net_growth` (Tăng net = vào − ra trên cùng Sale/TTKD), `aum` (Số dư đang đầu tư cuối ngày, theo Sale đang giữ khách), `renewal_rate` (tự động, dạng tỷ lệ). Tiền vào bỏ khoản có `renewal_of` |
 | Tỷ lệ | `daily-report-board.workflow.ts` | Ô tỷ lệ trả `rate_day/rate_month/rate_year`, `plan_rate`, `pct_* = tỷ lệ / KH`; KH tỷ lệ trong file kế hoạch nhập `70` hay `0.7` đều hiểu là 70% |
@@ -137,9 +143,22 @@ A + B làm trên nhánh mới tách từ `feat/crm-daily-report` (PR #179/#181/#
 xem theo phạm vi Sale, tổng bỏ sót khách chưa phân bổ. Nay xét trực tiếp quy tắc quyền (có quy tắc cho phép không
 điều kiện, không có quy tắc chặn).
 
-Test: `__tests__/investmentClosureTrend.test.ts` (ánh xạ TIKLUY, kỳ tuần/tháng, đồng bộ + chạy thử + chạy lại + lỗi 1
+Test: `__tests__/investmentHoldingBackfill.test.ts` (tạo bù: kỳ hạn, không hoa hồng, nối tái tục cùng lượt và với
+khoản đã tất toán từ trước, tất toán ngay trong lượt, tiền vào / ra / số dư sau tạo bù, chạy lại không trùng,
+`--all-customers`, trùng mã khi TIKLUY vừa đẩy sang), `__tests__/investmentClosureTrend.test.ts` (ánh xạ TIKLUY, kỳ tuần/tháng, đồng bộ + chạy thử + chạy lại + lỗi 1
 khách, chuỗi tái tục, tiền ra / tăng net / AUM / tái tục trên bảng tổng hợp, xu hướng theo tháng/tuần, phạm vi
 quản lý, quyền RBAC 2 role).
+
+### 8.4 Khoản TIKLUY không đẩy sang vWork + khoản mở tại quầy (đối chiếu live 13/11/2026)
+
+- Danh mục TIKLUY có những khoản vWork chưa từng nhận: chuỗi khoản **mở tại quầy** (mã `VNFM…`, có cả dạng có mã chi
+  nhánh như `VNFMHP…`), một số khoản **tự tái tục** kỳ hạn ngắn, một vài khoản mới lẻ. Ảnh hưởng: thiếu tiền vào / tiền ra
+  của các khoản đó và số dư của khoản còn mở → đồng bộ tạo bù (mục 8.1).
+- **VÍ VÀNG** (không kỳ hạn, mã `GWV…`) chưa từng có trên vWork — hiện KHÔNG tạo bù, chờ chốt có tính hay không (mục 3.3 câu 7).
+- **Quy tắc khoản mở tại quầy (đã chốt):** nhân viên dùng tài khoản quầy của chi nhánh nào thì ghi nhận cho chi nhánh đó.
+  vWork chưa có dữ liệu tài khoản quầy (TIKLUY không gửi; không có tài khoản quầy nào trên vWork) → hiện khoản `VNFM…` vẫn
+  ghi theo Sale đang giữ khách. Khi TIKLUY gửi tài khoản quầy / chi nhánh (mục 3.3 câu 5): ánh xạ tài khoản quầy → TTKD,
+  ghi `kpi_attribution` kênh quầy cho TTKD đó (không tính cho Sale), áp lại cho các khoản `VNFM…` đã có.
 
 ### 8.2 Web — `/bang-dieu-hanh` "Bảng điều hành kinh doanh" (menu Báo cáo & Phân tích, quyền `daily_report.view`)
 

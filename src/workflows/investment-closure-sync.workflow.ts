@@ -8,6 +8,7 @@ import {
   ClosureRecord,
   HoldingRow,
   findRenewalTarget,
+  holdingKeys,
   mapHoldingClosure
 } from "./investment-closure/holding-mapper";
 
@@ -101,10 +102,10 @@ export async function syncInvestmentClosures(
       const unmatched: string[] = [];
       rows.forEach((row) => {
         const closure = mapHoldingClosure(row, now);
-        const code = String(row.investmentCode ?? "");
-        const inv = byCode.get(code);
+        const keys = holdingKeys(row);
+        const inv = keys.map((key) => byCode.get(key)).find(Boolean);
         if (!inv) {
-          if (closure) unmatched.push(code);
+          if (closure) unmatched.push(...keys);
           return;
         }
         if (closure) closures.push({ inv, closure });
@@ -118,7 +119,14 @@ export async function syncInvestmentClosures(
           .select("external_investment_id")
           .lean()) as any[];
         const knownCodes = new Set(known.map((k) => String(k.external_investment_id)));
-        result.unknownCodes += unmatched.filter((code) => !knownCodes.has(code)).length;
+        const unknownRows = rows.filter((row) => {
+          const keys = holdingKeys(row);
+          return (
+            mapHoldingClosure(row, now) &&
+            !keys.some((key) => byCode.has(key) || knownCodes.has(key))
+          );
+        });
+        result.unknownCodes += unknownRows.length;
       }
 
       const ops: any[] = [];

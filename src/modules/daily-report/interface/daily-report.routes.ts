@@ -17,5 +17,7 @@ router.put("/me/result", authenticate, canSubmit, asyncHandler(c.submitResult));
 
 // Quản lý / lãnh đạo — bảng tổng hợp theo cây đơn vị, phạm vi theo data scope của daily_report.view
 router.get("/summary", authenticate, canView, asyncHandler(c.getSummary));
+// Xu hướng 1 chỉ tiêu theo tuần/tháng: metric, granularity=week|month, to=YYYY-MM-DD, periods
+router.get("/trend", authenticate, canView, asyncHandler(c.getTrend));
 
 export = router;

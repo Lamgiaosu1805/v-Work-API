@@ -579,3 +579,64 @@ describe("nội dung ẩn trong ô ghi chú của thao tác", () => {
     expect(((await TicketModel.findById(created.id).lean()) as any).status).toBe("in_progress");
   });
 });
+
+describe("nội dung ẩn trong tin nhắn: người được @", () => {
+  const VALUE = crypto.randomBytes(9).toString("hex");
+
+  const sendMessage = (who: Person, ticketId: string, payload: Record<string, unknown>) =>
+    as(who, request(app).post(`/tickets/${ticketId}/messages`)).field(
+      "payload",
+      JSON.stringify(payload)
+    );
+
+  it("chỉ người được @ trong CHÍNH tin chứa nội dung ẩn xem được; @ ở tin khác hoặc không @ thì không", async () => {
+    const created = await createTicket();
+    await post(itPerson, `/tickets/${created.id}/claim`).expect(200);
+    const other = await makePerson("other", EVERYONE);
+
+    // Tin 1: có nội dung ẩn, @ stranger. Tin 2: có nội dung ẩn, không @ ai.
+    await sendMessage(requester, created.id, {
+      body: "Pass VPN: ⟦s:k1⟧ nhờ bạn",
+      mentionIds: [stranger.employeeId],
+      secrets: [{ key: "k1", value: `${VALUE}-1` }]
+    }).expect(201);
+    await sendMessage(requester, created.id, {
+      body: "Mã OTP: ⟦s:k2⟧",
+      mentionIds: [],
+      secrets: [{ key: "k2", value: `${VALUE}-2` }]
+    }).expect(201);
+    // Tin 3: KHÔNG có nội dung ẩn, @ other (không liên quan tới hai tin trên)
+    await sendMessage(requester, created.id, {
+      body: "Bạn xem giúp nhé",
+      mentionIds: [other.employeeId]
+    }).expect(201);
+
+    const detail = await get(requester, `/tickets/${created.id}`).expect(200);
+    const [first, second] = detail.body.data.messages.map((m: any) => m.secrets[0]?.id);
+    const reveal = (who: Person, secretId: string) =>
+      post(who, `/tickets/${created.id}/secrets/${secretId}/reveal`);
+    const canReveal = async (who: Person) =>
+      (await get(who, `/tickets/${created.id}`).expect(200)).body.data.messages.map(
+        (m: any) => m.secrets[0]?.canReveal ?? null
+      );
+
+    // stranger: được @ ở tin 1 → xem tin 1; không @ ở tin 2 → không xem
+    expect(await canReveal(stranger)).toEqual([true, false, null]);
+    expect((await reveal(stranger, first).expect(200)).body.data.secret.value).toBe(`${VALUE}-1`);
+    await reveal(stranger, second).expect(403);
+
+    // other: chỉ được @ ở tin 3 (không có nội dung ẩn) → không xem được tin nào
+    expect(await canReveal(other)).toEqual([false, false, null]);
+    await reveal(other, first).expect(403);
+    await reveal(other, second).expect(403);
+
+    // Ba người mặc định vẫn xem được cả hai; IT là chủ trì nên cũng xem được
+    expect(await canReveal(requester)).toEqual([true, true, null]);
+    expect(await canReveal(itPerson)).toEqual([true, true, null]);
+    await reveal(itPerson, second).expect(200);
+
+    // Giá trị thật không lọt vào dữ liệu chi tiết của người được @
+    const asStranger = await get(stranger, `/tickets/${created.id}`).expect(200);
+    expect(JSON.stringify(asStranger.body.data)).not.toContain(VALUE);
+  });
+});

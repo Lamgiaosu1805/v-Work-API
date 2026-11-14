@@ -293,6 +293,10 @@ export class TicketQueryService {
     });
 
     const sensitiveVisible = canViewSensitiveFiles(ticket, actor);
+    // Người được @ trong chính tin nhắn chứa nội dung ẩn cũng xem được nội dung đó (xem canViewSecrets) — tra theo mã tin nhắn
+    const mentionsByMessage = new Map<string, unknown[]>(
+      messages.map((message: any) => [String(message._id), message.mention_ids ?? []])
+    );
 
     // Lịch sử KHÔNG hiện từng tin nhắn của nhóm xử lý (nhật ký "message" vẫn được ghi để cảnh báo "im lặng" đếm lại, chỉ ẩn khỏi
     // hiển thị). Thay vào đó chỉ có MỘT dòng "mở phần trao đổi" ở thời điểm tin nhắn đầu tiên — của bất kỳ ai, kể cả người tạo —
@@ -391,7 +395,12 @@ export class TicketQueryService {
       secrets: secrets.map((secret: any) => ({
         id: String(secret._id),
         label: secret.label ?? "",
-        canReveal: canViewSecrets(ticket, actor, secret.author_id)
+        canReveal: canViewSecrets(
+          ticket,
+          actor,
+          secret.author_id,
+          mentionsByMessage.get(String(secret.message_id))
+        )
       })),
       messages: messages.map((message: any) => ({
         id: String(message._id),
@@ -407,7 +416,7 @@ export class TicketQueryService {
           .map((secret: any) => ({
             id: String(secret._id),
             label: secret.label ?? "",
-            canReveal: canViewSecrets(ticket, actor, secret.author_id)
+            canReveal: canViewSecrets(ticket, actor, secret.author_id, message.mention_ids)
           })),
         createdAt: message.createdAt
       })),
@@ -547,7 +556,17 @@ export class TicketQueryService {
       isDeleted: false
     }).lean()) as any;
     if (!secret) throw new NotFoundException("Nội dung ẩn không tồn tại");
-    if (!canViewSecrets(ticket, actor, secret.author_id)) {
+    // Người được @ trong chính tin nhắn chứa nội dung ẩn này cũng xem được (nội dung ẩn ở ô ghi chú thì không gắn tin nhắn nào)
+    const message = secret.message_id
+      ? ((await TicketMessageModel.findOne({
+          _id: secret.message_id,
+          ticket_id: ticket.id,
+          isDeleted: false
+        })
+          .select("mention_ids")
+          .lean()) as any)
+      : null;
+    if (!canViewSecrets(ticket, actor, secret.author_id, message?.mention_ids)) {
       throw new TicketForbiddenError("Bạn không có quyền xem nội dung này");
     }
 

@@ -1,6 +1,7 @@
 import {
   accessLevel,
   canActAsHandler,
+  canViewSecrets,
   canViewSensitiveFiles
 } from "../../../src/modules/ticket/domain/ticket-access";
 import { TicketActor } from "../../../src/modules/ticket/domain/types";
@@ -120,5 +121,79 @@ describe("canActAsHandler", () => {
     expect(canActAsHandler(ticket(), actor("boss", { canManage: true }))).toBe(true);
     expect(canActAsHandler(ticket(), actor("requester"))).toBe(false);
     expect(canActAsHandler(ticket(), actor("stranger"))).toBe(false);
+  });
+});
+
+describe("canViewSecrets (nội dung ẩn)", () => {
+  const AUTHOR = "author";
+  const t = ticket();
+
+  it("xem được: người gõ, người tạo ticket, người xử lý chính", () => {
+    expect(canViewSecrets(t, actor("author"), AUTHOR)).toBe(true);
+    expect(canViewSecrets(t, actor("requester"), AUTHOR)).toBe(true);
+    expect(canViewSecrets(t, actor("handler"), AUTHOR)).toBe(true);
+  });
+
+  it("xem được: người được @ trong chính tin nhắn chứa nội dung ẩn", () => {
+    expect(canViewSecrets(t, actor("tagged"), AUTHOR, ["tagged"])).toBe(true);
+    expect(canViewSecrets(t, actor("tagged"), AUTHOR, ["other", "tagged", "x"])).toBe(true);
+    // Mã ở dạng khác kiểu (ObjectId vs chuỗi) vẫn so khớp
+    expect(
+      canViewSecrets(t, actor("507f1f77bcf86cd799439011"), AUTHOR, [
+        { toString: () => "507f1f77bcf86cd799439011" }
+      ])
+    ).toBe(true);
+  });
+
+  it("KHÔNG xem được: không ở trong danh sách @ của tin đó", () => {
+    expect(canViewSecrets(t, actor("tagged"), AUTHOR, ["someoneElse"])).toBe(false);
+    expect(canViewSecrets(t, actor("tagged"), AUTHOR, [])).toBe(false);
+    expect(canViewSecrets(t, actor("tagged"), AUTHOR)).toBe(false);
+    // Danh sách @ của tin khác không đưa vào thì không có hiệu lực (nội dung ẩn ở ô ghi chú không có @)
+    expect(canViewSecrets(t, actor("tagged"), AUTHOR, undefined)).toBe(false);
+  });
+
+  it("KHÔNG xem được: người phối hợp, quyền nhạy cảm / quản lý / xem hạn chế / xem mọi ticket", () => {
+    expect(canViewSecrets(t, actor("collab"), AUTHOR)).toBe(false);
+    expect(canViewSecrets(t, actor("it", { canViewSensitive: true }), AUTHOR)).toBe(false);
+    expect(canViewSecrets(t, actor("boss", { canManage: true }), AUTHOR)).toBe(false);
+    expect(
+      canViewSecrets(t, actor("lead", { canViewRestricted: true, canViewAll: true }), AUTHOR)
+    ).toBe(false);
+    expect(canViewSecrets(t, actor("stranger"), AUTHOR)).toBe(false);
+  });
+
+  it("không phụ thuộc trạng thái: ticket đã đóng / huỷ vẫn xem được theo cùng quy tắc", () => {
+    ["closed", "cancelled", "resolved", "waiting_info", "on_hold"].forEach((status) => {
+      const finished = ticket({ status });
+      expect(canViewSecrets(finished, actor("requester"), AUTHOR)).toBe(true);
+      expect(canViewSecrets(finished, actor("handler"), AUTHOR)).toBe(true);
+      expect(canViewSecrets(finished, actor("tagged"), AUTHOR, ["tagged"])).toBe(true);
+      expect(canViewSecrets(finished, actor("it", { canViewSensitive: true }), AUTHOR)).toBe(false);
+    });
+  });
+
+  it("chưa có chủ trì: chỉ còn người gõ, người tạo và người được @; người được giao đích danh chưa nhận thì không", () => {
+    const unclaimed = ticket({
+      assignment: {
+        mode: "members",
+        departmentId: null,
+        memberIds: ["handler", "collab"],
+        assignedBy: null,
+        ownerId: null,
+        collaboratorIds: [],
+        claimedAt: null
+      }
+    });
+    expect(canViewSecrets(unclaimed, actor("requester"), AUTHOR)).toBe(true);
+    expect(canViewSecrets(unclaimed, actor("author"), AUTHOR)).toBe(true);
+    expect(canViewSecrets(unclaimed, actor("handler"), AUTHOR)).toBe(false);
+    expect(canViewSecrets(unclaimed, actor("collab"), AUTHOR)).toBe(false);
+  });
+
+  it("người gõ ẩn danh (không rõ tác giả) không làm lộ cho ai: authorId rỗng thì chỉ người tạo / chủ trì / được @", () => {
+    expect(canViewSecrets(t, actor("stranger"), null)).toBe(false);
+    expect(canViewSecrets(t, actor("stranger"), undefined)).toBe(false);
+    expect(canViewSecrets(t, actor("requester"), null)).toBe(true);
   });
 });

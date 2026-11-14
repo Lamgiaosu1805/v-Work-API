@@ -2708,6 +2708,107 @@ describe("nội dung ẩn trong trao đổi / bổ sung thông tin", () => {
     );
   });
 
+  it("người được @ trong CHÍNH tin nhắn chứa nội dung ẩn xem được; @ ở tin khác, hoặc không được @ thì không", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    // Tin 1: có nội dung ẩn, @ IT_C. Tin 2: có nội dung ẩn khác, @ STRANGER. Tin 3: không nội dung ẩn, @ IT_B.
+    await commands.addMessage(requester(), created.id, {
+      body: "Pass VPN: ⟦s:k1⟧ nhờ anh xem",
+      mentionIds: [IT_C],
+      secrets: [{ key: "k1", value: HIDDEN_VALUE }]
+    });
+    await commands.addMessage(requester(), created.id, {
+      body: "Mã OTP: ⟦s:k2⟧ nhờ bạn",
+      mentionIds: [STRANGER],
+      secrets: [{ key: "k2", value: `${HIDDEN_VALUE}-2` }]
+    });
+    await commands.addMessage(requester(), created.id, {
+      body: "Không có gì ẩn ở tin này",
+      mentionIds: [IT_B]
+    });
+
+    const asMentionedFirst = actor(IT_C, { canViewAll: true });
+    const asMentionedSecond = stranger();
+    const detailOf = async (who: TicketActor) => (await queries.getById(who, created.id)) as any;
+    const first = (await detailOf(requester())).messages[0].secrets[0].id as string;
+    const second = (await detailOf(requester())).messages[1].secrets[0].id as string;
+
+    // IT_C chỉ thấy tin 1; STRANGER chỉ thấy tin 2
+    const c = await detailOf(asMentionedFirst);
+    expect(c.messages[0].secrets[0].canReveal).toBe(true);
+    expect(c.messages[1].secrets[0].canReveal).toBe(false);
+    expect(c.secrets.map((item: any) => item.canReveal)).toEqual([true, false]);
+    expect((await queries.revealSecret(asMentionedFirst, created.id, first)).secret.value).toBe(
+      HIDDEN_VALUE
+    );
+    await expect(queries.revealSecret(asMentionedFirst, created.id, second)).rejects.toThrow(
+      TicketForbiddenError
+    );
+
+    const s = await detailOf(asMentionedSecond);
+    expect(s.messages[0].secrets[0].canReveal).toBe(false);
+    expect(s.messages[1].secrets[0].canReveal).toBe(true);
+    expect((await queries.revealSecret(asMentionedSecond, created.id, second)).secret.value).toBe(
+      `${HIDDEN_VALUE}-2`
+    );
+    await expect(queries.revealSecret(asMentionedSecond, created.id, first)).rejects.toThrow(
+      TicketForbiddenError
+    );
+
+    // IT_B chỉ được @ ở tin KHÔNG có nội dung ẩn → không xem được cả hai (dù có ticket.view_sensitive)
+    const b = await detailOf(itB());
+    expect(b.secrets.map((item: any) => item.canReveal)).toEqual([false, false]);
+  });
+
+  it("được @ nhưng không mở được ticket (ticket hạn chế) thì không xem được: @ không tự cấp quyền xem ticket", async () => {
+    const restricted = await createPlain(
+      {
+        title: "Đổi SĐT khách",
+        templateId: ids.templatePhone,
+        customFields: { new_phone: "0911111111" }
+      } as any,
+      requester()
+    );
+    await commands.addMessage(requester(), restricted.id, {
+      body: "Pass: ⟦s:k1⟧ nhờ bạn",
+      mentionIds: [STRANGER],
+      secrets: [{ key: "k1", value: HIDDEN_VALUE }]
+    });
+    const stored: any = await TicketSecretModel.findOne({ ticket_id: restricted.id }).lean();
+
+    // STRANGER được @ trong chính tin đó nhưng không thuộc nhóm liên quan của ticket hạn chế → không mở được ticket
+    await expect(queries.getById(stranger(), restricted.id)).rejects.toThrow(TicketNotFoundError);
+    await expect(
+      queries.revealSecret(stranger(), restricted.id, String(stored._id))
+    ).rejects.toThrow(TicketNotFoundError);
+    // Người tạo vẫn xem được bình thường
+    expect(
+      (await queries.revealSecret(requester(), restricted.id, String(stored._id))).secret.value
+    ).toBe(HIDDEN_VALUE);
+  });
+
+  it("nội dung ẩn ở ô ghi chú của thao tác không có người được @: người được @ ở tin trao đổi không xem được", async () => {
+    const created = await createPlain();
+    await commands.claim(itA(), created.id);
+    await commands.addMessage(requester(), created.id, {
+      body: "Nhờ bạn xem giúp",
+      mentionIds: [STRANGER]
+    });
+    // Ghi chú kết quả có nội dung ẩn (qua controller sẽ gọi saveNoteSecrets) — dựng thẳng bản ghi không gắn tin nhắn nào
+    await commands.saveNoteSecrets(itA(), created.id, [
+      { id: String(new mongoose.Types.ObjectId()), label: "", value: HIDDEN_VALUE }
+    ]);
+    const stored: any = await TicketSecretModel.findOne({ ticket_id: created.id }).lean();
+    expect(stored.message_id).toBeNull();
+
+    await expect(queries.revealSecret(stranger(), created.id, String(stored._id))).rejects.toThrow(
+      TicketForbiddenError
+    );
+    expect((await queries.revealSecret(itA(), created.id, String(stored._id))).secret.value).toBe(
+      HIDDEN_VALUE
+    );
+  });
+
   it("ticket đã đóng: người tạo và chủ trì vẫn xem lại được (quy tắc riêng không phụ thuộc trạng thái)", async () => {
     const created = await createPlain();
     await commands.claim(itA(), created.id);

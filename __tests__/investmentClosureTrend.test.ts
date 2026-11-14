@@ -274,6 +274,12 @@ describe("đồng bộ tất toán", () => {
       renewed: 1,
       renewalLinks: 1,
       unknownCodes: 1,
+      // ZZ thiếu ngày bắt đầu / kỳ hạn → không tạo bù được, vẫn là mã lạ
+      backfilled: 0,
+      backfillRenewals: 0,
+      skippedNoTerm: 1,
+      skippedRecent: 0,
+      backfillRows: [],
       errors: []
     });
 

@@ -1955,6 +1955,8 @@ const CustomerController = {
         customer_id: customer._id,
         "commission.sale_id": null,
         status: { $nin: ["cancelled", "early_terminated"] },
+        // Khoản tạo bù từ danh mục TIKLUY (TIKLUY không đẩy sang) không có hoa hồng
+        source: { $ne: "holding_sync" },
         isDeleted: false
       }).session(session);
 
@@ -2130,6 +2132,8 @@ const CustomerController = {
           customer_id: customer._id,
           "commission.sale_id": null,
           status: { $nin: ["cancelled", "early_terminated"] },
+          // Khoản tạo bù từ danh mục TIKLUY (TIKLUY không đẩy sang) không có hoa hồng
+          source: { $ne: "holding_sync" },
           isDeleted: false
         }).session(session);
 

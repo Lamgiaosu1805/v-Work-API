@@ -31,7 +31,8 @@ async function runInvestmentClosureSync(now = new Date()) {
       const result = await syncInvestmentClosures({ appCode, now });
       console.log(
         `[Investment closure] ${appCode}: ${result.synced}/${result.customers} khách, tất toán ${result.closed}, ` +
-          `tái tục ${result.renewed} (nối ${result.renewalLinks}), mã lạ ${result.unknownCodes}, lỗi ${result.errors.length}`
+          `tái tục ${result.renewed} (nối ${result.renewalLinks}), mã lạ ${result.unknownCodes}, ` +
+          `tạo bù ${result.backfilled} (tái tục ${result.backfillRenewals}), lỗi ${result.errors.length}`
       );
     }
   });

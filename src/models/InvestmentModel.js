@@ -91,6 +91,11 @@ const InvestmentSchema = new mongoose.Schema(
         // Khoản mới sinh ra do tái tục khoản cũ → KHÔNG tính tiền vào (Q1)
         renewal_of: { type: mongoose.Schema.Types.ObjectId, ref: "investment", default: null },
         holding_synced_at: { type: Date, default: null },
+        // Mã hiển thị TIKLUY (VNF…; VNFM… = mở tại quầy) — ghi khi đồng bộ danh mục, external_investment_id là `id` UUID
+        investment_code: { type: String, default: null },
+        // "holding_sync" = tạo bù từ danh mục TIKLUY vì TIKLUY không đẩy sang: KHÔNG có hoa hồng, kể cả khi khách
+        // được gán Sale về sau (các luồng tính HH bù bỏ qua). null = TIKLUY đẩy qua /investments/upsert, bulk-sync
+        source: { type: String, enum: ["holding_sync"], default: null },
         ...BaseSchema.obj,
     },
     {

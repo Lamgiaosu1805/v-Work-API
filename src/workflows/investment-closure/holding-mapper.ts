@@ -26,7 +26,10 @@ export const HOLDING_STATUS = { ACTIVE: 0, EARLY_TERMINATED: 1, MATURED: 2 } as 
 export interface HoldingRow {
   id?: string | null;
   investmentCode?: string | number | null;
+  investmentHoldingProduct?: string | null;
   investAmount?: number | string | null;
+  interestRatePeriod?: string | null;
+  interestRate?: number | string | null;
   startDate?: string | null;
   endDate?: string | null;
   status?: number | string | null;
@@ -131,4 +134,66 @@ export function findRenewalTarget<T extends RenewalCandidate>(
   );
   matches.sort((a, b) => a.amount - b.amount || gap(a) - gap(b));
   return matches[0] ?? null;
+}
+
+/** Kỳ hạn TIKLUY "3 tháng" / "7 ngày" → kỳ hạn vWork (`week` lưu số NGÀY, như /investments/upsert); "Không kỳ hạn" → null. */
+export function parseHoldingTerm(
+  period: unknown
+): { term_type: "week" | "month"; term_value: number } | null {
+  if (typeof period !== "string") return null;
+  const match = unaccent(period)
+    .trim()
+    .match(/^(\d+)\s*(thang|ngay|tuan)$/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!(value > 0)) return null;
+  if (match[2] === "thang") return { term_type: "month", term_value: value };
+  return { term_type: "week", term_value: match[2] === "tuan" ? value * 7 : value };
+}
+
+const INVESTMENT_STATUS_BY_HOLDING: Record<number, string> = {
+  [HOLDING_STATUS.ACTIVE]: "active",
+  [HOLDING_STATUS.EARLY_TERMINATED]: "early_terminated",
+  [HOLDING_STATUS.MATURED]: "matured"
+};
+
+/** Mã VNFM… = khoản mở tại quầy (nhân viên dùng tài khoản quầy của chi nhánh). */
+export const isCounterCode = (code: unknown) => /^VNFM/i.test(String(code ?? ""));
+
+export interface BackfillInvestment {
+  external_investment_id: string;
+  investment_code: string | null;
+  product_name: string;
+  amount: number;
+  term_type: "week" | "month";
+  term_value: number;
+  interest_rate: number;
+  invested_at: Date;
+  maturity_at: Date;
+  status: string;
+}
+
+/**
+ * Dòng danh mục TIKLUY mà vWork chưa có → dữ liệu khoản đầu tư để tạo bù. Không kỳ hạn (VÍ VÀNG…), thiếu tiền /
+ * ngày / trạng thái lạ → null (không theo dõi được như khoản có kỳ hạn).
+ */
+export function mapHoldingInvestment(row: HoldingRow): BackfillInvestment | null {
+  const term = parseHoldingTerm(row.interestRatePeriod);
+  const amount = Number(row.investAmount);
+  const investedAt = parseTikluyDate(row.startDate);
+  const maturityAt = parseTikluyDate(row.endDate);
+  const status = INVESTMENT_STATUS_BY_HOLDING[Number(row.status)];
+  const externalId = holdingKeys(row)[0];
+  if (!term || !(amount > 0) || !investedAt || !maturityAt || !status || !externalId) return null;
+  return {
+    external_investment_id: externalId,
+    investment_code: row.investmentCode ? String(row.investmentCode) : null,
+    product_name: String(row.investmentHoldingProduct || "Không rõ sản phẩm"),
+    amount,
+    ...term,
+    interest_rate: Number(row.interestRate) || 0,
+    invested_at: investedAt,
+    maturity_at: maturityAt,
+    status
+  };
 }

@@ -129,17 +129,20 @@ export function canViewSensitiveFiles(ticket: AccessProps, actor: TicketActor): 
 }
 
 // Nội dung ẩn (mật khẩu... gõ trong trao đổi) dùng quy tắc RIÊNG, không theo file nhạy cảm và KHÔNG có quyền nào mở rộng:
-// chỉ ba người xem được — người đã gõ ra nó, người tạo ticket, và người xử lý chính (chủ trì). Người phối hợp, người có
+// xem được gồm người đã gõ ra nó, người tạo ticket, người xử lý chính (chủ trì), và những người được @ (`mentionIds`) trong
+// CHÍNH tin nhắn chứa nội dung ẩn đó (@ ở tin khác không tính; nội dung ẩn ở ô ghi chú không có @). Người phối hợp, người có
 // ticket.view_sensitive / ticket.manage / mọi quyền khác đều KHÔNG xem được. Không phụ thuộc trạng thái ticket (đóng rồi vẫn xem
 // được). Người gọi phải mở được ticket (accessLevel "full") trước khi hỏi hàm này.
 export function canViewSecrets(
   ticket: Pick<TicketProps, "createdBy" | "assignment">,
   actor: TicketActor,
-  authorId: unknown
+  authorId: unknown,
+  mentionIds: unknown[] = []
 ): boolean {
   return (
     sameId(authorId, actor.employeeId) ||
     isRequester(ticket, actor) ||
-    sameId(ticket.assignment.ownerId, actor.employeeId)
+    sameId(ticket.assignment.ownerId, actor.employeeId) ||
+    mentionIds.some((id) => sameId(id, actor.employeeId))
   );
 }
